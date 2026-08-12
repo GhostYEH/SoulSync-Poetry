@@ -246,49 +246,7 @@ router.post('/search-analysis', async function(req, res) {
 
 // AI 背诵检测接口
 const authenticateToken = require('../middleware/auth');
-
-function optionalAuthenticateToken(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
-    let token = null;
-    if (authHeader) {
-      const parts = authHeader.split(' ');
-      if (parts.length > 1) {
-        token = parts[1];
-      }
-    }
-
-    if (token) {
-      const jwt = require('jsonwebtoken');
-      const JWT_SECRET = 'your-secret-key';
-
-      jwt.verify(token, JWT_SECRET, function(err, decoded) {
-        if (err) {
-          req.user = {};
-          req.user.userId = 1;
-          req.user.username = 'default';
-          next();
-        } else {
-          req.user = {};
-          req.user.userId = decoded.userId;
-          req.user.username = decoded.username;
-          next();
-        }
-      });
-    } else {
-      req.user = {};
-      req.user.userId = 1;
-      req.user.username = 'default';
-      next();
-    }
-  } catch (error) {
-    console.error('认证失败:', error);
-    req.user = {};
-    req.user.userId = 1;
-    req.user.username = 'default';
-    next();
-  }
-}
+const optionalAuthenticateToken = authenticateToken.optionalAuthenticateToken;
 
 router.post('/recite-check', optionalAuthenticateToken, async function(req, res) {
   try {
@@ -331,12 +289,9 @@ router.post('/recite-check', optionalAuthenticateToken, async function(req, res)
       );
     }
 
-    if (poem_id) {
+    if (poem_id && req.user) {
       const learningService = require('../services/learningService');
-      let userId = 1;
-      if (req.user) {
-        userId = req.user.userId;
-      }
+      const userId = req.user.userId;
       learningService.recordLearningAction(userId, poem_id, 'recite', result.score);
 
       // 接入学习事件闭环：背诵考察原文记忆
@@ -1133,10 +1088,10 @@ router.post('/tts', async function(req, res) {
 
 const personalizedTutorService = require('../services/personalizedTutorService');
 
-router.post('/personalized-tutor', optionalAuthenticateToken, async function(req, res) {
+router.post('/personalized-tutor', authenticateToken, async function(req, res) {
   try {
     const { poemId, focusKnowledgePoint } = req.body;
-    const userId = req.user?.userId || 1;
+    const userId = req.user.userId;
 
     const result = await personalizedTutorService.getPersonalizedTutoring(userId, {
       poemId: poemId || null,

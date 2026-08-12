@@ -1082,6 +1082,9 @@ export default {
           body: JSON.stringify({ poemId: this.poem.id })
         })
         if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error('请登录后使用个性化学习')
+          }
           throw new Error('个性化教学服务请求失败')
         }
         const res = await response.json()
