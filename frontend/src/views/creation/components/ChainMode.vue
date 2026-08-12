@@ -331,16 +331,20 @@ export default {
 
     const updateHint = () => {
       const hints = [
-        '语义自然承接上句，避免跳脱到无关意象',
-        '注意情感推进：起承转合各有任务',
-        '关注韵脚，全诗同韵部更和谐',
-        '律诗注意对仗，尤其是颔联和颈联'
+        '语义自然衔接上句，让诗意如流水般顺畅',
+        '情感层次要分明，起承转合各有侧重',
+        '韵脚要和谐统一，让全诗读起来更流畅',
+        '律诗注重对仗之美，颔联颈联尤为关键',
+        '意象选择要贴合主题，避免杂乱无章',
+        '语言要凝练含蓄，留有想象空间',
+        '节奏要抑扬顿挫，富有音乐美感',
+        '意境要深远悠长，引人回味'
       ];
 
       if (chainLines.value.length === 0) {
-        currentHint.value = '开篇要新颖，吸引读者注意';
+        currentHint.value = '起句要新颖别致，为全诗定下基调';
       } else if (chainLines.value.length === expectedLines.value - 1) {
-        currentHint.value = '最后一局要注意收束全诗';
+        currentHint.value = '收句要余韵悠长，点明主旨升华意境';
       } else {
         currentHint.value = hints[Math.floor(Math.random() * hints.length)];
       }

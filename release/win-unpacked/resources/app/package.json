@@ -1,8 +1,0 @@
-{
-  "name": "chinese-poetry-desktop",
-  "version": "1.0.0",
-  "description": "诗词学习系统桌面应用 - Electron 版本",
-  "main": "electron/main.js",
-  "author": "",
-  "license": "MIT"
-}

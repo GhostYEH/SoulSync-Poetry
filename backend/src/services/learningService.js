@@ -1,8 +1,7 @@
 require('dotenv').config();
 const axios = require('axios');
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 
-// 最近7天的学习活跃度与得分趋势
 function buildLearningTrends(learnedPoems) {
   const trends = [];
   const today = new Date();
@@ -15,7 +14,6 @@ function buildLearningTrends(learnedPoems) {
     const m = date.getMonth();
     const d = date.getDate();
 
-    // 拼接日期字符串
     let monthStr = String(m + 1);
     if (monthStr.length === 1) {
       monthStr = '0' + monthStr;
@@ -26,7 +24,6 @@ function buildLearningTrends(learnedPoems) {
     }
     const dateStr = monthStr + '-' + dayStr;
 
-    // 找出这一天的记录
     const onDay = [];
     for (let j = 0; j < learnedPoems.length; j++) {
       const r = learnedPoems[j];
@@ -41,7 +38,6 @@ function buildLearningTrends(learnedPoems) {
 
     let score = 0;
     if (onDay.length > 0) {
-      // 找出有背诵记录的
       const recited = [];
       for (let j = 0; j < onDay.length; j++) {
         if (onDay[j].recite_attempts > 0) {
@@ -50,7 +46,6 @@ function buildLearningTrends(learnedPoems) {
       }
 
       if (recited.length > 0) {
-        // 计算平均分
         let totalScore = 0;
         for (let j = 0; j < recited.length; j++) {
           let bestScore = recited[j].best_score || 0;
@@ -58,7 +53,6 @@ function buildLearningTrends(learnedPoems) {
         }
         score = Math.round(totalScore / recited.length);
       } else {
-        // 计算参与度分数
         let engagement = 0;
         for (let j = 0; j < onDay.length; j++) {
           let viewCount = onDay[j].view_count || 0;
@@ -84,15 +78,10 @@ function buildLearningTrends(learnedPoems) {
 let learningRecords = {};
 
 function initLearningRecords(poems) {
-  db.serialize(function() {
-    for (let i = 0; i < poems.length; i++) {
-      // 空循环，不做任何事
-    }
-  });
+  // PostgreSQL不需要serialize，已移除
 }
 
-// 记录学习行为
-function recordLearningAction(userId, poemId, action, score) {
+async function recordLearningAction(userId, poemId, action, score) {
   if (score === undefined) {
     score = null;
   }
@@ -128,215 +117,148 @@ function recordLearningAction(userId, poemId, action, score) {
     }
   }
 
-  // 检查记录是否存在
-  db.get('SELECT * FROM learning_records WHERE user_id = ? AND poem_id = ?', [userId, poemId], function(err, row) {
-    if (err) {
-      console.error('查询学习记录失败:', err);
-      return;
+  const row = await db.get('SELECT * FROM learning_records WHERE user_id = $1 AND poem_id = $2', [userId, poemId]);
+
+  if (row) {
+    let newViewCount = row.view_count + recordObj.view_count;
+    let newAiCount = row.ai_explain_count + recordObj.ai_explain_count;
+    let newReciteAttempts = row.recite_attempts + recordObj.recite_attempts;
+    let newTotalScore = row.total_score;
+    let newBestScore = row.best_score;
+    let newStudyTime = row.study_time;
+
+    if (recordObj.recite_attempts > 0 && score !== null) {
+      newTotalScore = row.total_score + score;
+      if (score > row.best_score) {
+        newBestScore = score;
+      }
     }
 
-    if (row) {
-      // 更新现有记录
-      let newViewCount = row.view_count + recordObj.view_count;
-      let newAiCount = row.ai_explain_count + recordObj.ai_explain_count;
-      let newReciteAttempts = row.recite_attempts + recordObj.recite_attempts;
-      let newTotalScore = row.total_score;
-      let newBestScore = row.best_score;
-      let newStudyTime = row.study_time;
-
-      if (recordObj.recite_attempts > 0 && score !== null) {
-        newTotalScore = row.total_score + score;
-        if (score > row.best_score) {
-          newBestScore = score;
-        }
-      }
-
-      if (recordObj.study_time > 0) {
-        newStudyTime = row.study_time + recordObj.study_time;
-      }
-
-      if (recordObj.view_count > 0) {
-        newViewCount = row.view_count + 1;
-        recordObj.last_view_time = new Date().toISOString();
-      }
-
-      db.run(
-        'UPDATE learning_records SET view_count = ?, ai_explain_count = ?, recite_attempts = ?, best_score = ?, total_score = ?, study_time = ?, last_view_time = ? WHERE user_id = ? AND poem_id = ?',
-        [newViewCount, newAiCount, newReciteAttempts, newBestScore, newTotalScore, newStudyTime, recordObj.last_view_time, userId, poemId],
-        function(err) {
-          if (err) {
-            console.error('更新学习记录失败:', err);
-          }
-        }
-      );
-    } else {
-      // 创建新记录
-      db.run(
-        'INSERT INTO learning_records (user_id, poem_id, view_count, ai_explain_count, recite_attempts, best_score, total_score, study_time, last_view_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [userId, poemId, recordObj.view_count, recordObj.ai_explain_count, recordObj.recite_attempts, recordObj.best_score, recordObj.total_score, recordObj.study_time, recordObj.last_view_time],
-        function(err) {
-          if (err) {
-            console.error('插入学习记录失败:', err);
-          } else {
-            recordObj.id = this.lastID;
-          }
-        }
-      );
+    if (recordObj.study_time > 0) {
+      newStudyTime = row.study_time + recordObj.study_time;
     }
-  });
 
-  // 更新内存缓存
+    if (recordObj.view_count > 0) {
+      newViewCount = row.view_count + 1;
+      recordObj.last_view_time = new Date().toISOString();
+    }
+
+    await db.run(
+      'UPDATE learning_records SET view_count = $1, ai_explain_count = $2, recite_attempts = $3, best_score = $4, total_score = $5, study_time = $6, last_view_time = $7 WHERE user_id = $8 AND poem_id = $9',
+      [newViewCount, newAiCount, newReciteAttempts, newBestScore, newTotalScore, newStudyTime, recordObj.last_view_time, userId, poemId]
+    );
+  } else {
+    const result = await db.run(
+      'INSERT INTO learning_records (user_id, poem_id, view_count, ai_explain_count, recite_attempts, best_score, total_score, study_time, last_view_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
+      [userId, poemId, recordObj.view_count, recordObj.ai_explain_count, recordObj.recite_attempts, recordObj.best_score, recordObj.total_score, recordObj.study_time, recordObj.last_view_time]
+    );
+    recordObj.id = result.rows[0].id;
+  }
+
   learningRecords[cacheKey] = recordObj;
 
   return recordObj;
 }
 
-// 获取学习统计
-function getLearningStats(userId) {
-  return new Promise(function(resolve, reject) {
-    db.all(
-      'SELECT lr.*, p.title as poem_title, p.author as poem_author FROM learning_records lr JOIN poems p ON lr.poem_id = p.id WHERE lr.user_id = ? AND (lr.view_count > 0 OR lr.ai_explain_count > 0 OR lr.recite_attempts > 0)',
-      [userId],
-      function(err, rows) {
-        if (err) {
-          console.error('获取学习统计失败:', err);
-          reject(err);
-          return;
-        }
-        resolve(rows);
-      }
-    );
-  });
+async function getLearningStats(userId) {
+  return db.all(
+    'SELECT lr.*, p.title as poem_title, p.author as poem_author FROM learning_records lr JOIN poems p ON lr.poem_id = p.id WHERE lr.user_id = $1 AND (lr.view_count > 0 OR lr.ai_explain_count > 0 OR lr.recite_attempts > 0)',
+    [userId]
+  );
 }
 
-// 获取单首诗的学习记录
-function getLearningRecord(userId, poemId) {
-  return new Promise(function(resolve, reject) {
-    db.get(
-      'SELECT lr.*, p.title as poem_title, p.author as poem_author FROM learning_records lr JOIN poems p ON lr.poem_id = p.id WHERE lr.user_id = ? AND lr.poem_id = ?',
-      [userId, poemId],
-      function(err, row) {
-        if (err) {
-          console.error('获取学习记录失败:', err);
-          reject(err);
-          return;
-        }
-        if (row) {
-          resolve(row);
-        } else {
-          resolve(null);
-        }
-      }
-    );
-  });
+async function getLearningRecord(userId, poemId) {
+  const row = await db.get(
+    'SELECT lr.*, p.title as poem_title, p.author as poem_author FROM learning_records lr JOIN poems p ON lr.poem_id = p.id WHERE lr.user_id = $1 AND lr.poem_id = $2',
+    [userId, poemId]
+  );
+  return row || null;
 }
 
-// 获取学习仪表盘数据
-function getLearningDashboard(userId) {
-  return new Promise(function(resolve, reject) {
-    db.all(
-      'SELECT lr.*, p.title as poem_title, p.author as poem_author FROM learning_records lr JOIN poems p ON lr.poem_id = p.id WHERE lr.user_id = ? AND (lr.view_count > 0 OR lr.ai_explain_count > 0 OR lr.recite_attempts > 0)',
-      [userId],
-      function(err, rows) {
-        if (err) {
-          console.error('获取学习仪表盘数据失败:', err);
-          reject(err);
-          return;
-        }
+async function getLearningDashboard(userId) {
+  const learnedPoems = await db.all(
+    'SELECT lr.*, p.title as poem_title, p.author as poem_author FROM learning_records lr JOIN poems p ON lr.poem_id = p.id WHERE lr.user_id = $1 AND (lr.view_count > 0 OR lr.ai_explain_count > 0 OR lr.recite_attempts > 0)',
+    [userId]
+  );
 
-        const learnedPoems = rows;
+  const totalLearned = learnedPoems.length;
 
-        // 计算已学习诗词数量
-        const totalLearned = learnedPoems.length;
+  const recitedPoems = [];
+  for (let i = 0; i < learnedPoems.length; i++) {
+    if (learnedPoems[i].recite_attempts > 0) {
+      recitedPoems.push(learnedPoems[i]);
+    }
+  }
 
-        // 找出有背诵记录的诗
-        const recitedPoems = [];
-        for (let i = 0; i < learnedPoems.length; i++) {
-          if (learnedPoems[i].recite_attempts > 0) {
-            recitedPoems.push(learnedPoems[i]);
-          }
-        }
+  let totalScoreSum = 0;
+  let totalAttempts = 0;
+  for (let i = 0; i < recitedPoems.length; i++) {
+    totalScoreSum = totalScoreSum + (recitedPoems[i].total_score || 0);
+    totalAttempts = totalAttempts + recitedPoems[i].recite_attempts;
+  }
+  let averageScore = 0;
+  if (totalAttempts > 0) {
+    averageScore = Math.round(totalScoreSum / totalAttempts);
+  }
 
-        // 计算平均背诵得分
-        let totalScoreSum = 0;
-        let totalAttempts = 0;
-        for (let i = 0; i < recitedPoems.length; i++) {
-          totalScoreSum = totalScoreSum + (recitedPoems[i].total_score || 0);
-          totalAttempts = totalAttempts + recitedPoems[i].recite_attempts;
-        }
-        let averageScore = 0;
-        if (totalAttempts > 0) {
-          averageScore = Math.round(totalScoreSum / totalAttempts);
-        }
+  let mistakeCount = 0;
+  for (let i = 0; i < recitedPoems.length; i++) {
+    if (recitedPoems[i].best_score < 100) {
+      mistakeCount = mistakeCount + 1;
+    }
+  }
 
-        // 计算错题数量
-        let mistakeCount = 0;
-        for (let i = 0; i < recitedPoems.length; i++) {
-          if (recitedPoems[i].best_score < 100) {
-            mistakeCount = mistakeCount + 1;
-          }
-        }
+  let totalStudyTime = 0;
+  for (let i = 0; i < learnedPoems.length; i++) {
+    totalStudyTime = totalStudyTime + (learnedPoems[i].study_time || 0);
+  }
 
-        // 计算总学习时长
-        let totalStudyTime = 0;
-        for (let i = 0; i < learnedPoems.length; i++) {
-          totalStudyTime = totalStudyTime + (learnedPoems[i].study_time || 0);
-        }
-
-        // 获取最近学习记录（按最后查看时间排序，取前5个）
-        const recentLearnings = [];
-        for (let i = 0; i < learnedPoems.length; i++) {
-          if (learnedPoems[i].last_view_time) {
-            recentLearnings.push(learnedPoems[i]);
-          }
-        }
-        // 简单排序
-        for (let i = 0; i < recentLearnings.length; i++) {
-          for (let j = i + 1; j < recentLearnings.length; j++) {
-            const a = new Date(recentLearnings[i].last_view_time);
-            const b = new Date(recentLearnings[j].last_view_time);
-            if (a < b) {
-              const temp = recentLearnings[i];
-              recentLearnings[i] = recentLearnings[j];
-              recentLearnings[j] = temp;
-            }
-          }
-        }
-        // 取前5个
-        const recentLearningsResult = [];
-        const recentCount = recentLearnings.length > 5 ? 5 : recentLearnings.length;
-        for (let i = 0; i < recentCount; i++) {
-          recentLearningsResult.push(recentLearnings[i]);
-        }
-
-        // 计算掌握率
-        let masteredCount = 0;
-        for (let i = 0; i < recitedPoems.length; i++) {
-          if (recitedPoems[i].best_score === 100) {
-            masteredCount = masteredCount + 1;
-          }
-        }
-        let masteryRate = 0;
-        if (recitedPoems.length > 0) {
-          masteryRate = Math.round((masteredCount / recitedPoems.length) * 100);
-        }
-
-        const result = {};
-        result.totalLearned = totalLearned;
-        result.averageScore = averageScore;
-        result.mistakeCount = mistakeCount;
-        result.recentLearnings = recentLearningsResult;
-        result.masteryRate = masteryRate;
-        result.totalStudyTime = totalStudyTime;
-        result.learningTrends = buildLearningTrends(learnedPoems);
-
-        resolve(result);
+  const recentLearnings = [];
+  for (let i = 0; i < learnedPoems.length; i++) {
+    if (learnedPoems[i].last_view_time) {
+      recentLearnings.push(learnedPoems[i]);
+    }
+  }
+  for (let i = 0; i < recentLearnings.length; i++) {
+    for (let j = i + 1; j < recentLearnings.length; j++) {
+      const a = new Date(recentLearnings[i].last_view_time);
+      const b = new Date(recentLearnings[j].last_view_time);
+      if (a < b) {
+        const temp = recentLearnings[i];
+        recentLearnings[i] = recentLearnings[j];
+        recentLearnings[j] = temp;
       }
-    );
-  });
+    }
+  }
+  const recentLearningsResult = [];
+  const recentCount = recentLearnings.length > 5 ? 5 : recentLearnings.length;
+  for (let i = 0; i < recentCount; i++) {
+    recentLearningsResult.push(recentLearnings[i]);
+  }
+
+  let masteredCount = 0;
+  for (let i = 0; i < recitedPoems.length; i++) {
+    if (recitedPoems[i].best_score === 100) {
+      masteredCount = masteredCount + 1;
+    }
+  }
+  let masteryRate = 0;
+  if (recitedPoems.length > 0) {
+    masteryRate = Math.round((masteredCount / recitedPoems.length) * 100);
+  }
+
+  const result = {};
+  result.totalLearned = totalLearned;
+  result.averageScore = averageScore;
+  result.mistakeCount = mistakeCount;
+  result.recentLearnings = recentLearningsResult;
+  result.masteryRate = masteryRate;
+  result.totalStudyTime = totalStudyTime;
+  result.learningTrends = buildLearningTrends(learnedPoems);
+
+  return result;
 }
 
-// 生成AI学习建议
 async function generateAiLearningAdvice(userId) {
   const config = require('../config/config');
   const { callZhipuGenerateJSON } = require('./aiService');
@@ -349,10 +271,8 @@ async function generateAiLearningAdvice(userId) {
     throw err;
   }
 
-  // 获取学习记录
   const rows = await getLearningStats(userId);
 
-  // 按最后学习时间排序
   const sorted = [];
   for (let i = 0; i < rows.length; i++) {
     sorted.push(rows[i]);
@@ -381,7 +301,6 @@ async function generateAiLearningAdvice(userId) {
     }
   }
 
-  // 找出有背诵记录的诗
   const recited = [];
   for (let i = 0; i < sorted.length; i++) {
     if (sorted[i].recite_attempts > 0) {
@@ -389,7 +308,6 @@ async function generateAiLearningAdvice(userId) {
     }
   }
 
-  // 计算平均分
   let totalScoreSum = 0;
   let totalAttempts = 0;
   for (let i = 0; i < recited.length; i++) {
@@ -401,7 +319,6 @@ async function generateAiLearningAdvice(userId) {
     averageRecite = Math.round(totalScoreSum / totalAttempts);
   }
 
-  // 计算薄弱诗词数量
   let mistakeCount = 0;
   for (let i = 0; i < recited.length; i++) {
     if (recited[i].best_score < 100) {
@@ -409,7 +326,6 @@ async function generateAiLearningAdvice(userId) {
     }
   }
 
-  // 计算掌握诗词数量
   let masteredCount = 0;
   for (let i = 0; i < recited.length; i++) {
     if (recited[i].best_score === 100) {
@@ -422,13 +338,11 @@ async function generateAiLearningAdvice(userId) {
     masteryRate = Math.round((masteredCount / recited.length) * 100);
   }
 
-  // 计算总学习时间
   let totalStudyTime = 0;
   for (let i = 0; i < sorted.length; i++) {
     totalStudyTime = totalStudyTime + (sorted[i].study_time || 0);
   }
 
-  // 找出掌握好的诗（得分>=90）
   const strongPoems = [];
   for (let i = 0; i < sorted.length; i++) {
     if (sorted[i].recite_attempts > 0 && sorted[i].best_score >= 90) {
@@ -439,7 +353,6 @@ async function generateAiLearningAdvice(userId) {
     }
   }
 
-  // 找出掌握差的诗（得分<80）
   const weakPoems = [];
   for (let i = 0; i < sorted.length; i++) {
     if (sorted[i].recite_attempts > 0 && sorted[i].best_score < 80) {
@@ -450,7 +363,6 @@ async function generateAiLearningAdvice(userId) {
     }
   }
 
-  // 找出还没背过的诗
   const unrecitedPoems = [];
   for (let i = 0; i < sorted.length; i++) {
     if (sorted[i].recite_attempts === 0) {
@@ -461,14 +373,12 @@ async function generateAiLearningAdvice(userId) {
     }
   }
 
-  // 最近学的诗
   const recentPoems = [];
   const recentCount = sorted.length > 5 ? 5 : sorted.length;
   for (let i = 0; i < recentCount; i++) {
     recentPoems.push(sorted[i]);
   }
 
-  // 整理strong_poems
   const strongPoemsList = [];
   for (let i = 0; i < strongPoems.length; i++) {
     const p = strongPoems[i];
@@ -482,7 +392,6 @@ async function generateAiLearningAdvice(userId) {
     strongPoemsList.push(item);
   }
 
-  // 整理weak_poems
   const weakPoemsList = [];
   for (let i = 0; i < weakPoems.length; i++) {
     const p = weakPoems[i];
@@ -494,7 +403,6 @@ async function generateAiLearningAdvice(userId) {
     weakPoemsList.push(item);
   }
 
-  // 整理unrecited_poems
   const unrecitedPoemsList = [];
   for (let i = 0; i < unrecitedPoems.length; i++) {
     const p = unrecitedPoems[i];
@@ -505,7 +413,6 @@ async function generateAiLearningAdvice(userId) {
     unrecitedPoemsList.push(item);
   }
 
-  // 整理recent_poems
   const recentPoemsList = [];
   for (let i = 0; i < recentPoems.length; i++) {
     const p = recentPoems[i];
@@ -516,7 +423,6 @@ async function generateAiLearningAdvice(userId) {
     recentPoemsList.push(item);
   }
 
-  // 整理学习概况
   const summary = {};
   summary.total_learned_poems = sorted.length;
   summary.average_recite_score_percent = averageRecite;
@@ -528,7 +434,6 @@ async function generateAiLearningAdvice(userId) {
   summary.unrecited_poems = unrecitedPoemsList;
   summary.recent_poems = recentPoemsList;
 
-  // 构造AI提示词
   let strongPoemsText = '暂无';
   if (strongPoemsList.length > 0) {
     strongPoemsText = '';
@@ -626,10 +531,50 @@ ${recentPoemsText}
     throw new Error('AI返回空结果');
   } catch (err) {
     console.error('[learningService] AI学习建议生成失败:', err.message);
-    const ne = new Error('AI 服务暂不可用');
-    ne.code = 'NO_API_KEY';
-    throw ne;
+    if (err.code === 'NO_API_KEY') {
+      throw err;
+    }
+    console.log('[learningService] 使用降级方案生成学习建议');
+    return generateFallbackLearningAdvice(summary);
   }
+}
+
+function generateFallbackLearningAdvice(summary) {
+  const plans = [];
+  
+  if (summary.mastery_rate_percent < 50) {
+    plans.push('优先复习已学诗词，巩固基础');
+    plans.push('每天背诵1首已学诗词');
+  } else if (summary.mastery_rate_percent < 80) {
+    plans.push('加强薄弱诗词的复习');
+    plans.push('尝试飞花令游戏巩固记忆');
+  } else {
+    plans.push('挑战更高难度的诗词');
+    plans.push('尝试创作自己的诗词');
+  }
+  
+  if (summary.total_study_time_minutes < 30) {
+    plans.push('每天增加学习时间');
+  }
+  
+  if (summary.weak_poems && summary.weak_poems.length > 0) {
+    plans.push('重点复习《' + summary.weak_poems[0].title + '》');
+  }
+  
+  return {
+    summary: `你已学习${summary.total_learned_poems}首诗词，掌握率${summary.mastery_rate_percent}%，继续加油！`,
+    strength: summary.strong_poems && summary.strong_poems.length > 0 
+      ? `《${summary.strong_poems[0].title}》等诗词掌握得很好！`
+      : '学习态度积极，继续保持！',
+    weakness: summary.weak_poems && summary.weak_poems.length > 0
+      ? `《${summary.weak_poems[0].title}》等诗词需要加强复习`
+      : '暂无明显薄弱环节',
+    suggestion: summary.mastery_rate_percent < 80
+      ? '建议多进行背诵练习，巩固记忆效果'
+      : '建议尝试诗词创作，提升文学素养',
+    plan: plans.slice(0, 3),
+    encourage: '坚持就是胜利，每一次学习都会让你更加优秀！'
+  };
 }
 
 module.exports = {

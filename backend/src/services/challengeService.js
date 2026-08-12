@@ -5,7 +5,7 @@
  * 2. 严格难度梯度：1-50简单、51-100中等、101-150困难、151-200挑战
  * 3. 答案判断直接用数据匹配，O(1)查找
  */
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 
 // ============================================================
 // 诗词数据：200首不同诗词，按难度分4段
@@ -1306,53 +1306,39 @@ function getQuestionByLevel(level) {
 // 获取用户闯关进度
 // ============================================================
 async function getUserProgress(userId) {
-  return new Promise((resolve, reject) => {
-    db.get('SELECT * FROM user_challenge_progress WHERE user_id = ?', [userId], (err, row) => {
-      if (err) { reject(err); return; }
-      if (row) {
-        resolve(row);
-      } else {
-        db.run(
-          'INSERT INTO user_challenge_progress (user_id, highest_level, current_challenge_level, last_challenge_time) VALUES (?, 0, 1, ?)',
-          [userId, new Date().toISOString()],
-          (err2) => {
-            if (err2) reject(err2);
-            else resolve({
-              user_id: userId,
-              highest_level: 0,
-              current_challenge_level: 1,
-              last_challenge_time: new Date().toISOString()
-            });
-          }
-        );
-      }
-    });
-  });
+  const row = await db.get('SELECT * FROM user_challenge_progress WHERE user_id = $1', [userId]);
+  if (row) {
+    return row;
+  }
+  await db.run(
+    'INSERT INTO user_challenge_progress (user_id, highest_level, current_challenge_level, last_challenge_time) VALUES ($1, 0, 1, $2)',
+    [userId, new Date().toISOString()]
+  );
+  return {
+    user_id: userId,
+    highest_level: 0,
+    current_challenge_level: 1,
+    last_challenge_time: new Date().toISOString()
+  };
 }
 
 // ============================================================
 // 更新用户闯关进度
 // ============================================================
 async function updateUserProgress(userId, level) {
-  return new Promise((resolve, reject) => {
-    db.get('SELECT * FROM user_challenge_progress WHERE user_id = ?', [userId], (err, row) => {
-      if (err) { reject(err); return; }
-      const newHighest = row ? Math.max(row.highest_level, level) : level;
-      if (row) {
-        db.run(
-          'UPDATE user_challenge_progress SET highest_level = ?, current_challenge_level = ?, last_challenge_time = ? WHERE user_id = ?',
-          [newHighest, level + 1, new Date().toISOString(), userId],
-          (err2) => { if (err2) reject(err2); else resolve(); }
-        );
-      } else {
-        db.run(
-          'INSERT INTO user_challenge_progress (user_id, highest_level, current_challenge_level, last_challenge_time) VALUES (?, ?, ?, ?)',
-          [userId, newHighest, level + 1, new Date().toISOString()],
-          (err2) => { if (err2) reject(err2); else resolve(); }
-        );
-      }
-    });
-  });
+  const row = await db.get('SELECT * FROM user_challenge_progress WHERE user_id = $1', [userId]);
+  const newHighest = row ? Math.max(row.highest_level, level) : level;
+  if (row) {
+    await db.run(
+      'UPDATE user_challenge_progress SET highest_level = $1, current_challenge_level = $2, last_challenge_time = $3 WHERE user_id = $4',
+      [newHighest, level + 1, new Date().toISOString(), userId]
+    );
+  } else {
+    await db.run(
+      'INSERT INTO user_challenge_progress (user_id, highest_level, current_challenge_level, last_challenge_time) VALUES ($1, $2, $3, $4)',
+      [userId, newHighest, level + 1, new Date().toISOString()]
+    );
+  }
 }
 
 // ============================================================
@@ -1382,96 +1368,74 @@ async function submitAnswer(userId, level, questionText, userAnswer, frontendCor
     isCorrect = frontendCorrect === true;
   }
 
-  return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO user_challenge_records
-      (user_id, level, question_content, user_answer, correct_answer, is_correct, answered_at, poem_title, poem_author)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [userId, level, questionText, userAnswer, matched?.answer || '', isCorrect ? 1 : 0, now, block?.title || poemTitle, block?.author || poemAuthor],
-      function(err) {
-        if (err) { reject(err); return; }
-        const recordId = this.lastID;
-        if (isCorrect) {
-          updateUserProgress(userId, level).then(async () => {
-            // 重新查询最新进度返回给前端
-            try {
-              const progress = await getUserProgress(userId);
-              resolve({ correct: true, recordId, highestLevel: progress.highest_level, currentLevel: progress.current_challenge_level });
-            } catch {
-              resolve({ correct: true, recordId });
-            }
-          }).catch(reject);
-        } else {
-          db.run(
-            'UPDATE user_challenge_progress SET total_errors = total_errors + 1 WHERE user_id = ?',
-            [userId],
-            async () => {
-              try {
-                const progress = await getUserProgress(userId);
-                resolve({ correct: false, recordId, highestLevel: progress.highest_level, currentLevel: progress.current_challenge_level });
-              } catch {
-                resolve({ correct: false, recordId });
-              }
-            }
-          );
-        }
-      }
+  const result = await db.run(
+    `INSERT INTO user_challenge_records
+    (user_id, level, question_content, user_answer, correct_answer, is_correct, answered_at, poem_title, poem_author)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING id`,
+    [userId, level, questionText, userAnswer, matched?.answer || '', isCorrect ? 1 : 0, now, block?.title || poemTitle, block?.author || poemAuthor]
+  );
+  const recordId = result.rows[0].id;
+  if (isCorrect) {
+    await updateUserProgress(userId, level);
+    try {
+      const progress = await getUserProgress(userId);
+      return { correct: true, recordId, highestLevel: progress.highest_level, currentLevel: progress.current_challenge_level };
+    } catch {
+      return { correct: true, recordId };
+    }
+  } else {
+    await db.run(
+      'UPDATE user_challenge_progress SET total_errors = total_errors + 1 WHERE user_id = $1',
+      [userId]
     );
-  });
+    try {
+      const progress = await getUserProgress(userId);
+      return { correct: false, recordId, highestLevel: progress.highest_level, currentLevel: progress.current_challenge_level };
+    } catch {
+      return { correct: false, recordId };
+    }
+  }
 }
 
 // ============================================================
 // 错题本
 // ============================================================
 async function addToErrorBook(userId, recordId, question, userAnswer, correctAnswer, explanation) {
-  return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO user_error_book (user_id, record_id, question_content, user_answer, correct_answer, explanation, added_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [userId, recordId, question, userAnswer, correctAnswer, explanation, new Date().toISOString()],
-      (err) => {
-        if (err) { reject(err); return; }
-        db.run('UPDATE user_challenge_records SET added_to_error_book = 1 WHERE id = ?', [recordId], () => resolve());
-      }
-    );
-  });
+  await db.run(
+    `INSERT INTO user_error_book (user_id, record_id, question_content, user_answer, correct_answer, explanation, added_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [userId, recordId, question, userAnswer, correctAnswer, explanation, new Date().toISOString()]
+  );
+  await db.run('UPDATE user_challenge_records SET added_to_error_book = 1 WHERE id = $1', [recordId]);
 }
 
 async function getErrorBook(userId) {
-  return new Promise((resolve, reject) => {
-    db.all(
-      'SELECT * FROM user_error_book WHERE user_id = ? ORDER BY added_at DESC',
-      [userId], (err, rows) => { if (err) reject(err); else resolve(rows || []); }
-    );
-  });
+  return db.all(
+    'SELECT * FROM user_error_book WHERE user_id = $1 ORDER BY added_at DESC',
+    [userId]
+  );
 }
 
 async function removeFromErrorBook(userId, id) {
-  return new Promise((resolve, reject) => {
-    db.run('DELETE FROM user_error_book WHERE user_id = ? AND id = ?', [userId, id],
-      (err) => { if (err) reject(err); else resolve(); }
-    );
-  });
+  await db.run('DELETE FROM user_error_book WHERE user_id = $1 AND id = $2', [userId, id]);
 }
 
-// ============================================================
-// 排行榜
-// ============================================================
 async function getLeaderboard() {
-  return new Promise((resolve, reject) => {
-    db.all(
+  try {
+    return await db.all(
       `SELECT u.username, ucp.highest_level
        FROM user_challenge_progress ucp
        JOIN users u ON ucp.user_id = u.id
        WHERE ucp.highest_level > 0
        ORDER BY ucp.highest_level DESC
        LIMIT 50`,
-      [], (err, rows) => {
-        if (err) { console.error('获取排行榜失败:', err); resolve([]); }
-        else resolve(rows || []);
-      }
+      []
     );
-  });
+  } catch (err) {
+    console.error('获取排行榜失败:', err);
+    return [];
+  }
 }
 
 // ============================================================

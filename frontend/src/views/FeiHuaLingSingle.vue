@@ -258,55 +258,108 @@
             </div>
           </div>
 
-          <!-- 历史记录 -->
+          <!-- 历史记录 - 左右分栏对战布局 -->
           <div class="history-section">
             <div class="section-header">
-              <span class="section-icon">📖</span>
-              <h3 class="section-title">对局记录</h3>
-              <span class="history-count">{{ poemHistory.length }}句</span>
+              <span class="section-icon">⚔️</span>
+              <h3 class="section-title">对战记录</h3>
+              <span class="history-count">共 {{ poemHistory.length }} 句</span>
             </div>
-            <div class="history-list">
-              <transition-group name="poem-slide">
-                <div 
-                  v-for="(item, idx) in poemHistory" 
-                  :key="item.id"
-                  class="history-item ios26-card"
-                  :class="[item.player, item.result]"
-                  :style="{ animationDelay: `${idx * 0.05}s` }"
-                >
-                  <div class="card-liquid-border"></div>
-                  <div class="card-liquid-shine"></div>
-                  <div class="card-content">
-                    <div class="item-header">
-                      <span class="player-tag">{{ item.player === 'user' ? '👤 我' : '🤖 系统' }}</span>
-                      <span class="item-round">第{{ idx + 1 }}回合</span>
-                      <span class="item-score" v-if="item.player === 'user' && item.result === 'correct'">+{{ item.scoreGained }}分</span>
-                    </div>
-                    <div class="poem-text">
-                      <span 
-                        v-for="(char, ci) in item.poem" 
-                        :key="ci"
-                        class="poem-char"
-                        :class="{ highlight: char === currentKeyword }"
-                      >{{ char }}</span>
-                    </div>
-                    <div class="poem-meta" v-if="item.analysis">
-                      <span class="meta-author">{{ item.analysis.author }}</span>
-                      <span class="meta-sep">·</span>
-                      <span class="meta-dynasty">{{ item.analysis.dynasty }}</span>
-                      <span class="meta-sep">·</span>
-                      <span class="meta-title">《{{ item.analysis.title }}》</span>
-                    </div>
-                    <div class="poem-result" :class="item.result">
-                      <span class="result-icon">{{ item.result === 'correct' ? '✓' : '✗' }}</span>
-                      <span class="result-text">{{ item.resultText }}</span>
-                    </div>
+            
+            <div class="battle-arena">
+              <!-- 左侧：我的答题区 -->
+              <div class="battle-side player-side">
+                <div class="side-header">
+                  <div class="player-avatar">
+                    <span class="avatar-icon">👤</span>
+                  </div>
+                  <div class="player-info">
+                    <span class="player-name">我的回答</span>
+                    <span class="player-score">{{ userCorrectCount }}/{{ userTotalCount }} 正确</span>
                   </div>
                 </div>
-              </transition-group>
-              <div v-if="poemHistory.length === 0" class="history-empty">
-                <span class="empty-icon">📝</span>
-                <p>开始你的飞花令之旅吧！</p>
+                <div class="side-records">
+                  <transition-group name="poem-slide">
+                    <div 
+                      v-for="(item, idx) in userHistory" 
+                      :key="item.id"
+                      class="record-item user-record"
+                      :class="item.result"
+                    >
+                      <div class="record-content">
+                        <div class="record-round">第{{ item.roundIndex }}回合</div>
+                        <div class="record-poem">
+                          <span 
+                            v-for="(char, ci) in item.poem" 
+                            :key="ci"
+                            class="poem-char"
+                            :class="{ highlight: char === currentKeyword }"
+                          >{{ char }}</span>
+                        </div>
+                        <div class="record-meta" v-if="item.analysis">
+                          {{ item.analysis.author }} · {{ item.analysis.dynasty }}《{{ item.analysis.title }}》
+                        </div>
+                        <div class="record-status">
+                          <span class="status-icon">{{ item.result === 'correct' ? '✓' : '✗' }}</span>
+                          <span class="status-text">{{ item.resultText }}</span>
+                          <span class="status-score" v-if="item.scoreGained">+{{ item.scoreGained }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </transition-group>
+                  <div v-if="userHistory.length === 0" class="empty-side">
+                    <span class="empty-icon">🎯</span>
+                    <p>等待你的回答...</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 中间：对战指示 -->
+              <div class="battle-divider">
+                <div class="divider-line"></div>
+                <div class="divider-icon">⚔️</div>
+                <div class="divider-line"></div>
+              </div>
+
+              <!-- 右侧：AI答题区 -->
+              <div class="battle-side ai-side">
+                <div class="side-header">
+                  <div class="player-avatar ai">
+                    <span class="avatar-icon">🤖</span>
+                  </div>
+                  <div class="player-info">
+                    <span class="player-name">AI 对手</span>
+                    <span class="player-score">{{ aiHistory.length }} 次回答</span>
+                  </div>
+                </div>
+                <div class="side-records">
+                  <transition-group name="poem-slide">
+                    <div 
+                      v-for="(item, idx) in aiHistory" 
+                      :key="item.id"
+                      class="record-item ai-record"
+                    >
+                      <div class="record-content">
+                        <div class="record-round">第{{ item.roundIndex }}回合</div>
+                        <div class="record-poem">
+                          <span 
+                            v-for="(char, ci) in item.poem" 
+                            :key="ci"
+                            class="poem-char"
+                            :class="{ highlight: char === currentKeyword }"
+                          >{{ char }}</span>
+                        </div>
+                        <div class="record-meta" v-if="item.analysis">
+                          {{ item.analysis.author }} · {{ item.analysis.dynasty }}《{{ item.analysis.title }}》
+                        </div>
+                      </div>
+                    </div>
+                  </transition-group>
+                  <div v-if="aiHistory.length === 0" class="empty-side">
+                    <span class="empty-icon">🤖</span>
+                    <p>等待AI回答...</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -403,6 +456,8 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { feihuaPoems, getAvailableKeywords, validatePoem, getKeywordCount, validatePoemByAI } from '@/data/feihuaPoems'
+import api from '@/services/api'
+import { generateAttemptId } from '@/utils/attemptId'
 
 export default {
   name: 'FeiHuaLingSingle',
@@ -420,6 +475,8 @@ export default {
     const selectedKeyword = ref('')
     const userInput = ref('')
     const isThinking = ref(false)
+    const gameSessionId = ref(null)
+    const savedToServer = ref(false)
     
     // ===== 游戏数据 =====
     const score = ref(0)
@@ -546,6 +603,34 @@ export default {
     )
     const wrongCount = computed(() => 
       poemHistory.value.filter(p => p.player === 'user' && p.result !== 'correct').length
+    )
+    
+    const userHistory = computed(() => {
+      let userRound = 0
+      return poemHistory.value
+        .filter(p => p.player === 'user')
+        .map(p => ({
+          ...p,
+          roundIndex: ++userRound
+        }))
+    })
+    
+    const aiHistory = computed(() => {
+      let aiRound = 0
+      return poemHistory.value
+        .filter(p => p.player === 'system')
+        .map(p => ({
+          ...p,
+          roundIndex: ++aiRound
+        }))
+    })
+    
+    const userCorrectCount = computed(() => 
+      poemHistory.value.filter(p => p.player === 'user' && p.result === 'correct').length
+    )
+    
+    const userTotalCount = computed(() => 
+      poemHistory.value.filter(p => p.player === 'user').length
     )
     
     const resultGrade = computed(() => {
@@ -698,6 +783,8 @@ export default {
       usedPoems.value = []
       userInput.value = ''
       historyIdCounter = 0
+      gameSessionId.value = generateAttemptId()
+      savedToServer.value = false
       
       updateHint()
       startTimer()
@@ -864,7 +951,7 @@ export default {
       inputRef.value?.focus()
     }
 
-    const endGame = (reason = 'manual') => {
+    const endGame = async (reason = 'manual') => {
       stopTimer()
       gameOver.value = true
       gameStarted.value = false
@@ -874,6 +961,22 @@ export default {
         showToast('🎉 系统诗句用尽，通关奖励 +50分！', 'success')
       } else if (reason === 'timeout') {
         showToast('⏱ 时间耗尽，挑战结束', 'warning')
+      }
+
+      if (gameSessionId.value && !savedToServer.value && poemHistory.value.length > 0) {
+        savedToServer.value = true
+        try {
+          await api.feihua.save({
+            keyword: selectedKeyword.value,
+            score: score.value,
+            poemCount: userCorrectCount.value,
+            history: poemHistory.value,
+            gameSessionId: gameSessionId.value
+          })
+        } catch (err) {
+          savedToServer.value = false
+          console.error('[feihua] 保存游戏记录失败:', err.message)
+        }
       }
       
       cleanupCardHover()
@@ -937,6 +1040,10 @@ export default {
       timerColor,
       correctCount,
       wrongCount,
+      userHistory,
+      aiHistory,
+      userCorrectCount,
+      userTotalCount,
       resultGrade,
       resultTitle,
       resultSubtitle,
@@ -1825,6 +1932,237 @@ export default {
   color: rgba(255, 255, 255, 0.4);
 }
 
+/* 对战区域布局 */
+.battle-arena {
+  display: flex;
+  gap: 16px;
+  min-height: 300px;
+}
+
+.battle-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.player-side {
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
+
+.ai-side {
+  border: 1px solid rgba(96, 165, 250, 0.3);
+}
+
+.side-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.player-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.3), rgba(74, 222, 128, 0.1));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(74, 222, 128, 0.5);
+}
+
+.player-avatar.ai {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.3), rgba(96, 165, 250, 0.1));
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+.avatar-icon {
+  font-size: 22px;
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.player-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: white;
+}
+
+.player-score {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.player-side .player-score {
+  color: rgba(74, 222, 128, 0.8);
+}
+
+.ai-side .player-score {
+  color: rgba(96, 165, 250, 0.8);
+}
+
+.side-records {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 350px;
+}
+
+.side-records::-webkit-scrollbar { width: 4px; }
+.side-records::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
+.side-records::-webkit-scrollbar-thumb { background: rgba(168, 85, 247, 0.4); border-radius: 4px; }
+
+/* 单条记录样式 */
+.record-item {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 3px solid;
+  animation: recordSlideIn 0.4s ease;
+}
+
+@keyframes recordSlideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.user-record {
+  border-left-color: rgba(74, 222, 128, 0.6);
+}
+
+.user-record.correct {
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.user-record.wrong {
+  background: rgba(248, 113, 113, 0.1);
+  border-left-color: rgba(248, 113, 113, 0.6);
+}
+
+.ai-record {
+  border-left-color: rgba(96, 165, 250, 0.6);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.record-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.record-round {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 500;
+}
+
+.record-poem {
+  font-size: 16px;
+  font-family: 'Noto Serif SC', serif;
+  color: white;
+  line-height: 1.6;
+}
+
+.record-poem .poem-char {
+  display: inline-block;
+  transition: all 0.3s ease;
+}
+
+.record-poem .poem-char.highlight {
+  color: #f4d03f;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(244, 208, 63, 0.5);
+}
+
+.record-meta {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.record-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.status-icon {
+  font-size: 14px;
+}
+
+.user-record.correct .status-icon { color: #4ade80; }
+.user-record.wrong .status-icon { color: #f87171; }
+
+.status-text {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.status-score {
+  margin-left: auto;
+  font-weight: 700;
+  color: #4ade80;
+}
+
+/* 空状态 */
+.empty-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.3);
+  text-align: center;
+}
+
+.empty-side .empty-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.empty-side p {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* 对战分割线 */
+.battle-divider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.divider-line {
+  flex: 1;
+  width: 2px;
+  background: linear-gradient(to bottom, transparent, rgba(168, 85, 247, 0.3), transparent);
+}
+
+.divider-icon {
+  font-size: 24px;
+  animation: battlePulse 2s ease-in-out infinite;
+}
+
+@keyframes battlePulse {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.2); opacity: 1; }
+}
+
 .history-list {
   max-height: 350px;
   overflow-y: auto;
@@ -1922,7 +2260,18 @@ export default {
 .history-item.wrong .result-icon,
 .history-item.wrong .result-text { color: #f87171; }
 
-.quit-btn { align-self: center; margin-top: 16px; }
+.history-empty {
+  text-align: center;
+  padding: 48px;
+  color: rgba(255,255,255,0.3);
+}
+
+.empty-icon {
+  font-size: 40px;
+  display: block;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
 
 /* 过渡动画 */
 .fade-scale-enter-active,

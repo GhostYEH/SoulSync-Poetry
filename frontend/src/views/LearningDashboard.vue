@@ -401,7 +401,13 @@
               <div class="advice-icon">📅</div>
               <div class="advice-content">
                 <h4>本周计划</h4>
-                <p>{{ aiAdviceData.plan }}</p>
+                <div v-if="Array.isArray(aiAdviceData.plan)" class="plan-list">
+                  <div v-for="(item, index) in aiAdviceData.plan" :key="index" class="plan-item">
+                    <span class="plan-number">{{ index + 1 }}.</span>
+                    <span class="plan-text">{{ item }}</span>
+                  </div>
+                </div>
+                <p v-else>{{ aiAdviceData.plan }}</p>
               </div>
             </div>
             <div class="advice-card encourage">
@@ -2197,6 +2203,33 @@ onUnmounted(() => {
 .advice-card.suggestion { border-left: 3px solid #9C27B0; }
 .advice-card.plan { border-left: 3px solid #00BCD4; }
 .advice-card.encourage { border-left: 3px solid #E91E63; }
+
+.plan-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-item {
+  display: flex;
+  margin-bottom: 6px;
+  align-items: flex-start;
+}
+
+.plan-number {
+  font-weight: bold;
+  margin-right: 8px;
+  color: #00BCD4;
+  min-width: 20px;
+  font-size: 12px;
+}
+
+.plan-text {
+  flex: 1;
+  line-height: 1.4;
+  font-size: 12px;
+  color: #5d4e37;
+}
 
 @media (max-width: 900px) {
   .ai-advice-cards {

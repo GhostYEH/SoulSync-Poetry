@@ -15,6 +15,7 @@ const TeacherLogin = () => import('../views/teacher/TeacherLogin.vue')
 const TeacherRegister = () => import('../views/teacher/TeacherRegister.vue')
 const TeacherLayout = () => import('../views/teacher/TeacherLayout.vue')
 const TeacherDashboard = () => import('../views/teacher/Dashboard.vue')
+const KnowledgeDiagnosisView = () => import('../views/teacher/KnowledgeDiagnosisView.vue')
 const StudentDetail = () => import('../views/teacher/StudentDetail.vue')
 const ClassDetail = () => import('../views/teacher/ClassDetail.vue')
 const ClassManagement = () => import('../views/teacher/ClassManagement.vue')
@@ -142,6 +143,15 @@ const routes = [
         component: TeacherDashboard,
         meta: {
           title: '教师看板 - 古诗词学习系统',
+          requiresTeacherAuth: true
+        }
+      },
+      {
+        path: 'knowledge',
+        name: 'TeacherKnowledgeDiagnosis',
+        component: KnowledgeDiagnosisView,
+        meta: {
+          title: '认知诊断 - 古诗词学习系统',
           requiresTeacherAuth: true
         }
       },

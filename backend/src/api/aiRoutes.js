@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const aiService = require('../services/aiService');
+const { getIO } = require('../utils/socket');
 const crypto = require('crypto');
 const axios = require('axios');
 
@@ -307,19 +308,8 @@ router.post('/recite-check', optionalAuthenticateToken, async function(req, res)
       return;
     }
 
-    // 使用程序检测（快速响应）
-    const programResult = aiService.checkRecitation(original, input);
-    
-    // 使用本地生成的建议（不调用 AI API，避免延迟）
-    const mockResult = aiService.getMockRecitationCheck(original, input, null);
-
-    const result = {
-      score: programResult.score,
-      wrongChars: programResult.wrongChars,
-      missing: programResult.missing,
-      extra: programResult.extra,
-      aiAdvice: mockResult.aiAdvice
-    };
+    // 使用AI检测（调用Qwen/Qwen2.5-7B-Instruct模型）
+    const result = await aiService.getAIRecitationCheck(original, input, poem_title, poem_author, null);
 
     if (poem_id && result.score < 90) {
       const mistakesService = require('../services/mistakesService');
@@ -348,6 +338,31 @@ router.post('/recite-check', optionalAuthenticateToken, async function(req, res)
         userId = req.user.userId;
       }
       learningService.recordLearningAction(userId, poem_id, 'recite', result.score);
+
+      // 接入学习事件闭环：背诵考察原文记忆
+      // 幂等设计：attemptId 由前端在背诵开始时生成 UUID，HTTP 重试复用同一值
+      // 同一次背诵的 retry → 相同 eventKey → LearningEvent 不重复
+      // 不同时间重新背诵 → 不同 attemptId → 新 LearningEvent
+      const learningEventService = require('../services/learningEventService');
+      const reciteCorrect = result.score >= 80;
+      const attemptId = req.body.attemptId;
+      if (!attemptId) {
+        console.warn('[aiRoutes] 背诵未提供 attemptId，无法保证幂等');
+      }
+      const reciteKey = attemptId || `legacy_${poem_id}_${Date.now()}`;
+      learningEventService.recordEvent({
+        userId,
+        eventType: reciteCorrect ? learningEventService.EVENT_TYPES.RECITE_POEM
+                                  : learningEventService.EVENT_TYPES.RECITATION_ERROR,
+        poemId: poem_id,
+        knowledgePoints: ['memorization'],
+        correct: reciteCorrect,
+        score: result.score,
+        difficulty: 3,
+        metadata: { poem_title, poem_author, score: result.score, errors: result.errors || [], attemptId: reciteKey },
+        eventKey: `recite:${userId}:${reciteKey}`,
+        questionText: `背诵《${poem_title || ''}》`,
+      }).catch(err => console.error('[learningEvent] 背诵事件失败:', err.message));
     }
 
     res.json(result);
@@ -815,12 +830,11 @@ router.post('/image/pregenerate', async function(req, res) {
       return;
     }
 
-    if (!global.io) {
+    const socket = getIO();
+    if (!socket) {
       res.status(500).json({ message: 'Socket连接未初始化' });
       return;
     }
-
-    const socket = global.io;
 
     generateImage(poemId, title, author, content, socket);
 
@@ -882,12 +896,11 @@ router.post('/image/carousel', async function(req, res) {
       return;
     }
 
-    if (!global.io) {
+    const socket = getIO();
+    if (!socket) {
       res.status(500).json({ message: 'Socket连接未初始化' });
       return;
     }
-
-    const socket = global.io;
 
     const styleVariations = [
       '水墨画风格',
@@ -901,7 +914,7 @@ router.post('/image/carousel', async function(req, res) {
 
     const promptText = '根据古诗词《' + title + '》（作者：' + author + '）的内容生成一幅' + randomStyle + '的中国风图像，画面要准确描绘诗中所描述的场景和意境，' + content + '，中国传统风格，高清细腻，氛围感强，无任何文字、无水印、无logo，画面干净统一，适合做网页背景图';
 
-    const SILICON_FLOW_API_KEY = process.env.SILICON_FLOW_API_KEY;
+    let SILICON_FLOW_API_KEY = process.env.SILICONFLOW_API_KEY;
     if (!SILICON_FLOW_API_KEY) {
       SILICON_FLOW_API_KEY = 'YOUR-API-KEY';
     }
@@ -1096,6 +1109,59 @@ router.post('/feihua-validate', async function(req, res) {
   } catch (error) {
     console.error('飞花令验证失败:', error);
     res.status(500).json({ message: '验证失败，请稍后重试' });
+  }
+});
+
+// 语音合成
+router.post('/tts', async function(req, res) {
+  try {
+    const { text } = req.body;
+    
+    if (!text) {
+      res.status(400).json({ message: '缺少文本内容' });
+      return;
+    }
+
+    const audioData = await aiService.generateTTS(text);
+    res.set('Content-Type', 'audio/mp3');
+    res.send(audioData);
+  } catch (error) {
+    console.error('语音合成失败:', error);
+    res.status(500).json({ success: false, message: '语音合成失败' });
+  }
+});
+
+const personalizedTutorService = require('../services/personalizedTutorService');
+
+router.post('/personalized-tutor', optionalAuthenticateToken, async function(req, res) {
+  try {
+    const { poemId, focusKnowledgePoint } = req.body;
+    const userId = req.user?.userId || 1;
+
+    const result = await personalizedTutorService.getPersonalizedTutoring(userId, {
+      poemId: poemId || null,
+      focusKnowledgePoint: focusKnowledgePoint || null,
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('[aiRoutes] 个性化教学失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '个性化教学服务暂时不可用',
+      data: {
+        depth: 'DEVELOPING',
+        targetPoem: null,
+        weakPoints: [],
+        teaching: {
+          explanation: '教学服务暂时不可用，请稍后重试。',
+          keyPoints: [],
+          practiceAdvice: '',
+        },
+        sources: [],
+        degraded: true,
+      },
+    });
   }
 });
 

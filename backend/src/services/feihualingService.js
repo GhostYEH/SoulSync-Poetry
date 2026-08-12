@@ -1,5 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 
 class FeihualingService {
   constructor() {
@@ -29,20 +29,17 @@ class FeihualingService {
       return this.poemsCache;
     }
 
-    return new Promise((resolve) => {
-      db.all('SELECT id, title, author, content FROM poems', [], (err, poems) => {
-        if (err || !poems || poems.length === 0) {
-          this.poemsCache = [];
-          this.poemsCacheTime = now;
-          resolve([]);
-          return;
-        }
-
-        this.poemsCache = poems;
-        this.poemsCacheTime = now;
-        resolve(poems);
-      });
-    });
+    try {
+      const result = await db.query('SELECT id, title, author, content FROM poems');
+      this.poemsCache = result.rows || [];
+      this.poemsCacheTime = now;
+      return this.poemsCache;
+    } catch (err) {
+      console.error('[FeihualingService] 加载诗词失败:', err.message);
+      this.poemsCache = [];
+      this.poemsCacheTime = now;
+      return [];
+    }
   }
 
   getRandomKeyword() {
@@ -106,19 +103,24 @@ class FeihualingService {
       inGame: false
     });
 
-    db.get(
-      'SELECT class_id, (SELECT COALESCE(MAX(total_rounds), 0) FROM feihua_battles WHERE player1_id = ? OR player2_id = ?) as max_rounds FROM users WHERE id = ?',
-      [userId, userId, userId],
-      (err, row) => {
-        if (!err && row) {
+    (async () => {
+      try {
+        const result = await db.query(
+          'SELECT class_id, (SELECT COALESCE(MAX(total_rounds), 0) FROM feihua_battles WHERE player1_id = $1 OR player2_id = $2) as max_rounds FROM users WHERE id = $3',
+          [userId, userId, userId]
+        );
+        if (result.rows.length > 0) {
+          const row = result.rows[0];
           const user = this.onlineUsers.get(userId);
           if (user) {
             user.classId = row.class_id || null;
             user.maxRounds = row.max_rounds || 0;
           }
         }
+      } catch (err) {
+        console.error('[FeihualingService] 获取用户信息失败:', err.message);
       }
-    );
+    })();
 
     return this.getOnlineUsers();
   }
@@ -564,33 +566,34 @@ class FeihualingService {
     return this._endRoundWithResult(room, winner, loser, 'manual', reason || '主动结束');
   }
 
-  saveFightHistory(room) {
+  async saveFightHistory(room) {
     if (!room.winner || !room.loser) return;
 
-    const stmt = db.prepare(
-      'INSERT INTO feihua_battles (player1_id, player2_id, keyword, winner_id, loser_id, total_rounds, player1_throw_count, player2_throw_count, battle_history, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    );
-
-    stmt.run(
-      room.players[0].id,
-      room.players[1].id,
-      room.keyword,
-      room.winner ? room.winner.id : null,
-      room.loser ? room.loser.id : null,
-      room.currentRound,
-      0,
-      0,
-      JSON.stringify(room.usedPoems),
-      room.createdAt,
-      Date.now()
-    );
-
-    stmt.finalize();
+    try {
+      await db.query(
+        'INSERT INTO feihua_battles (player1_id, player2_id, keyword, winner_id, loser_id, total_rounds, player1_throw_count, player2_throw_count, battle_history, started_at, ended_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+        [
+          room.players[0].id,
+          room.players[1].id,
+          room.keyword,
+          room.winner ? room.winner.id : null,
+          room.loser ? room.loser.id : null,
+          room.currentRound,
+          0,
+          0,
+          JSON.stringify(room.usedPoems),
+          room.createdAt,
+          Date.now()
+        ]
+      );
+    } catch (err) {
+      console.error('[FeihualingService] 保存对战历史失败:', err.message);
+    }
   }
 
-  getFightHistory(username) {
-    return new Promise((resolve, reject) => {
-      db.all(
+  async getFightHistory(username) {
+    try {
+      const result = await db.query(
         `SELECT
           f.id,
           p1.username as player1,
@@ -603,31 +606,28 @@ class FeihualingService {
         FROM feihua_battles f
         JOIN users p1 ON f.player1_id = p1.id
         JOIN users p2 ON f.player2_id = p2.id
-        WHERE p1.username = ? OR p2.username = ?
+        WHERE p1.username = $1 OR p2.username = $2
         ORDER BY f.ended_at DESC
         LIMIT 20`,
-        [username, username],
-        (err, rows) => {
-          if (err) {
-            reject(err);
-          } else {
-            const history = rows.map(row => {
-              return {
-                id: row.id,
-                player1: row.player1,
-                player2: row.player2,
-                keyword: row.keyword,
-                winner: row.winner_id,
-                loser: row.loser_id,
-                rounds: row.total_rounds,
-                date: row.date
-              };
-            });
-            resolve(history);
-          }
-        }
+        [username, username]
       );
-    });
+
+      const history = result.rows.map(row => ({
+        id: row.id,
+        player1: row.player1,
+        player2: row.player2,
+        keyword: row.keyword,
+        winner: row.winner_id,
+        loser: row.loser_id,
+        rounds: row.total_rounds,
+        date: row.date
+      }));
+
+      return history;
+    } catch (err) {
+      console.error('[FeihualingService] 获取对战历史失败:', err.message);
+      throw err;
+    }
   }
 
   getRecommendedKeywords() {

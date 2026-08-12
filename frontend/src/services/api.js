@@ -217,7 +217,27 @@ export const api = {
     reciteCheck: (data) => request('/ai/recite-check', {
       method: 'POST',
       body: JSON.stringify(data)
-    })
+    }),
+    personalizedTutor: (data) => request('/ai/personalized-tutor', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+    tts: async (text) => {
+      const baseUrl = await initApiUrl();
+      const response = await fetchWithTimeout(`${baseUrl}/ai/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ text })
+      }, 30000);
+      
+      if (!response.ok) {
+        throw new Error('语音合成失败');
+      }
+      
+      return response.blob();
+    }
   },
   
   // 闯关相关
@@ -317,6 +337,16 @@ export const api = {
     getStats: () => publicFetch('/feihua-ranking/stats'),
     getLevels: () => publicFetch('/feihua-ranking/levels'),
     getUserRank: (userId) => request(`/feihua-ranking/user/${userId}`)
+  },
+
+  // 飞花令游戏保存（幂等：gameSessionId 保证 retry 不重复）
+  feihua: {
+    save: (data) => request('/feihua/save', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+    getGames: () => request('/feihua/games'),
+    getHighScore: () => request('/feihua/high-score')
   },
 
   // 诗词创作挑战相关

@@ -12,6 +12,10 @@
             <span class="nav-icon">📊</span>
             <span>数据看板</span>
           </router-link>
+          <router-link to="/teacher/knowledge" class="nav-item" :class="{ active: route.path === '/teacher/knowledge' }">
+            <span class="nav-icon">🧠</span>
+            <span>认知诊断</span>
+          </router-link>
           <router-link to="/teacher/classes" class="nav-item" :class="{ active: route.path.startsWith('/teacher/classes') }">
             <span class="nav-icon">🏫</span>
             <span>班级管理</span>

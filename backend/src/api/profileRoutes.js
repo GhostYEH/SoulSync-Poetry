@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const config = require('../config/config');
+const db = require('../utils/db');
 const abilityModelService = require('../services/abilityModelService');
 
-// 认证中间件
 function authenticateToken(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
@@ -28,162 +28,78 @@ function authenticateToken(req, res, next) {
   }
 }
 
-// 懒加载数据库（避免循环依赖）
-let db = null;
-function getDb() {
-  if (!db) {
-    db = require('../utils/db').db;
-  }
-  return db;
-}
-
-// GET /api/profile/stats - 获取用户个人中心统计数据
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const database = getDb();
 
-    // 并行查询多个数据源
     const stats = await Promise.all([
-      // 已学诗词数量
-      new Promise((resolve) => {
-        database.get('SELECT COUNT(*) as count FROM learning_records WHERE user_id = ?', [userId], (err, row) => {
-          resolve(err ? 0 : (row?.count || 0));
-        });
-      }),
-      // 收藏诗词数量
-      new Promise((resolve) => {
-        database.get('SELECT COUNT(*) as count FROM collections WHERE user_id = ?', [userId], (err, row) => {
-          resolve(err ? 0 : (row?.count || 0));
-        });
-      }),
-      // 创作作品数量
-      new Promise((resolve) => {
-        database.get('SELECT COUNT(*) as count FROM user_creations WHERE user_id = ?', [userId], (err, row) => {
-          resolve(err ? 0 : (row?.count || 0));
-        });
-      }),
-      // 闯关最高关卡
-      new Promise((resolve) => {
-        database.get('SELECT MAX(level) as max_level FROM user_challenge_records WHERE user_id = ?', [userId], (err, row) => {
-          resolve(err ? 0 : (row?.max_level || 0));
-        });
-      }),
-      // 飞花令积分
-      new Promise((resolve) => {
-        database.get('SELECT rating FROM feihua_ranking WHERE user_id = ?', [userId], (err, row) => {
-          resolve(err ? 1000 : (row?.rating || 1000));
-        });
-      }),
-      // 错题本数量
-      new Promise((resolve) => {
-        database.get('SELECT COUNT(*) as count FROM wrong_questions WHERE user_id = ?', [userId], (err, row) => {
-          resolve(err ? 0 : (row?.count || 0));
-        });
-      }),
-        // 本周打卡天数
-        new Promise((resolve) => {
-          const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-          database.get('SELECT COUNT(DISTINCT date) as count FROM daily_checkin WHERE user_id = ? AND date >= ?', [userId, weekAgo.split('T')[0]], (err, row) => {
-            resolve(err ? 0 : (row?.count || 0));
-          });
-        }),
-      // 累计学习时长（分钟）
-      new Promise((resolve) => {
-        database.get('SELECT SUM(study_time) as total FROM learning_records WHERE user_id = ?', [userId], (err, row) => {
-          resolve(err ? 0 : Math.round((row?.total || 0) / 60));
-        });
-      }),
-      // 学习准确率
-      new Promise((resolve) => {
-        database.get(`SELECT AVG(CAST(is_correct AS REAL)) as avg FROM user_challenge_records WHERE user_id = ?`, [userId], (err, row) => {
-          resolve(err ? 0 : Math.round((row?.avg || 0) * 100));
-        });
-      }),
+      db.get('SELECT COUNT(*) as count FROM learning_records WHERE user_id = $1', [userId]).then(row => row?.count || 0).catch(() => 0),
+      db.get('SELECT COUNT(*) as count FROM collections WHERE user_id = $1', [userId]).then(row => row?.count || 0).catch(() => 0),
+      db.get('SELECT COUNT(*) as count FROM user_creations WHERE user_id = $1', [userId]).then(row => row?.count || 0).catch(() => 0),
+      db.get('SELECT MAX(level) as max_level FROM user_challenge_records WHERE user_id = $1', [userId]).then(row => row?.max_level || 0).catch(() => 0),
+      db.get('SELECT rating FROM feihua_ranking WHERE user_id = $1', [userId]).then(row => row?.rating || 1000).catch(() => 1000),
+      db.get('SELECT COUNT(*) as count FROM wrong_questions WHERE user_id = $1', [userId]).then(row => row?.count || 0).catch(() => 0),
+      (async () => {
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const row = await db.get('SELECT COUNT(DISTINCT date) as count FROM daily_checkin WHERE user_id = $1 AND date >= $2', [userId, weekAgo.split('T')[0]]);
+        return row?.count || 0;
+      })().catch(() => 0),
+      db.get('SELECT SUM(study_time) as total FROM learning_records WHERE user_id = $1', [userId]).then(row => Math.round((row?.total || 0) / 60)).catch(() => 0),
+      db.get('SELECT AVG(CAST(is_correct AS REAL)) as avg FROM user_challenge_records WHERE user_id = $1', [userId]).then(row => Math.round((row?.avg || 0) * 100)).catch(() => 0),
     ]);
 
-    // 查询最近学习的诗词（按时间排序）
-    const recentPoems = await new Promise((resolve) => {
-      database.all(`
-        SELECT lr.poem_id, lr.best_score, lr.last_view_time,
-               p.title, p.author, p.dynasty, p.content
-        FROM learning_records lr
-        LEFT JOIN poems p ON lr.poem_id = p.id
-        WHERE lr.user_id = ?
-        ORDER BY lr.last_view_time DESC
-        LIMIT 5
-      `, [userId], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const recentPoems = await db.all(`
+      SELECT lr.poem_id, lr.best_score, lr.last_view_time,
+             p.title, p.author, p.dynasty, p.content
+      FROM learning_records lr
+      LEFT JOIN poems p ON lr.poem_id = p.id
+      WHERE lr.user_id = $1
+      ORDER BY lr.last_view_time DESC
+      LIMIT 5
+    `, [userId]).catch(() => []);
 
-    // 查询收藏的诗词
-    const collectedPoems = await new Promise((resolve) => {
-      database.all(`
-        SELECT c.poem_id, c.created_at as collected_at,
-               p.title, p.author, p.dynasty, p.content
-        FROM collections c
-        LEFT JOIN poems p ON c.poem_id = p.id
-        WHERE c.user_id = ?
-        ORDER BY c.created_at DESC
-        LIMIT 5
-      `, [userId], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const collectedPoems = await db.all(`
+      SELECT c.poem_id, c.created_at as collected_at,
+             p.title, p.author, p.dynasty, p.content
+      FROM collections c
+      LEFT JOIN poems p ON c.poem_id = p.id
+      WHERE c.user_id = $1
+      ORDER BY c.created_at DESC
+      LIMIT 5
+    `, [userId]).catch(() => []);
 
-    // 查询每日学习活动（近30天）
-    const activityData = await new Promise((resolve) => {
-      const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      database.all(`
-        SELECT DATE(last_view_time) as date, COUNT(*) as count
-        FROM learning_records
-        WHERE user_id = ? AND last_view_time >= ?
-        GROUP BY DATE(last_view_time)
-        ORDER BY date ASC
-      `, [userId, monthAgo], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const activityData = await db.all(`
+      SELECT (last_view_time)::date as date, COUNT(*) as count
+      FROM learning_records
+      WHERE user_id = $1 AND last_view_time >= $2
+      GROUP BY (last_view_time)::date
+      ORDER BY date ASC
+    `, [userId, monthAgo]).catch(() => []);
 
-    // 查询每周学习数据（用于雷达图）
-    const weeklyStats = await new Promise((resolve) => {
-      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      database.get(`
-        SELECT
-          COUNT(DISTINCT poem_id) as poems_learned,
-          COUNT(*) as total_sessions,
-          SUM(study_time) as total_time
-        FROM learning_records
-        WHERE user_id = ? AND last_view_time >= ?
-      `, [userId, weekAgo], (err, row) => {
-        if (err) {
-          resolve({ poems_learned: 0, total_sessions: 0, total_time: 0 });
-        } else {
-          resolve({
-            poems_learned: row?.poems_learned || 0,
-            total_sessions: row?.total_sessions || 0,
-            total_time: row?.total_time || 0
-          });
-        }
-      });
-    });
-    
-    // 获取能力模型数据
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const weeklyStats = await db.get(`
+      SELECT
+        COUNT(DISTINCT poem_id) as poems_learned,
+        COUNT(*) as total_sessions,
+        SUM(study_time) as total_time
+      FROM learning_records
+      WHERE user_id = $1 AND last_view_time >= $2
+    `, [userId, weekAgo]).then(row => ({
+      poems_learned: row?.poems_learned || 0,
+      total_sessions: row?.total_sessions || 0,
+      total_time: row?.total_time || 0
+    })).catch(() => ({ poems_learned: 0, total_sessions: 0, total_time: 0 }));
+
     const abilityModel = await abilityModelService.calculateAbilityModel(userId);
 
-    // 闯关数据
-    const challengeStats = await new Promise((resolve) => {
-      database.all(`
-        SELECT level, best_score, answered_at as completed_at
-        FROM user_challenge_records
-        WHERE user_id = ?
-        ORDER BY level DESC
-        LIMIT 10
-      `, [userId], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const challengeStats = await db.all(`
+      SELECT level, best_score, answered_at as completed_at
+      FROM user_challenge_records
+      WHERE user_id = $1
+      ORDER BY level DESC
+      LIMIT 10
+    `, [userId]).catch(() => []);
 
     const payload = {
       userId,
@@ -214,93 +130,61 @@ router.get('/stats', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/profile/activity - 获取用户活动数据（用于图表）
 router.get('/activity', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const database = getDb();
-
-    // 近30天学习活动
     const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const learningActivity = await new Promise((resolve) => {
-      database.all(`
-        SELECT DATE(last_view_time) as date, COUNT(*) as count
-        FROM learning_records
-        WHERE user_id = ? AND last_view_time >= ?
-        GROUP BY DATE(last_view_time)
-        ORDER BY date ASC
-      `, [userId, monthAgo], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
 
-    // 近30天闯关活动
-    const challengeActivity = await new Promise((resolve) => {
-      database.all(`
-        SELECT DATE(answered_at) as date, COUNT(*) as count, AVG(CAST(is_correct AS REAL)) as accuracy
-        FROM user_challenge_records
-        WHERE user_id = ? AND answered_at >= ?
-        GROUP BY DATE(answered_at)
-        ORDER BY date ASC
-      `, [userId, monthAgo], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const learningActivity = await db.all(`
+      SELECT (last_view_time)::date as date, COUNT(*) as count
+      FROM learning_records
+      WHERE user_id = $1 AND last_view_time >= $2
+      GROUP BY (last_view_time)::date
+      ORDER BY date ASC
+    `, [userId, monthAgo]).catch(() => []);
 
-    // 近30天打卡数据
-    const checkinActivity = await new Promise((resolve) => {
-      database.all(`
-        SELECT date, COUNT(*) as count
-        FROM daily_checkin
-        WHERE user_id = ? AND date >= ?
-        GROUP BY date
-        ORDER BY date ASC
-      `, [userId, monthAgo], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const challengeActivity = await db.all(`
+      SELECT (answered_at)::date as date, COUNT(*) as count, AVG(CAST(is_correct AS REAL)) as accuracy
+      FROM user_challenge_records
+      WHERE user_id = $1 AND answered_at >= $2
+      GROUP BY (answered_at)::date
+      ORDER BY date ASC
+    `, [userId, monthAgo]).catch(() => []);
 
-    // 近30天创作活动
-    const creationActivity = await new Promise((resolve) => {
-      database.all(`
-        SELECT DATE(created_at) as date, COUNT(*) as count
-        FROM user_creations
-        WHERE user_id = ? AND created_at >= ?
-        GROUP BY DATE(created_at)
-        ORDER BY date ASC
-      `, [userId, monthAgo], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const checkinActivity = await db.all(`
+      SELECT date, COUNT(*) as count
+      FROM daily_checkin
+      WHERE user_id = $1 AND date >= $2
+      GROUP BY date
+      ORDER BY date ASC
+    `, [userId, monthAgo]).catch(() => []);
 
-    // 按朝代分布
-    const dynastyDistribution = await new Promise((resolve) => {
-      database.all(`
-        SELECT p.dynasty, COUNT(*) as count
-        FROM learning_records lr
-        JOIN poems p ON lr.poem_id = p.id
-        WHERE lr.user_id = ?
-        GROUP BY p.dynasty
-        ORDER BY count DESC
-      `, [userId], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const creationActivity = await db.all(`
+      SELECT (created_at)::date as date, COUNT(*) as count
+      FROM user_creations
+      WHERE user_id = $1 AND created_at >= $2
+      GROUP BY (created_at)::date
+      ORDER BY date ASC
+    `, [userId, monthAgo]).catch(() => []);
 
-    // 按诗人分布
-    const authorDistribution = await new Promise((resolve) => {
-      database.all(`
-        SELECT p.author, COUNT(*) as count
-        FROM learning_records lr
-        JOIN poems p ON lr.poem_id = p.id
-        WHERE lr.user_id = ?
-        GROUP BY p.author
-        ORDER BY count DESC
-        LIMIT 10
-      `, [userId], (err, rows) => {
-        resolve(err ? [] : (rows || []));
-      });
-    });
+    const dynastyDistribution = await db.all(`
+      SELECT p.dynasty, COUNT(*) as count
+      FROM learning_records lr
+      JOIN poems p ON lr.poem_id = p.id
+      WHERE lr.user_id = $1
+      GROUP BY p.dynasty
+      ORDER BY count DESC
+    `, [userId]).catch(() => []);
+
+    const authorDistribution = await db.all(`
+      SELECT p.author, COUNT(*) as count
+      FROM learning_records lr
+      JOIN poems p ON lr.poem_id = p.id
+      WHERE lr.user_id = $1
+      GROUP BY p.author
+      ORDER BY count DESC
+      LIMIT 10
+    `, [userId]).catch(() => []);
 
     const payload = {
       learningActivity,
@@ -319,13 +203,10 @@ router.get('/activity', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/profile/achievements - 获取用户成就
 router.get('/achievements', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const database = getDb();
 
-    // 定义所有成就
     const allAchievements = [
       { id: 'poem_10', name: '初学者', desc: '学习10首诗词', icon: '📖', type: 'poems' },
       { id: 'poem_50', name: '诗词爱好者', desc: '学习50首诗词', icon: '📚', type: 'poems' },
@@ -346,62 +227,51 @@ router.get('/achievements', authenticateToken, async (req, res) => {
       { id: 'feihua_legend', name: '飞花令传奇', desc: '飞花令积分达到2000', icon: '🌺', type: 'feihua' },
     ];
 
-    // 获取用户统计数据
-    const userStats = await new Promise((resolve) => {
-      database.get(`
-        SELECT
-          (SELECT COUNT(*) FROM learning_records WHERE user_id = ?) as poems_count,
-          (SELECT COUNT(*) FROM collections WHERE user_id = ?) as collections_count,
-          (SELECT COUNT(*) FROM user_creations WHERE user_id = ?) as creations_count,
-          (SELECT MAX(level) FROM user_challenge_records WHERE user_id = ?) as max_level,
-          (SELECT AVG(CAST(is_correct AS REAL)) FROM user_challenge_records WHERE user_id = ?) as avg_accuracy,
-          (SELECT rating FROM feihua_ranking WHERE user_id = ?) as feihua_rating
-      `, [userId, userId, userId, userId, userId, userId], (err, row) => {
-        resolve(err ? { poems_count: 0, collections_count: 0, creations_count: 0, max_level: 0, avg_accuracy: 0, feihua_rating: 1000 } : row);
-      });
-    });
+    const userStats = await db.get(`
+      SELECT
+        (SELECT COUNT(*) FROM learning_records WHERE user_id = $1) as poems_count,
+        (SELECT COUNT(*) FROM collections WHERE user_id = $2) as collections_count,
+        (SELECT COUNT(*) FROM user_creations WHERE user_id = $3) as creations_count,
+        (SELECT MAX(level) FROM user_challenge_records WHERE user_id = $4) as max_level,
+        (SELECT AVG(CAST(is_correct AS REAL)) FROM user_challenge_records WHERE user_id = $5) as avg_accuracy,
+        (SELECT rating FROM feihua_ranking WHERE user_id = $6) as feihua_rating
+    `, [userId, userId, userId, userId, userId, userId]).catch(() => ({
+      poems_count: 0, collections_count: 0, creations_count: 0, max_level: 0, avg_accuracy: 0, feihua_rating: 1000
+    }));
 
-    // 计算连续打卡天数
-    const checkinStreak = await new Promise((resolve) => {
-      database.all(`
-        SELECT date
-        FROM daily_checkin
-        WHERE user_id = ?
-        ORDER BY date DESC
-      `, [userId], (err, rows) => {
-        if (err || !rows || rows.length === 0) {
-          resolve(0);
-          return;
-        }
-        let streak = 0;
-        let lastDate = null;
-        const today = new Date().toISOString().split('T')[0];
-        for (const row of rows) {
-          const date = row.date;
-          if (!lastDate) {
-            // 检查是否是今天或昨天开始
-            const diff = Math.floor((new Date(today) - new Date(date)) / (24 * 60 * 60 * 1000));
-            if (diff <= 1) {
-              streak = 1;
-              lastDate = date;
-            } else {
-              break;
-            }
+    const checkinRows = await db.all(`
+      SELECT date
+      FROM daily_checkin
+      WHERE user_id = $1
+      ORDER BY date DESC
+    `, [userId]).catch(() => []);
+
+    let checkinStreak = 0;
+    if (checkinRows && checkinRows.length > 0) {
+      let lastDate = null;
+      const today = new Date().toISOString().split('T')[0];
+      for (const row of checkinRows) {
+        const date = row.date;
+        if (!lastDate) {
+          const diff = Math.floor((new Date(today) - new Date(date)) / (24 * 60 * 60 * 1000));
+          if (diff <= 1) {
+            checkinStreak = 1;
+            lastDate = date;
           } else {
-            const diff = Math.floor((new Date(lastDate) - new Date(date)) / (24 * 60 * 60 * 1000));
-            if (diff === 1) {
-              streak++;
-              lastDate = date;
-            } else {
-              break;
-            }
+            break;
+          }
+        } else {
+          const diff = Math.floor((new Date(lastDate) - new Date(date)) / (24 * 60 * 60 * 1000));
+          if (diff === 1) {
+            checkinStreak++;
+            lastDate = date;
+          } else {
+            break;
           }
         }
-        resolve(streak);
-      });
-    });
+      }
+    }
 
-    // 判断每个成就是否达成
     const achievements = allAchievements.map(a => {
       let progress = 0;
       let target = 0;

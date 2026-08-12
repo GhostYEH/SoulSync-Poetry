@@ -119,6 +119,11 @@
         </div>
       </div>
 
+      <!-- 知识掌握画像（可解释认知诊断） -->
+      <div class="chart-section">
+        <StudentKnowledgeProfile :user-id="studentId" />
+      </div>
+
       <!-- 个性化推荐诗词 -->
       <div class="chart-section">
         <h2>个性化推荐诗词</h2>
@@ -238,6 +243,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import TeacherChart from '@/components/teacher/TeacherChart.vue'
+import StudentKnowledgeProfile from './components/StudentKnowledgeProfile.vue'
 
 const router = useRouter()
 const route = useRoute()

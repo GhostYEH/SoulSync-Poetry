@@ -1,80 +1,63 @@
-// 飞花令游戏服务
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 
-// 保存飞花令游戏记录
-function saveFeihuaGame(userId, keyword, score, poemCount, history) {
-  return new Promise((resolve, reject) => {
+async function saveFeihuaGame(userId, keyword, score, poemCount, history) {
+  try {
     const now = new Date().toISOString();
     const historyJson = JSON.stringify(history);
-    
-    db.run(
-      'INSERT INTO feihua_games (user_id, keyword, score, poem_count, history, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, keyword, score, poemCount, historyJson, now],
-      function(err) {
-        if (err) {
-          console.error('保存飞花令游戏记录失败:', err);
-          reject(err);
-          return;
-        }
-        
-        const gameRecord = {
-          id: this.lastID,
-          user_id: userId,
-          keyword: keyword,
-          score: score,
-          poem_count: poemCount,
-          history: history,
-          created_at: now
-        };
-        
-        resolve(gameRecord);
-      }
+
+    const result = await db.query(
+      'INSERT INTO feihua_games (user_id, keyword, score, poem_count, history, created_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [userId, keyword, score, poemCount, historyJson, now]
     );
-  });
+
+    const gameRecord = {
+      id: result.rows[0].id,
+      user_id: userId,
+      keyword,
+      score,
+      poem_count: poemCount,
+      history,
+      created_at: now
+    };
+
+    return gameRecord;
+  } catch (err) {
+    console.error('保存飞花令游戏记录失败:', err);
+    throw err;
+  }
 }
 
-// 获取用户的飞花令游戏记录
-function getUserFeihuaGames(userId) {
-  return new Promise((resolve, reject) => {
-    db.all(
-      'SELECT * FROM feihua_games WHERE user_id = ? ORDER BY created_at DESC',
-      [userId],
-      (err, rows) => {
-        if (err) {
-          console.error('获取飞花令游戏记录失败:', err);
-          reject(err);
-          return;
-        }
-        
-        // 解析history字段
-        const games = rows.map(row => ({
-          ...row,
-          history: JSON.parse(row.history)
-        }));
-        
-        resolve(games);
-      }
+async function getUserFeihuaGames(userId) {
+  try {
+    const result = await db.query(
+      'SELECT * FROM feihua_games WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId]
     );
-  });
+
+    const games = result.rows.map(row => ({
+      ...row,
+      history: JSON.parse(row.history)
+    }));
+
+    return games;
+  } catch (err) {
+    console.error('获取飞花令游戏记录失败:', err);
+    throw err;
+  }
 }
 
-// 获取用户的最高得分
-function getHighScore(userId) {
-  return new Promise((resolve, reject) => {
-    db.get(
-      'SELECT MAX(score) as high_score FROM feihua_games WHERE user_id = ?',
-      [userId],
-      (err, row) => {
-        if (err) {
-          console.error('获取最高得分失败:', err);
-          reject(err);
-          return;
-        }
-        
-        resolve(row.high_score || 0);
-      }
+async function getHighScore(userId) {
+  try {
+    const result = await db.query(
+      'SELECT MAX(score) as high_score FROM feihua_games WHERE user_id = $1',
+      [userId]
     );
-  });
+
+    return result.rows[0]?.high_score || 0;
+  } catch (err) {
+    console.error('获取最高得分失败:', err);
+    throw err;
+  }
 }
 
 module.exports = {

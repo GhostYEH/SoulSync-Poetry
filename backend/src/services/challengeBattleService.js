@@ -1,5 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 
 class ChallengeBattleService {
   constructor() {
@@ -189,49 +189,54 @@ class ChallengeBattleService {
       return this.POEMS_CACHE;
     }
 
-    return new Promise((resolve) => {
-      db.all(`SELECT id, title, author, content FROM poems`, [], (err, poems) => {
-        if (err || !poems || poems.length === 0) {
-          this.POEMS_CACHE = [];
-          this.cacheLoadTime = now;
-          resolve([]);
-          return;
-        }
+    try {
+      const result = await db.query('SELECT id, title, author, content FROM poems');
+      const poems = result.rows || [];
 
-        const processedPoems = poems.map(poem => {
-          const content = (poem.content || '').replace(/[，、；：""''（）【】《》]/g, '，').replace(/[。！？…；]/g, '。');
-          const lines = content.split('。').filter(l => l.trim().length >= 4);
+      if (poems.length === 0) {
+        this.POEMS_CACHE = [];
+        this.cacheLoadTime = now;
+        return [];
+      }
 
-          const couplets = [];
-          for (const line of lines) {
-            const parts = line.split('，').filter(p => p.trim().length >= 2);
-            for (let i = 0; i < parts.length - 1; i++) {
-              const left = parts[i].trim();
-              const right = parts[i + 1].trim();
-              if (left.length >= 2 && right.length >= 2) {
-                const isTop = Math.random() > 0.5;
-                couplets.push({
-                  question: isTop ? `${left}，____。` : `____，${right}。`,
-                  answer: isTop ? right : left,
-                  type: isTop ? '上句填下句' : '下句填上句'
-                });
-              }
+      const processedPoems = poems.map(poem => {
+        const content = (poem.content || '').replace(/[，、；：""''（）【】《》]/g, '，').replace(/[。！？…；]/g, '。');
+        const lines = content.split('。').filter(l => l.trim().length >= 4);
+
+        const couplets = [];
+        for (const line of lines) {
+          const parts = line.split('，').filter(p => p.trim().length >= 2);
+          for (let i = 0; i < parts.length - 1; i++) {
+            const left = parts[i].trim();
+            const right = parts[i + 1].trim();
+            if (left.length >= 2 && right.length >= 2) {
+              const isTop = Math.random() > 0.5;
+              couplets.push({
+                question: isTop ? `${left}，____。` : `____，${right}。`,
+                answer: isTop ? right : left,
+                type: isTop ? '上句填下句' : '下句填上句'
+              });
             }
           }
+        }
 
-          return {
-            ...poem,
-            content,
-            couplets,
-            difficulty: this.estimateDifficulty(poem)
-          };
-        }).filter(p => p.couplets.length > 0);
+        return {
+          ...poem,
+          content,
+          couplets,
+          difficulty: this.estimateDifficulty(poem)
+        };
+      }).filter(p => p.couplets.length > 0);
 
-        this.POEMS_CACHE = processedPoems;
-        this.cacheLoadTime = now;
-        resolve(processedPoems);
-      });
-    });
+      this.POEMS_CACHE = processedPoems;
+      this.cacheLoadTime = now;
+      return processedPoems;
+    } catch (err) {
+      console.error('[ChallengeBattle] 加载诗词缓存失败:', err.message);
+      this.POEMS_CACHE = [];
+      this.cacheLoadTime = now;
+      return [];
+    }
   }
 
   estimateDifficulty(poem) {
@@ -518,69 +523,70 @@ class ChallengeBattleService {
     return { ...result, reason: 'quit' };
   }
 
-  saveSingleRecord(room) {
-    const stmt = db.prepare(
-      `INSERT INTO challenge_battles (player1_id, player2_id, winner_id, loser_id, total_questions, player1_correct, player2_correct, total_rounds, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
+  async saveSingleRecord(room) {
+    try {
+      const winnerId = room.correctCount >= room.wrongCount ? room.userId : null;
+      const loserId = room.correctCount < room.wrongCount ? room.userId : null;
 
-    const winnerId = room.correctCount >= room.wrongCount ? room.userId : null;
-    const loserId = room.correctCount < room.wrongCount ? room.userId : null;
+      await db.query(
+        `INSERT INTO challenge_battles (player1_id, player2_id, winner_id, loser_id, total_questions, player1_correct, player2_correct, total_rounds, started_at, ended_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          room.userId, room.userId,
+          winnerId, loserId,
+          room.questions.length,
+          room.correctCount, 0,
+          room.currentRound,
+          room.createdAt,
+          room.endedAt || Date.now()
+        ]
+      );
 
-    stmt.run(
-      room.userId, room.userId,
-      winnerId, loserId,
-      room.questions.length,
-      room.correctCount, 0,
-      room.currentRound,
-      room.createdAt,
-      room.endedAt || Date.now()
-    );
-    stmt.finalize();
+      if (room.wrongQuestions && room.wrongQuestions.length > 0) {
+        const now = new Date().toISOString();
+        for (const wq of room.wrongQuestions) {
+          const existingResult = await db.query(
+            'SELECT * FROM wrong_questions WHERE user_id = $1 AND question = $2',
+            [room.userId, wq.question]
+          );
 
-    if (room.wrongQuestions && room.wrongQuestions.length > 0) {
-      const now = new Date().toISOString();
-      for (const wq of room.wrongQuestions) {
-        db.get(
-          'SELECT * FROM wrong_questions WHERE user_id = ? AND question = ?',
-          [room.userId, wq.question],
-          (err, existing) => {
-            if (err) return;
-            if (existing) {
-              db.run(
-                `UPDATE wrong_questions SET wrong_count = wrong_count + 1, user_answer = ?, last_wrong_time = ?, correct_streak = 0, mastered = 0 WHERE id = ?`,
-                [wq.userAnswer || '', now, existing.id]
-              );
-            } else {
-              db.run(
-                `INSERT INTO wrong_questions (user_id, question, answer, user_answer, level, full_poem, author, title, wrong_count, last_wrong_time)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [room.userId, wq.question, wq.answer, wq.userAnswer || '', 1, wq.fullPoem || '', wq.author || '', wq.title || '', 1, now]
-              );
-            }
+          if (existingResult.rows.length > 0) {
+            const existing = existingResult.rows[0];
+            await db.query(
+              `UPDATE wrong_questions SET wrong_count = wrong_count + 1, user_answer = $1, last_wrong_time = $2, correct_streak = 0, mastered = 0 WHERE id = $3`,
+              [wq.userAnswer || '', now, existing.id]
+            );
+          } else {
+            await db.query(
+              `INSERT INTO wrong_questions (user_id, question, answer, user_answer, level, full_poem, author, title, wrong_count, last_wrong_time)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+              [room.userId, wq.question, wq.answer, wq.userAnswer || '', 1, wq.fullPoem || '', wq.author || '', wq.title || '', 1, now]
+            );
           }
-        );
+        }
       }
+    } catch (err) {
+      console.error('[ChallengeBattle] 保存单人记录失败:', err.message);
     }
   }
 
-  getBattleHistory(userId) {
-    return new Promise((resolve, reject) => {
-      db.all(
+  async getBattleHistory(userId) {
+    try {
+      const result = await db.query(
         `SELECT cb.*, u1.username as player1_name, u2.username as player2_name
          FROM challenge_battles cb
          LEFT JOIN users u1 ON cb.player1_id = u1.id
          LEFT JOIN users u2 ON cb.player2_id = u2.id
-         WHERE cb.player1_id = ? OR cb.player2_id = ?
+         WHERE cb.player1_id = $1 OR cb.player2_id = $2
          ORDER BY cb.ended_at DESC
          LIMIT 20`,
-        [userId, userId],
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
+        [userId, userId]
       );
-    });
+      return result.rows || [];
+    } catch (err) {
+      console.error('[ChallengeBattle] 获取对战历史失败:', err.message);
+      throw err;
+    }
   }
 
   // ==============================================================
@@ -788,25 +794,27 @@ class ChallengeBattleService {
     };
   }
 
-  _saveDualBattleRecord(room, winner, loser) {
-    const stmt = db.prepare(
-      `INSERT INTO challenge_battles (player1_id, player2_id, winner_id, loser_id, total_questions, player1_correct, player2_correct, total_rounds, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-
-    stmt.run(
-      room.players[0].id,
-      room.players[1].id,
-      winner.tie ? null : winner.id,
-      loser.tie ? null : loser.id,
-      room.currentRound,
-      room.players[0].correct,
-      room.players[1].correct,
-      room.currentRound,
-      room.createdAt,
-      room.endedAt || Date.now()
-    );
-    stmt.finalize();
+  async _saveDualBattleRecord(room, winner, loser) {
+    try {
+      await db.query(
+        `INSERT INTO challenge_battles (player1_id, player2_id, winner_id, loser_id, total_questions, player1_correct, player2_correct, total_rounds, started_at, ended_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          room.players[0].id,
+          room.players[1].id,
+          winner.tie ? null : winner.id,
+          loser.tie ? null : loser.id,
+          room.currentRound,
+          room.players[0].correct,
+          room.players[1].correct,
+          room.currentRound,
+          room.createdAt,
+          room.endedAt || Date.now()
+        ]
+      );
+    } catch (err) {
+      console.error('[ChallengeBattle] 保存双人对战记录失败:', err.message);
+    }
   }
 
   // ==============================================================
@@ -1012,26 +1020,28 @@ class ChallengeBattleService {
     };
   }
 
-  _saveDualInviteRecord(room, winner, loser) {
-    const stmt = db.prepare(
-      `INSERT INTO challenge_battles
-       (player1_id, player2_id, winner_id, loser_id, total_questions, player1_correct, player2_correct, total_rounds, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-
-    stmt.run(
-      room.players[0].id,
-      room.players[1].id,
-      winner.tie ? null : winner.id,
-      loser.tie ? null : loser.id,
-      room.totalQuestions,
-      room.players[0].correctAnswers,
-      room.players[1].correctAnswers,
-      room.currentQuestionIndex + 1,
-      room.createdAt,
-      room.endedAt || Date.now()
-    );
-    stmt.finalize();
+  async _saveDualInviteRecord(room, winner, loser) {
+    try {
+      await db.query(
+        `INSERT INTO challenge_battles
+         (player1_id, player2_id, winner_id, loser_id, total_questions, player1_correct, player2_correct, total_rounds, started_at, ended_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          room.players[0].id,
+          room.players[1].id,
+          winner.tie ? null : winner.id,
+          loser.tie ? null : loser.id,
+          room.totalQuestions,
+          room.players[0].correctAnswers,
+          room.players[1].correctAnswers,
+          room.currentQuestionIndex + 1,
+          room.createdAt,
+          room.endedAt || Date.now()
+        ]
+      );
+    } catch (err) {
+      console.error('[ChallengeBattle] 保存邀请对战记录失败:', err.message);
+    }
   }
 }
 

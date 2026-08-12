@@ -125,7 +125,6 @@
           </p>
           <!-- 朗读按钮 -->
           <button 
-            v-if="speechSynthesisSupported"
             class="read-btn"
             @click="toggleRead"
           >
@@ -188,7 +187,7 @@
         </div>
         
         <!-- AI背诵检测功能 -->
-        <div class="recite-check-section">
+        <div class="recite-check-card">
           <h2 class="section-title">📝 AI背诵检测</h2>
           <div class="recite-check-content">
             <div class="form-group">
@@ -198,7 +197,7 @@
                 v-model="reciteInput"
                 placeholder="请输入您默写的内容..."
                 class="recite-input"
-                rows="8"
+                rows="6"
                 @focus="startRecitationMode"
                 @blur="stopRecitationMode"
               ></textarea>
@@ -214,53 +213,60 @@
             
             <!-- 检测结果 -->
             <div v-if="reciteResult" class="recite-result-section">
-              <div class="recite-score">
-                <h3>检测结果</h3>
-                <div class="score-circle" :class="getScoreClass(reciteResult.score)">
-                  <span class="score-number">{{ reciteResult.score }}%</span>
-                  <span class="score-label">正确率</span>
-                  <div class="score-message">{{ getScoreMessage(reciteResult.score) }}</div>
+              <!-- 正确率板块 -->
+              <div class="result-section accuracy-section">
+                <h3 class="result-title">📊 正确率</h3>
+                <div class="accuracy-display">
+                  <div class="accuracy-circle" :class="getScoreClass(reciteResult.score)">
+                    <span class="accuracy-number">{{ reciteResult.score }}</span>
+                    <span class="accuracy-unit">分</span>
+                  </div>
+                  <div class="accuracy-message">{{ getScoreMessage(reciteResult.score) }}</div>
                 </div>
               </div>
               
-              <div class="recite-feedback">
-                <div v-if="reciteResult.wrongChars.length > 0" class="feedback-item error">
-                  <h4>🔴 错字 ({{ reciteResult.wrongChars.length }}个)</h4>
-                  <ul class="error-list">
-                    <li v-for="(error, index) in reciteResult.wrongChars" :key="index" class="error-item">
-                      <span class="error-position">位置 {{ error.position }}:</span>
-                      <span class="error-input">{{ error.input }}</span>
-                      <span class="error-arrow">→</span>
-                      <span class="error-correct">{{ error.original }}</span>
-                    </li>
-                  </ul>
-                </div>
-                
-                <div v-if="reciteResult.missing.length > 0" class="feedback-item error">
-                  <h4>🔵 漏字 ({{ reciteResult.missing.length }}个)</h4>
-                  <ul class="error-list">
-                    <li v-for="(error, index) in reciteResult.missing" :key="index" class="error-item">
-                      <span class="error-position">位置 {{ error.position }}:</span>
-                      <span class="error-missing">缺少 "{{ error.char }}"</span>
-                    </li>
-                  </ul>
-                </div>
-                
-                <div v-if="reciteResult.extra.length > 0" class="feedback-item error">
-                  <h4>🟡 多写 ({{ reciteResult.extra.length }}个)</h4>
-                  <ul class="error-list">
-                    <li v-for="(error, index) in reciteResult.extra" :key="index" class="error-item">
-                      <span class="error-position">位置 {{ error.position }}:</span>
-                      <span class="error-extra">多写 "{{ error.char }}"</span>
-                    </li>
-                  </ul>
-                </div>
-                
-                <div v-if="reciteResult.aiAdvice" class="feedback-item advice">
-                  <h4>🤖 AI学习建议</h4>
-                  <div class="ai-advice-container">
-                    <p class="ai-advice">{{ reciteResult.aiAdvice }}</p>
+              <!-- 问题板块 -->
+              <div class="result-section problem-section">
+                <h3 class="result-title">❌ 问题分析</h3>
+                <div class="problem-list">
+                  <div v-if="reciteResult.wrongChars.length > 0" class="problem-item">
+                    <span class="problem-label">错字：</span>
+                    <span class="problem-detail">
+                      <span v-for="(error, index) in reciteResult.wrongChars" :key="index" class="error-tag">
+                        "{{ error.input }}" → "{{ error.original }}"
+                      </span>
+                    </span>
                   </div>
+                  
+                  <div v-if="reciteResult.missing.length > 0" class="problem-item">
+                    <span class="problem-label">漏字：</span>
+                    <span class="problem-detail">
+                      <span v-for="(error, index) in reciteResult.missing" :key="index" class="missing-tag">
+                        "{{ error.char }}"
+                      </span>
+                    </span>
+                  </div>
+                  
+                  <div v-if="reciteResult.extra.length > 0" class="problem-item">
+                    <span class="problem-label">多字：</span>
+                    <span class="problem-detail">
+                      <span v-for="(error, index) in reciteResult.extra" :key="index" class="extra-tag">
+                        "{{ error.char }}"
+                      </span>
+                    </span>
+                  </div>
+                  
+                  <div v-if="reciteResult.wrongChars.length === 0 && reciteResult.missing.length === 0 && reciteResult.extra.length === 0" class="problem-item no-error">
+                    <span class="no-error-text">✅ 完全正确，没有错误！</span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 建议板块 -->
+              <div class="result-section advice-section">
+                <h3 class="result-title">💡 学习建议</h3>
+                <div class="advice-content">
+                  <p class="advice-text">{{ reciteResult.aiAdvice }}</p>
                 </div>
               </div>
 
@@ -461,12 +467,114 @@
           </div>
         </div>
         
+        <!-- 个性化教学卡片（RAG 驱动） -->
+        <div class="personalized-tutor-section">
+          <h2 class="section-title">🎓 个性化教学</h2>
+          <p class="tutor-subtitle">基于你的学习诊断，针对性讲解薄弱知识点</p>
+          <button 
+            class="ai-btn purple"
+            @click="loadPersonalizedTutor"
+            :disabled="tutorLoading || !poem"
+          >
+            <span v-if="tutorLoading" class="loading-spinner"></span>
+            {{ tutorLoading ? '诊断教学中...' : '🧠 获取个性化教学' }}
+          </button>
+
+          <div v-if="tutorError" class="error-message">
+            <p>{{ tutorError }}</p>
+          </div>
+
+          <div v-if="tutorData" class="tutor-content">
+            <div class="tutor-depth-badge" :class="tutorData.depth">
+              {{ { FOUNDATION: '基础阶段', DEVELOPING: '发展阶段', ADVANCED: '进阶阶段' }[tutorData.depth] || tutorData.depth }}
+            </div>
+
+            <div v-if="tutorData.weakPoints && tutorData.weakPoints.length > 0" class="tutor-weak-points">
+              <h4>📋 薄弱知识点</h4>
+              <div class="weak-point-tags">
+                <span 
+                  v-for="wp in tutorData.weakPoints" 
+                  :key="wp.code"
+                  class="weak-point-tag"
+                >
+                  {{ wp.name }}（{{ wp.mastery }}%）
+                </span>
+              </div>
+            </div>
+
+            <div v-if="tutorData.teaching && tutorData.teaching.explanation" class="tutor-explanation">
+              <h4>📖 个性化讲解</h4>
+              <p class="teaching-text">{{ tutorData.teaching.explanation }}</p>
+            </div>
+
+            <div v-if="tutorData.teaching && tutorData.teaching.keyPoints && tutorData.teaching.keyPoints.length > 0" class="tutor-key-points">
+              <h4>🔑 核心知识点</h4>
+              <ul class="key-points-list">
+                <li v-for="(kp, idx) in tutorData.teaching.keyPoints" :key="idx" class="key-point-item">
+                  <strong>{{ kp.point }}</strong>：{{ kp.detail }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="tutorData.teaching && tutorData.teaching.practiceAdvice" class="tutor-advice">
+              <h4>✍️ 练习建议</h4>
+              <p>{{ tutorData.teaching.practiceAdvice }}</p>
+            </div>
+
+            <div v-if="tutorData.practiceQuestions && tutorData.practiceQuestions.length > 0" class="tutor-practice">
+              <h4>📝 推荐练习</h4>
+              <div 
+                v-for="q in tutorData.practiceQuestions" 
+                :key="q.questionId"
+                class="practice-item"
+              >
+                <p class="practice-question">{{ q.questionText }}</p>
+                <p v-if="q.poem" class="practice-source">来源：《{{ q.poem.title }}》{{ q.poem.author }}</p>
+              </div>
+            </div>
+
+            <div v-if="tutorData.relatedPoems && tutorData.relatedPoems.length > 0" class="tutor-related">
+              <h4>📚 相关诗词</h4>
+              <div class="related-poems-list">
+                <span 
+                  v-for="rp in tutorData.relatedPoems" 
+                  :key="rp.id"
+                  class="related-poem-tag"
+                  @click="navigateToPoem(rp.id)"
+                >
+                  《{{ rp.title }}》{{ rp.author }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="tutorData.sources && tutorData.sources.length > 0" class="tutor-sources">
+              <h4>📎 数据来源</h4>
+              <ul class="sources-list">
+                <li v-for="(src, idx) in tutorData.sources" :key="idx" class="source-item">
+                  <span class="source-type">{{ { target_poem: '目标诗词', related_poem: '相关诗词', practice_question: '练习题' }[src.type] || src.type }}</span>
+                  <span v-if="src.title">《{{ src.title }}》{{ src.author || '' }}</span>
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="tutorData.degraded" class="tutor-degraded-notice">
+              ⚠️ AI 讲解服务暂时不可用，以上为数据库基础信息
+            </div>
+          </div>
+        </div>
+        
         <!-- 诗人简介卡片 -->
         <div class="author-profile">
           <h2 class="section-title">👤 诗人简介</h2>
           <div class="author-content">
             <div class="author-avatar">
-              <img v-if="authorAvatar" :src="authorAvatar" :alt="poem.author" class="avatar-image">
+              <img 
+                v-if="authorAvatar" 
+                :src="authorAvatar" 
+                :alt="poem.author" 
+                class="avatar-image"
+                @error="handleAvatarError"
+              >
               <div v-else class="avatar-loading">加载中...</div>
             </div>
             <div class="author-info">
@@ -707,6 +815,7 @@
 
 <script>
 import io from 'socket.io-client'
+import { generateAttemptId } from '../utils/attemptId'
 
 const API_BASE_URL = 'http://localhost:3000'
 
@@ -718,9 +827,8 @@ export default {
       loading: true,
       error: '',
       // 语音朗读相关状态
-      speechSynthesisSupported: 'speechSynthesis' in window,
       isReading: false,
-      speechUtterance: null,
+      audio: null,
       // AI讲解相关状态
       aiExplanations: {
         daily_life_explanation: null,
@@ -755,6 +863,7 @@ export default {
       floatingElements: [],
       // 背诵检测功能相关
       reciteInput: '',
+      reciteAttemptId: null,
       reciteLoading: false,
       reciteResult: null,
       reciteError: '',
@@ -818,7 +927,11 @@ export default {
         show: false,
         message: '',
         type: 'info' // info | success | error
-      }
+      },
+      // 个性化教学（RAG 驱动）
+      tutorData: null,
+      tutorLoading: false,
+      tutorError: ''
     }
   },
   // 路由离开前清理资源并记录学习时长
@@ -953,6 +1066,34 @@ export default {
     document.removeEventListener('mouseup', this.handleTextSelection);
   },
   methods: {
+    // 加载个性化教学（RAG 驱动）
+    async loadPersonalizedTutor() {
+      if (this.tutorLoading || !this.poem) return
+      this.tutorLoading = true
+      this.tutorError = ''
+      try {
+        const token = localStorage.getItem('token')
+        const response = await fetch(`${API_BASE_URL}/api/ai/personalized-tutor`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({ poemId: this.poem.id })
+        })
+        if (!response.ok) {
+          throw new Error('个性化教学服务请求失败')
+        }
+        const res = await response.json()
+        this.tutorData = res.data || res
+      } catch (err) {
+        console.error('[personalizedTutor] 获取失败:', err)
+        this.tutorError = err.message || '个性化教学服务暂时不可用'
+        this.tutorData = null
+      } finally {
+        this.tutorLoading = false
+      }
+    },
     // 背景图加载完成后触发淡入
     onBgImageLoaded() {
       this.bgImageFadingIn = true
@@ -1122,6 +1263,7 @@ export default {
         this.tutorLoading = false
         // 重置背诵检测状态
         this.reciteInput = ''
+        this.reciteAttemptId = null
         this.reciteResult = null
         this.reciteLoading = false
         this.wrongBookAdded = false
@@ -1290,6 +1432,7 @@ export default {
       try {
         this.reciteLoading = true
         this.reciteError = ''
+        if (!this.reciteAttemptId) this.reciteAttemptId = generateAttemptId()
         
         const response = await fetch(`${API_BASE_URL}/api/ai/recite-check`, {
           method: 'POST',
@@ -1302,7 +1445,8 @@ export default {
             input: this.reciteInput,
             poem_id: this.poem.id,
             poem_title: this.poem.title,
-            poem_author: this.poem.author
+            poem_author: this.poem.author,
+            attemptId: this.reciteAttemptId
           })
         })
         
@@ -1361,6 +1505,7 @@ export default {
         }).join('，')
         
         // 调用AI背诵检测API
+        if (!this.reciteAttemptId) this.reciteAttemptId = generateAttemptId()
         const response = await fetch(`${API_BASE_URL}/api/ai/recite-check`, {
           method: 'POST',
           headers: {
@@ -1372,7 +1517,8 @@ export default {
             input: userInputText,
             poem_id: this.poem.id,
             poem_title: this.poem.title,
-            poem_author: this.poem.author
+            poem_author: this.poem.author,
+            attemptId: this.reciteAttemptId
           })
         })
         
@@ -1415,6 +1561,7 @@ export default {
       this.refreshRecitation()
       this.reciteResult = null
       this.reciteInput = ''
+      this.reciteAttemptId = null
       this.wrongBookAdded = false
     },
     
@@ -1912,68 +2059,63 @@ export default {
     },
     // 切换朗读状态
     toggleRead() {
-      if (!this.speechSynthesisSupported) {
-        alert('您的浏览器不支持语音朗读功能');
-        return;
-      }
-      
       if (this.isReading) {
-        // 直接停止朗读
-        speechSynthesis.cancel();
-        this.isReading = false;
+        // 停止朗读
+        this.stopReading();
       } else {
         // 开始朗读
         this.startReading();
       }
     },
     // 开始朗读诗词
-    startReading() {
+    async startReading() {
       if (!this.poem || !this.poem.content) return;
       
-      // 取消之前的朗读
-      speechSynthesis.cancel();
+      this.isReading = true;
       
-      let text = this.poem.content;
-      // 预处理：规范化标点，确保每句有停顿
-      text = text.replace(/([。！？；])\s*/g, '$1，').replace(/\n/g, '。');
-      
-      // 分割成句子数组（按。！？；, 分）
-      const sentences = text.split(/(?<=[。！？；，])/).filter(s => s.trim());
-      
-      let queue = [...sentences]; // 队列朗读
-      
-      const speakNext = () => {
-        if (queue.length === 0) {
-          this.isReading = false;
-          return;
+      try {
+        let text = this.poem.content;
+        // 预处理：规范化标点，确保每句有停顿
+        text = text.replace(/([。！？；])\s*/g, '$1，').replace(/\n/g, '。');
+        
+        // 调用后端语音合成API
+        const response = await fetch(`${API_BASE_URL}/api/ai/tts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ text: text })
+        });
+        
+        if (!response.ok) {
+          throw new Error('语音合成失败');
         }
         
-        const utterance = new SpeechSynthesisUtterance(queue.shift());
-        utterance.lang = 'zh-CN';
-        utterance.rate = 0.8;    // 稍慢，更有节奏
-        utterance.pitch = 1.1;   // 略高，模拟吟诵
-        utterance.volume = 1;
+        // 获取音频数据
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
         
-        // 优先选柔和女声（名字因系统而异）
-        const voices = speechSynthesis.getVoices();
-        const preferred = voices.find(v => 
-          v.name.includes('Xiaoxiao') || 
-          v.name.includes('Yunxi') || 
-          v.name.includes('女') ||
-          v.name.includes('Chinese')
-        );
-        if (preferred) utterance.voice = preferred;
-        
-        // 句末加长停顿
-        utterance.onend = () => {
-          setTimeout(speakNext, 600); // 每句后停0.6秒
+        // 创建音频对象并播放
+        this.audio = new Audio(audioUrl);
+        this.audio.onended = () => {
+          this.isReading = false;
+          URL.revokeObjectURL(audioUrl);
         };
         
-        speechSynthesis.speak(utterance);
-      };
-      
-      this.isReading = true;
-      speakNext();
+        this.audio.play();
+      } catch (error) {
+        console.error('朗读失败:', error);
+        this.isReading = false;
+        alert('朗读失败，请稍后重试');
+      }
+    },
+    // 停止朗读
+    stopReading() {
+      if (this.audio) {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+      }
+      this.isReading = false;
     },
 
     // 滚动聊天窗口到底部
@@ -2063,6 +2205,17 @@ export default {
       if (!this.reciteInput.trim()) {
         this.recitationMode = false;
       }
+    },
+    
+    // 处理头像加载失败
+    handleAvatarError() {
+      console.warn('诗人头像加载失败，使用默认头像');
+      const author = this.poem?.author || '';
+      this.authorAvatar = this.getDefaultAvatar(author);
+      // 清除缓存，下次重新获取
+      const CACHE_VERSION = 'v2';
+      const cacheKey = `author_avatar_${CACHE_VERSION}_${author}`;
+      localStorage.removeItem(cacheKey);
     },
     
     // 获取诗人头像（使用阿里云百炼文生图API生成）
@@ -3583,7 +3736,7 @@ input:checked + .slider:before {
 }
 
 /* 背诵检测功能样式 */
-.recite-check-section {
+.recite-check-card {
   background: var(--glass-background);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -3597,7 +3750,7 @@ input:checked + .slider:before {
   transition: var(--transition);
 }
 
-.recite-check-section:hover {
+.recite-check-card:hover {
   transform: translateY(-4px);
   backdrop-filter: blur(calc(var(--glass-blur) + 4px));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
@@ -3605,26 +3758,172 @@ input:checked + .slider:before {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
-.recite-check-section::before {
+.recite-check-card::before {
   content: '';
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   height: 4px;
-  background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+  background: linear-gradient(90deg, #e74c3c, #f39c12);
   transform: scaleX(0);
   transition: transform 0.3s ease;
 }
 
-.recite-check-section:hover::before {
+.recite-check-card:hover::before {
   transform: scaleX(1);
 }
 
-.recite-check-section:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.2);
-  border-color: rgba(255, 255, 255, 0.5);
+/* 检测结果板块样式 */
+.result-section {
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.result-title {
+  font-size: 16px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid rgba(74, 144, 226, 0.2);
+}
+
+/* 正确率板块 */
+.accuracy-section {
+  background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(80, 227, 194, 0.1));
+}
+
+.accuracy-display {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.accuracy-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #4a90e2, #50e3c2);
+  color: white;
+  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+}
+
+.accuracy-circle.score-low {
+  background: linear-gradient(135deg, #e74c3c, #f39c12);
+}
+
+.accuracy-circle.score-medium {
+  background: linear-gradient(135deg, #f39c12, #f1c40f);
+}
+
+.accuracy-circle.score-high {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+}
+
+.accuracy-number {
+  font-size: 28px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.accuracy-unit {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.accuracy-message {
+  font-size: 14px;
+  color: #555;
+  font-weight: 500;
+}
+
+/* 问题板块 */
+.problem-section {
+  background: linear-gradient(135deg, rgba(231, 76, 60, 0.05), rgba(243, 156, 18, 0.05));
+}
+
+.problem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.problem-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.problem-label {
+  font-weight: bold;
+  color: #e74c3c;
+  min-width: 50px;
+}
+
+.problem-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.error-tag {
+  background: rgba(231, 76, 60, 0.15);
+  color: #c0392b;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.missing-tag {
+  background: rgba(52, 152, 219, 0.15);
+  color: #2980b9;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid rgba(52, 152, 219, 0.3);
+}
+
+.extra-tag {
+  background: rgba(241, 196, 15, 0.15);
+  color: #d68910;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid rgba(241, 196, 15, 0.3);
+}
+
+.no-error-text {
+  color: #27ae60;
+  font-weight: 500;
+}
+
+/* 建议板块 */
+.advice-section {
+  background: linear-gradient(135deg, rgba(39, 174, 96, 0.05), rgba(46, 204, 113, 0.05));
+}
+
+.advice-content {
+  background: rgba(39, 174, 96, 0.08);
+  border-radius: 8px;
+  padding: 12px 16px;
+  border-left: 3px solid #27ae60;
+}
+
+.advice-text {
+  font-size: 14px;
+  color: #555;
+  line-height: 1.7;
+  margin: 0;
 }
 
 /* ===== 新增卡片通用样式 ===== */
@@ -3897,6 +4196,119 @@ input:checked + .slider:before {
   border-top-color: white;
   border-radius: 50%;
   animation: spin 1s linear infinite;
+}
+
+/* ===== 个性化教学样式 ===== */
+.personalized-tutor-section {
+  background: linear-gradient(135deg, #f8f4ff 0%, #f0f7ff 100%);
+  border-radius: 16px;
+  padding: 24px;
+  margin: 20px 0;
+  border: 1px solid #e0d4f5;
+}
+.tutor-subtitle {
+  color: #666;
+  font-size: 14px;
+  margin: 4px 0 16px;
+}
+.tutor-content {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.tutor-depth-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  width: fit-content;
+}
+.tutor-depth-badge.FOUNDATION { background: #e3f2fd; color: #1565c0; }
+.tutor-depth-badge.DEVELOPING { background: #fff3e0; color: #e65100; }
+.tutor-depth-badge.ADVANCED { background: #fce4ec; color: #c62828; }
+.tutor-weak-points h4, .tutor-explanation h4, .tutor-key-points h4,
+.tutor-advice h4, .tutor-practice h4, .tutor-related h4, .tutor-sources h4 {
+  font-size: 15px;
+  color: #333;
+  margin-bottom: 8px;
+}
+.weak-point-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.weak-point-tag {
+  background: #fff;
+  border: 1px solid #d4c5f9;
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: #5e35b1;
+}
+.teaching-text {
+  line-height: 1.8;
+  color: #444;
+  white-space: pre-wrap;
+}
+.key-points-list, .sources-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.key-point-item {
+  padding: 6px 0;
+  border-bottom: 1px dashed #e0d4f5;
+  color: #444;
+  font-size: 14px;
+}
+.key-point-item:last-child { border-bottom: none; }
+.practice-item {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  border: 1px solid #e8e0f7;
+}
+.practice-question { font-weight: 500; color: #333; }
+.practice-source { font-size: 12px; color: #888; margin-top: 4px; }
+.related-poems-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.related-poem-tag {
+  background: #fff;
+  border: 1px solid #c5cae9;
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: #283593;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.related-poem-tag:hover { background: #e8eaf6; }
+.source-item {
+  font-size: 12px;
+  color: #666;
+  padding: 2px 0;
+}
+.source-type {
+  display: inline-block;
+  background: #f5f5f5;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-right: 6px;
+  font-weight: 500;
+}
+.tutor-degraded-notice {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #856404;
 }
 
 /* ===== 动画 ===== */

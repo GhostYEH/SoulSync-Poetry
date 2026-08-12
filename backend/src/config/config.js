@@ -23,7 +23,7 @@ module.exports = {
   ai: {
     model: process.env.AI_MODEL || (
       process.env.SILICONFLOW_API_KEY
-        ? 'Qwen/Qwen3-8B'
+        ? 'Qwen/Qwen2.5-7B-Instruct'
         : 'qwen-flash'
     ),
     // URL：SiliconFlow key存在则走SiliconFlow，否则走DashScope

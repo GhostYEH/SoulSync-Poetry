@@ -5,7 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 const aiService = require('../services/aiService');
 const config = require('../config/config');
 
@@ -80,6 +80,47 @@ function escapeString(str) {
   return String(str).replace(/[<>'"]/g, '');
 }
 
+/**
+ * 验证润色结果质量
+ * 检查是否包含乱码、无意义字符或英文
+ */
+function isValidPolishResult(poem, originalPoem) {
+  if (!poem || typeof poem !== 'string') return false;
+  
+  const lines = poem.split('\n').filter(line => line.trim());
+  const originalLines = originalPoem.split('\n').filter(line => line.trim());
+  
+  if (lines.length !== originalLines.length) return false;
+  
+  const invalidPatterns = [
+    /[a-zA-Z]/g,           
+    /[^\u4e00-\u9fa5\u3000-\u303f\s，。！？、；：""''《》「」【】]/g,  
+    /\b(kuk|xxx|aaa|bbb|ccc|www|com|http)\b/gi,  
+    /\s{2,}/g              
+  ];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const originalLine = originalLines[i].trim();
+    
+    if (!line) return false;
+    
+    const lineChars = normalizePoemLineChars(line);
+    const originalChars = normalizePoemLineChars(originalLine);
+    
+    if (lineChars.length !== originalChars.length) return false;
+    
+    for (const pattern of invalidPatterns) {
+      if (pattern.test(line)) {
+        console.warn('[polish] 发现无效内容:', line, '匹配:', pattern);
+        return false;
+      }
+    }
+  }
+  
+  return true;
+}
+
 /** 诗句行规范化（去空格标点，便于数字数） */
 function normalizePoemLineChars(s) {
   if (!s) return '';
@@ -101,11 +142,11 @@ function isValidLineLength(aiLine, lineLength) {
 /** AI 失败时的兜底句：按主题生成语义连贯的句子，而非随机名句 */
 function contextualChainFallback(existingLinesText, theme, lineLength) {
   const themes = {
-    '思乡': ['雁阵横空过故园', '故园音讯久无凭', '独倚高楼望归路'],
-    '离别': ['落日余晖映客袍', '挥手从兹各西东', '天涯何处寄相思'],
-    '山水': ['幽壑泉声入梦寒', '松风竹韵共清欢', '云深不知处'],
-    '自然': ['清风徐来水波兴', '鸟鸣山幽更显静', '落花流水春去也'],
-    '一般': ['凭阑无语意难平', '古今多少事都付笑谈中']
+    '思乡': ['秋风吹过旧亭台', '故园草木应向荣', '归心似箭越千山'],
+    '离别': ['夕阳西下人影长', '执手相看语凝噎', '此去山高水又长'],
+    '山水': ['山高林密听泉声', '云卷云舒自在行', '溪水潺潺石上鸣'],
+    '自然': ['风过荷塘叶田田', '鸟鸣山涧林更幽', '花开花落任自然'],
+    '一般': ['望远凭栏思渺然', '万籁俱寂夜阑珊']
   };
   const key = Object.keys(themes).find(k => theme.includes(k)) || '一般';
   const lines = themes[key];
@@ -137,14 +178,22 @@ router.post('/inspiration/generate', optionalAuthenticateToken, async (req, res)
     const escapedTheme = escapeString(theme);
     const escapedGenre = escapeString(genre);
 
-    const prompt = `主题：${escapedTheme}，体裁：${escapedGenre}
+    const prompt = `为「${escapedTheme}」主题的${escapedGenre}生成创作灵感。
 
-请直接返回实际的创作建议JSON（不要返回模板，要返回实际内容）：
-{"keywords":["柳絮","桃花","燕子","新芽","微雨","暖风","蜂蝶","纸鸢"],"theme":"围绕春天展开诗意画面，从一花一草的细微变化切入，写出春日独有的生机","mood":"清新","openingIdeas":["从眼前一处小景切入","从一声一物引出心绪","从对比或转折起笔","从回忆或想象入手"],"avoid":["空泛口号式抒情","意象堆砌无主线","陈词滥调无新意"],"suggestions":["写春不写春字，借柳绿桃红让春意自己显现","动静结合：蜂蝶忙而人静，意境更活","转句引入春将尽或人事，增加层次","结尾宕入人事，写春日里的思念或孩童"]}`;
+要求：
+1. keywords：5-8个与主题相关的关键词
+2. theme：主题描述（20字内）
+3. mood：情感基调（如：清新、豪放、婉约等）
+4. openingIdeas：3-4个起笔思路
+5. avoid：2-3个避免事项
+6. suggestions：2-3个创作建议
+
+返回JSON：
+{"keywords":["关键词1","关键词2"],"theme":"主题描述","mood":"情感基调","openingIdeas":["思路1","思路2"],"avoid":["避免1","避免2"],"suggestions":["建议1","建议2"]}`;
 
     const result = await aiService.callZhipuGenerateJSON(prompt,
-      '你是古诗词专家。请直接返回实际的创作建议JSON，不要返回模板或示例。',
-      { temperature: 0.8, maxTokens: 800 }
+      '你是古诗词专家，根据主题生成实际创作建议。',
+      { temperature: 0.8, maxTokens: 500 }
     );
 
     if (result) {
@@ -281,11 +330,10 @@ router.post('/recommend/next-line', optionalAuthenticateToken, async (req, res) 
     const lineCount = lines.length;
 
     const prompt = `续写${escapedGenre}，主题"${escapedTheme}"，第${lineCount + 1}句需${lineLength}字。
-已有诗句：
-${escapedLines}
+已有诗句：${escapedLines}
 
-请严格按照以下JSON格式返回结果，不要返回其他任何内容：
-{"suggestions":[{"line":"续写诗句1","reason":"推荐理由1","mood":"意境描述1"},{"line":"续写诗句2","reason":"推荐理由2","mood":"意境描述2"},{"line":"续写诗句3","reason":"推荐理由3","mood":"意境描述3"}],"rhymeHint":"押韵提示","moodHint":"情感走向"}`;
+返回JSON：
+{"suggestions":[{"line":"诗句1","reason":"理由1","mood":"意境1"},{"line":"诗句2","reason":"理由2","mood":"意境2"}],"rhymeHint":"押韵提示","moodHint":"情感走向"}`;
 
     const result = await aiService.callZhipuGenerateJSON(prompt,
       '你是诗词续写专家。请严格按照JSON格式返回结果，不要返回其他任何内容。',
@@ -394,21 +442,15 @@ router.post('/chain/start', optionalAuthenticateToken, async (req, res) => {
     const escapedTheme = escapeString(theme || '自然风光');
     const lineLength = escapedGenre.includes('七') ? 7 : 5;
 
-    const prompt = `【任务】为「${escapedTheme}」主题创作${escapedGenre}的首句（起句）。
+    const prompt = `为「${escapedTheme}」主题创作${escapedGenre}首句，${lineLength}字，无标点。
 
-【要求】
-1. 严格${lineLength}字，无标点符号
-2. 起句要点题但不直白，以景起或以情起
+重要要求：
+1. 必须是原创诗句，不能使用现有的古诗词
+2. 要点题但不直白，以景起或以情起
 3. 用典雅意象，避免大白话和现代词汇
 4. 为后续诗句预留意境发展空间
-5. 可用经典意象：月、风、花、鸟、山、水、云、烟、柳、松等
 
-【示例】
-主题「春」五言：春风绿岸柳
-主题「秋」七言：秋风萧瑟天气凉
-主题「思乡」五言：明月照高楼
-
-直接返回JSON：{"aiLine":"诗句"}`;
+返回JSON：{"aiLine":"诗句"}`;
 
     const result = await aiService.callZhipuGenerateJSON(prompt,
       '你是唐代诗人，精通格律诗创作。你的诗句意境深远、用词典雅、格律工整。起句讲究"兴"，以景引情，含蓄蕴藉。请只返回JSON格式结果。',
@@ -473,25 +515,18 @@ router.post('/chain/next', optionalAuthenticateToken, async (req, res) => {
       '合句': '收束全篇，点明主旨，余韵悠长，忌直白说理'
     };
 
-    const prompt = `【任务】续写${escapedGenre}第${currentLineNum}句（${positionName}）。
+    const prompt = `续写${escapedGenre}第${currentLineNum}句（${positionName}），${lineLength}字，无标点。
+主题：${escapedTheme}
+上句：${escapeString(prevNorm)}
+已有：${existingLinesText}
 
-【主题】${escapedTheme}
-【上句】${escapeString(prevNorm)}
-【已有诗句】${existingLinesText}
-
-【要求】
-1. 严格${lineLength}字，无标点符号
+重要要求：
+1. 必须是原创诗句，不能使用现有的古诗词
 2. ${positionGuide[positionName] || '承接上文意境'}
-3. 注意押韵：${currentLineNum % 2 === 0 ? '偶数句需押韵，韵脚与第二句相同' : '奇数句可不押韵'}
+3. 注意押韵：${currentLineNum % 2 === 0 ? '偶数句需押韵' : '奇数句可不押韵'}
 4. 意境连贯：与上句形成对仗或递进关系
-5. 用词典雅：避免大白话，善用古典意象
-${isLastLine ? '6. 末句收束：点题升华，言有尽而意无穷' : ''}
 
-【示例续写】
-上句「春风绿岸柳」→ 承句「细雨润花红」
-上句「明月照高楼」→ 承句「清风吹绮窗」
-
-直接返回JSON：{"aiLine":"诗句"}`;
+返回JSON：{"aiLine":"诗句"}`;
 
     const result = await aiService.callZhipuGenerateJSON(prompt,
       '你是唐代诗人，精通格律诗创作。你深谙起承转合之法，承句要承接上文、深化意境，转句要另辟蹊径、引入变化，合句要点题收束、余韵悠长。请只返回JSON格式结果。',
@@ -613,36 +648,22 @@ router.post('/feihua/score', optionalAuthenticateToken, async (req, res) => {
     const escapedKeyword = escapeString(keyword || '');
     const escapedGenre = escapeString(genre || '五言绝句');
 
-    const prompt = `你是一位严格的飞花令评审专家。请对以下飞花令作品进行评分。
-
-【作品信息】
+    const prompt = `飞花令评分：
 关键字："${escapedKeyword}"（必须在诗中出现）
 体裁：${escapedGenre}
-正文：
-${escapedPoem}
+正文：${escapedPoem}
 
-【评分标准】（每项0-100分）
-1. keyword（关键字分）：关键字是否出现、出现次数、位置是否恰当
-2. content（内容分）：内容是否充实、逻辑是否通顺、是否有深度
-3. rhythm（韵律分）：平仄是否和谐、押韵是否工整、节奏感如何
-4. mood（意境分）：画面感是否强、情感是否真挚、意象是否优美
-5. creativity（创意分）：构思是否新颖、表达是否独特、有无亮点
+评分标准（0-100分）：
+- keyword：关键字分
+- content：内容分
+- rhythm：韵律分
+- mood：意境分
+- creativity：创意分
 
-【返回格式】
-请直接返回JSON对象，格式如下：
-{
-  "total": 总分（五项平均分，保留整数）,
-  "dimensions": {
-    "keyword": 分数,
-    "content": 分数,
-    "rhythm": 分数,
-    "mood": 分数,
-    "creativity": 分数
-  },
-  "suggestions": "【亮点】列举优点\\n【不足】指出问题\\n【建议】改进方向"
-}
+总分=五项平均分。
 
-现在请开始评分，直接返回JSON：`;
+返回JSON：
+{"total":总分,"dimensions":{"keyword":分数,"content":分数,"rhythm":分数,"mood":分数,"creativity":分数},"suggestions":"【亮点】一句话\\n【不足】一句话\\n【建议】一句话"}`;
 
     const result = await aiService.callZhipuGenerateJSON(prompt,
       '你是严格的飞花令评审专家，评分要客观公正，关键字必须出现在诗中。请直接返回JSON格式的评分结果。',
@@ -743,41 +764,33 @@ router.post('/polish', optionalAuthenticateToken, async (req, res) => {
     const escapedTheme = escapeString(theme || '一般主题');
     const polishType = type || 'optimize';
 
-    const prompt = `你是一位资深诗词润色专家。请对以下诗词进行润色优化。
-
-【原诗信息】
+    const prompt = `润色诗词：
 体裁：${escapedGenre}
 主题：${escapedTheme}
-原诗内容：
-${escapedPoem}
+原诗：${escapedPoem}
 
-【润色要求】
-1. 保持原诗的体裁格式（${escapedGenre}的句数和字数）
-2. 优化用词：选择更精准、更有意境的词语
-3. 调整韵律：确保平仄和谐，朗朗上口
-4. 提升意境：让画面更生动，情感更饱满
-5. 润色后的诗句每句用换行符分隔
+要求：
+1. 保持原诗结构和行数，每行字数与原诗一致
+2. 使用规范的古诗词词汇，避免网络用语、乱码、无意义字符
+3. 优化用词，使词汇更典雅、更符合古诗词风格
+4. 调整韵律节奏，提升整体意境
+5. 严格保持中文，不出现任何英文或乱码字符
 
-【返回格式】
-请直接返回JSON对象，格式如下：
-{
-  "poem": "润色后的诗句（每句用\\n换行）",
-  "explanation": "润色说明（50字以内）",
-  "changes": [
-    {"original": "原句", "polished": "润色后", "reason": "修改理由"}
-  ]
-}
-
-现在请开始润色，直接返回JSON：`;
+返回JSON：
+{"poem":"润色后诗句（\\n换行）","explanation":"润色说明（30字内）","changes":[{"original":"原句","polished":"润色后","reason":"理由"}]}`;
 
     const result = await aiService.callZhipuGenerateJSON(prompt,
-      '你是资深诗词润色专家，精通古典诗词的格律、用词和意境。请直接返回JSON格式的润色结果。',
-      { temperature: 0.7, maxTokens: 800 }
+      '你是诗词润色专家。直接返回JSON。',
+      { temperature: 0.7, maxTokens: 400 }
     );
 
     if (result && result.poem && result.poem.trim()) {
-      result.original = escapedPoem;
-      return res.json({ success: true, data: result });
+      if (isValidPolishResult(result.poem, escapedPoem)) {
+        result.original = escapedPoem;
+        return res.json({ success: true, data: result });
+      } else {
+        console.warn('[polish] 润色结果无效，返回原诗');
+      }
     }
 
     return res.json({

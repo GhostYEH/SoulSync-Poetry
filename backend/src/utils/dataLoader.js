@@ -1,71 +1,26 @@
-// 数据加载工具函数
-const { db } = require('./db');
+const db = require('./db');
 
-// 加载诗词数据
-function loadPoems() {
-  return new Promise((resolve, reject) => {
-    db.all('SELECT * FROM poems', (err, rows) => {
-      if (err) {
-        console.error('从数据库加载诗词数据失败:', err);
-        reject(err);
-      } else {
-        // 转换tags字段为数组格式
-        const poems = rows.map(row => ({
-          id: row.id,
-          title: row.title,
-          author: row.author,
-          dynasty: row.dynasty,
-          content: row.content,
-          tags: row.tags ? row.tags.split(',') : []
-        }));
-        console.log(`成功从数据库加载 ${poems.length} 首诗词`);
-        resolve(poems);
-      }
-    });
-  });
+async function loadPoems() {
+  try {
+    const result = await db.query('SELECT * FROM poems');
+    const poems = result.rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      author: row.author,
+      dynasty: row.dynasty,
+      content: row.content,
+      tags: row.tags ? row.tags.split(',') : []
+    }));
+    console.log(`成功从数据库加载 ${poems.length} 首诗词`);
+    return poems;
+  } catch (err) {
+    console.error('从数据库加载诗词数据失败:', err);
+    throw err;
+  }
 }
 
-// 同步版本的加载诗词数据
-function loadPoemsSync() {
-  let poems = [];
-  let error = null;
-  
-  // 使用同步方式执行查询
-  const sqlite3 = require('sqlite3').verbose();
-  const fs = require('fs');
-  const path = require('path');
-  
-  const DB_PATH = path.join(__dirname, '../../db/poetry.db');
-  const syncDb = new sqlite3.Database(DB_PATH);
-  
-  syncDb.serialize(() => {
-    syncDb.all('SELECT * FROM poems', (err, rows) => {
-      if (err) {
-        console.error('从数据库加载诗词数据失败:', err);
-        error = err;
-      } else {
-        // 转换tags字段为数组格式
-        poems = rows.map(row => ({
-          id: row.id,
-          title: row.title,
-          author: row.author,
-          dynasty: row.dynasty,
-          content: row.content,
-          tags: row.tags ? row.tags.split(',') : []
-        }));
-        console.log(`成功从数据库加载 ${poems.length} 首诗词`);
-      }
-    });
-  });
-  
-  // 关闭数据库连接
-  syncDb.close();
-  
-  if (error) {
-    throw error;
-  }
-  
-  return poems;
+async function loadPoemsSync() {
+  return await loadPoems();
 }
 
 // 使用默认诗词数据（备用）

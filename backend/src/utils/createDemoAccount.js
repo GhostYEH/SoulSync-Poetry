@@ -2,7 +2,7 @@
  * 为 Studentdemo 账号填充演示数据（2026年4月版）
  * node backend/src/utils/createDemoAccount.js
  */
-const { db } = require('./db');
+const db = require('./db');
 const bcrypt = require('bcrypt');
 
 const ALL_POEMS = [
@@ -116,197 +116,190 @@ function recentTime(maxDays) {
   return d.toISOString();
 }
 
-function p(resolve, reject) {
-  return (err) => { if (err) reject(err); else resolve(); };
-}
-
 async function main() {
-  return new Promise((resolve, reject) => {
+  const client = await db.pool.connect();
+  try {
     console.log('开始为 Studentdemo 填充高质量演示数据...\n');
-    db.serialize(async () => {
-      try {
-        db.run('BEGIN TRANSACTION');
-        const pwdHash = await bcrypt.hash('123456', 10);
-        const now = new Date();
+    await client.query('BEGIN');
+    const pwdHash = await bcrypt.hash('123456', 10);
+    const now = new Date();
 
-        await new Promise(r => db.run('INSERT OR IGNORE INTO classes (id,class_name) VALUES (?,?)', [1,'一年级一班'], r));
-        console.log('+ 班级 OK');
+    await client.query('INSERT INTO classes (id,class_name) VALUES ($1,$2) ON CONFLICT DO NOTHING', [1,'一年级一班']);
+    console.log('+ 班级 OK');
 
-        const existing = await new Promise(r => db.get('SELECT id FROM users WHERE username=?', ['Studentdemo'], (e,row) => r(row)));
-        let uid;
-        if (existing) {
-          uid = existing.id;
-          await new Promise(r => db.run('UPDATE users SET email=?,password_hash=?,class_id=?,updated_at=? WHERE id=?', ['s@s.com',pwdHash,1,now.toISOString(),uid], r));
-          console.log('+ 账号 Studentdemo (ID:' + uid + ') 已存在，已清空旧数据');
-          for (const t of ['learning_records','collections','wrong_questions','user_challenge_progress','user_challenge_records','user_error_book','daily_checkin','activity_logs','user_creations','feihua_battles','feihua_high_records','ability_assessments','learning_paths','review_schedules','poetry_challenges'])
-            await new Promise(r => db.run('DELETE FROM ' + t + ' WHERE user_id=?', [uid], r));
-        } else {
-          uid = await new Promise((res,rej) => db.run('INSERT INTO users (username,email,password_hash,class_id,created_at,updated_at) VALUES (?,?,?,?,?,?)', ['Studentdemo','s@s.com',pwdHash,1,now.toISOString(),now.toISOString()], function(e){e?rej(e):res(this.lastID)}));
-          console.log('+ 新建 Studentdemo (ID:' + uid + ')');
-        }
+    const { rows: [existing] } = await client.query('SELECT id FROM users WHERE username=$1', ['Studentdemo']);
+    let uid;
+    if (existing) {
+      uid = existing.id;
+      await client.query('UPDATE users SET email=$1,password_hash=$2,class_id=$3,updated_at=$4 WHERE id=$5', ['s@s.com',pwdHash,1,now.toISOString(),uid]);
+      console.log('+ 账号 Studentdemo (ID:' + uid + ') 已存在，已清空旧数据');
+      for (const t of ['learning_records','collections','wrong_questions','user_challenge_progress','user_challenge_records','user_error_book','daily_checkin','activity_logs','user_creations','feihua_battles','feihua_high_records','ability_assessments','learning_paths','review_schedules','poetry_challenges'])
+        await client.query('DELETE FROM ' + t + ' WHERE user_id=$1', [uid]);
+    } else {
+      const result = await client.query('INSERT INTO users (username,email,password_hash,class_id,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', ['Studentdemo','s@s.com',pwdHash,1,now.toISOString(),now.toISOString()]);
+      uid = result.rows[0].id;
+      console.log('+ 新建 Studentdemo (ID:' + uid + ')');
+    }
 
-        /* 插入多朝代诗词（逐条查重） */
-        let added = 0;
-        for (const p of ALL_POEMS) {
-          const ex = await new Promise(r => db.get('SELECT id FROM poems WHERE title=? AND dynasty=?', [p.title, p.dynasty], (e,row) => r(!!row)));
-          if (!ex) { await new Promise(r => db.run('INSERT INTO poems (title,author,dynasty,content,tags) VALUES (?,?,?,?,?)', [p.title,p.author,p.dynasty,p.content,p.tags], r)); added++; }
-        }
-        console.log('+ 诗词数据: 新增' + added + '首 (部分已存在则跳过)');
+    /* 插入多朝代诗词（逐条查重） */
+    let added = 0;
+    for (const p of ALL_POEMS) {
+      const { rows: [ex] } = await client.query('SELECT id FROM poems WHERE title=$1 AND dynasty=$2', [p.title, p.dynasty]);
+      if (!ex) { await client.query('INSERT INTO poems (title,author,dynasty,content,tags) VALUES ($1,$2,$3,$4,$5)', [p.title,p.author,p.dynasty,p.content,p.tags]); added++; }
+    }
+    console.log('+ 诗词数据: 新增' + added + '首 (部分已存在则跳过)');
 
-        /* 按朝代选取学习诗词 */
-        const allP = await new Promise(r => db.all('SELECT id,title,dynasty,author FROM poems',(e,rows)=>r(rows)));
-        const tang   = allP.filter(p=>p.dynasty==='唐').slice(0,6);
-        const song   = allP.filter(p=>p.dynasty==='宋').slice(0,5);
-        const qing   = allP.filter(p=>p.dynasty==='清').slice(0,3);
-        const modern = allP.filter(p=>p.dynasty==='近代').slice(0,2);
-        const learnP = [...tang,...song,...qing,...modern];
-        console.log('+ 朝代分布: 唐' + tang.length + ' 宋' + song.length + ' 清' + qing.length + ' 近代' + modern.length);
+    /* 按朝代选取学习诗词 */
+    const { rows: allP } = await client.query('SELECT id,title,dynasty,author FROM poems');
+    const tang   = allP.filter(p=>p.dynasty==='唐').slice(0,6);
+    const song   = allP.filter(p=>p.dynasty==='宋').slice(0,5);
+    const qing   = allP.filter(p=>p.dynasty==='清').slice(0,3);
+    const modern = allP.filter(p=>p.dynasty==='近代').slice(0,2);
+    const learnP = [...tang,...song,...qing,...modern];
+    console.log('+ 朝代分布: 唐' + tang.length + ' 宋' + song.length + ' 清' + qing.length + ' 近代' + modern.length);
 
-        /* 学习记录 */
-        for (const p of learnP) {
-          await new Promise((res,rej) => db.run(
-            'INSERT INTO learning_records (user_id,poem_id,view_count,ai_explain_count,recite_attempts,best_score,total_score,study_time,last_view_time) VALUES (?,?,?,?,?,?,?,?,?)',
-            [uid,p.id,ri(4,18),ri(0,6),ri(2,10),ri(65,100),ri(65,100)*ri(2,10),ri(150,900),recentTime(ri(0,8))], e=>e?rej(e):res()));
-        }
-        console.log('+ 学习记录 ' + learnP.length + ' 首');
+    /* 学习记录 */
+    for (const p of learnP) {
+      await client.query(
+        'INSERT INTO learning_records (user_id,poem_id,view_count,ai_explain_count,recite_attempts,best_score,total_score,study_time,last_view_time) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+        [uid,p.id,ri(4,18),ri(0,6),ri(2,10),ri(65,100),ri(65,100)*ri(2,10),ri(150,900),recentTime(ri(0,8))]);
+    }
+    console.log('+ 学习记录 ' + learnP.length + ' 首');
 
-        /* 收藏 */
-        for (const p of learnP.slice(0,10))
-          await new Promise(r => db.run('INSERT OR IGNORE INTO collections (user_id,poem_id,created_at) VALUES (?,?,?)', [uid,p.id,recentTime(ri(1,10))], r));
-        console.log('+ 收藏 10 首');
+    /* 收藏 */
+    for (const p of learnP.slice(0,10))
+      await client.query('INSERT INTO collections (user_id,poem_id,created_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [uid,p.id,recentTime(ri(1,10))]);
+    console.log('+ 收藏 10 首');
 
-        /* 闯关进度 */
-        const topLvl = ri(60,110);
-        await new Promise(r => db.run('INSERT INTO user_challenge_progress (user_id,highest_level,current_challenge_level,last_challenge_time,total_ai_help_used,total_errors) VALUES (?,?,?,?,?,?)', [uid,topLvl,Math.min(topLvl+1,200),recentTime(ri(0,3)),ri(5,25),ri(8,40)], r));
-        console.log('+ 闯关进度 最高' + topLvl);
+    /* 闯关进度 */
+    const topLvl = ri(60,110);
+    await client.query('INSERT INTO user_challenge_progress (user_id,highest_level,current_challenge_level,last_challenge_time,total_ai_help_used,total_errors) VALUES ($1,$2,$3,$4,$5,$6)', [uid,topLvl,Math.min(topLvl+1,200),recentTime(ri(0,3)),ri(5,25),ri(8,40)]);
+    console.log('+ 闯关进度 最高' + topLvl);
 
-        /* 答题记录 */
-        for (let i=0;i<ri(100,160);i++) {
-          const x=rand(QUESTIONS);
-          const ok=Math.random()>0.32;
-          await new Promise(r=>db.run('INSERT INTO user_challenge_records (user_id,level, question_content, user_answer, correct_answer, is_correct, used_ai_help, answered_at, poem_title, poem_author) VALUES (?,?,?,?,?,?,?,?,?,?)', [uid,ri(1,topLvl),x.q,ok?x.a:wrong(x.a),x.a,ok?1:0,Math.random()>0.7?1:0,recentTime(ri(0,9)),x.title,x.author],r));
-        }
-        console.log('+ 答题记录 ~' + (ri(100,160)) + ' 条');
+    /* 答题记录 */
+    for (let i=0;i<ri(100,160);i++) {
+      const x=rand(QUESTIONS);
+      const ok=Math.random()>0.32;
+      await client.query('INSERT INTO user_challenge_records (user_id,level, question_content, user_answer, correct_answer, is_correct, used_ai_help, answered_at, poem_title, poem_author) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [uid,ri(1,topLvl),x.q,ok?x.a:wrong(x.a),x.a,ok?1:0,Math.random()>0.7?1:0,recentTime(ri(0,9)),x.title,x.author]);
+    }
+    console.log('+ 答题记录 ~' + (ri(100,160)) + ' 条');
 
-        /* 错题本 */
-        const wp=QUESTIONS.slice(5);
-        for (let i=0;i<10;i++) {
-          const x=wp[i%wp.length];
-          await new Promise(r=>db.run('INSERT INTO wrong_questions (user_id,question,answer,user_answer,level,full_poem,author,title,wrong_count,last_wrong_time,mastered) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [uid.toString(),x.q,x.a,wrong(x.a),ri(10,topLvl),'(全诗略)',x.author,x.title,ri(1,5),recentTime(ri(0,8)),i<4?1:0],r));
-        }
-        console.log('+ 错题 10 条');
+    /* 错题本 */
+    const wp=QUESTIONS.slice(5);
+    for (let i=0;i<10;i++) {
+      const x=wp[i%wp.length];
+      await client.query('INSERT INTO wrong_questions (user_id,question,answer,user_answer,level,full_poem,author,title,wrong_count,last_wrong_time,mastered) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [uid.toString(),x.q,x.a,wrong(x.a),ri(10,topLvl),'(全诗略)',x.author,x.title,ri(1,5),recentTime(ri(0,8)),i<4?1:0]);
+    }
+    console.log('+ 错题 10 条');
 
-        /* 每日打卡 3月28~4月3日 */
-        const start=new Date('2026-03-28');
-        const end=new Date('2026-04-03');
-        for (let d=new Date(start);d<=end;d.setDate(d.getDate()+1)) {
-          const ds=d.toISOString().split('T')[0];
-          const dt=new Date(d); dt.setHours(ri(8,20),ri(0,59),ri(0,59));
-          await new Promise(r=>db.run('INSERT OR IGNORE INTO daily_checkin (user_id,date,checked_in_at) VALUES (?,?,?)',[uid,ds,dt.toISOString()],r));
-        }
-        console.log('+ 每日打卡 7 天 (3月28-4月3日)');
+    /* 每日打卡 3月28~4月3日 */
+    const start=new Date('2026-03-28');
+    const end=new Date('2026-04-03');
+    for (let d=new Date(start);d<=end;d.setDate(d.getDate()+1)) {
+      const ds=d.toISOString().split('T')[0];
+      const dt=new Date(d); dt.setHours(ri(8,20),ri(0,59),ri(0,59));
+      await client.query('INSERT INTO daily_checkin (user_id,date,checked_in_at) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',[uid,ds,dt.toISOString()]);
+    }
+    console.log('+ 每日打卡 7 天 (3月28-4月3日)');
 
-        /* 活动日志 */
-        const acts=['view','recite','challenge','feihua','ai_explain','checkin','creation','wrong_review'];
-        for (let i=0;i<60;i++)
-          await new Promise(r=>db.run('INSERT INTO activity_logs (user_id,activity_type,duration_seconds,created_at) VALUES (?,?,?,?)',[uid,rand(acts),ri(30,900),recentTime(ri(0,9))],r));
-        console.log('+ 活动日志 60 条');
+    /* 活动日志 */
+    const acts=['view','recite','challenge','feihua','ai_explain','checkin','creation','wrong_review'];
+    for (let i=0;i<60;i++)
+      await client.query('INSERT INTO activity_logs (user_id,activity_type,duration_seconds,created_at) VALUES ($1,$2,$3,$4)',[uid,rand(acts),ri(30,900),recentTime(ri(0,9))]);
+    console.log('+ 活动日志 60 条');
 
-        /* 诗词创作 */
-        for (const c of CREATIONS) {
-          const refAuth=rand(['李白','杜甫','苏轼','王维']);
-          await new Promise((res,rej)=>db.run(
-            'INSERT INTO user_creations (user_id,title,content,genre,theme,creation_mode,ai_reference,score_data,modification_suggestions,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-            [uid,c.title,c.content,c.genre,c.theme,'ai_assisted','参考了'+refAuth+'的风格',
-             JSON.stringify({content:c.score,rhythm:c.rh,emotion:c.em}),c.sug,
-             recentTime(ri(1,15)),recentTime(ri(1,15))], e=>e?rej(e):res()));
-        }
-        console.log('+ 诗词创作 ' + CREATIONS.length + ' 首');
+    /* 诗词创作 */
+    for (const c of CREATIONS) {
+      const refAuth=rand(['李白','杜甫','苏轼','王维']);
+      await client.query(
+        'INSERT INTO user_creations (user_id,title,content,genre,theme,creation_mode,ai_reference,score_data,modification_suggestions,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+        [uid,c.title,c.content,c.genre,c.theme,'ai_assisted','参考了'+refAuth+'的风格',
+         JSON.stringify({content:c.score,rhythm:c.rh,emotion:c.em}),c.sug,
+         recentTime(ri(1,15)),recentTime(ri(1,15))]);
+    }
+    console.log('+ 诗词创作 ' + CREATIONS.length + ' 首');
 
-        /* creation_stats */
-        const crows=await new Promise(r=>db.all('SELECT score_data FROM user_creations WHERE user_id=?',[uid],(e,rows)=>r(rows)));
-        const scScores=crows.map(r=>{try{const d=JSON.parse(r.score_data);return d&&d.content;}catch{return null;}});
-        const sc=scScores.filter(s=>s!=null&&s>0);
-        const total=sc.length;
-        const avgSc=total?Math.round(sc.reduce((a,b)=>a+b,0)/total):0;
-        const hiSc=total?Math.round(sc.reduce((a,b)=>a>b?a:b)):0;
-        const qual=sc.filter(s=>s>=60).length;
-        await new Promise(r=>db.run('INSERT OR REPLACE INTO creation_stats (user_id,total_creations,qualified_works,average_score,highest_score,last_creation_time) VALUES (?,?,?,?,?,?)',[uid,total,qual,avgSc,hiSc,now.toISOString()],r));
-        console.log('+ creation_stats: 总'+total+'篇 均分'+avgSc+' 最高'+hiSc);
+    /* creation_stats */
+    const { rows: crows } = await client.query('SELECT score_data FROM user_creations WHERE user_id=$1',[uid]);
+    const scScores=crows.map(r=>{try{const d=JSON.parse(r.score_data);return d&&d.content;}catch{return null;}});
+    const sc=scScores.filter(s=>s!=null&&s>0);
+    const total=sc.length;
+    const avgSc=total?Math.round(sc.reduce((a,b)=>a+b,0)/total):0;
+    const hiSc=total?Math.round(sc.reduce((a,b)=>a>b?a:b)):0;
+    const qual=sc.filter(s=>s>=60).length;
+    await client.query('INSERT INTO creation_stats (user_id,total_creations,qualified_works,average_score,highest_score,last_creation_time) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id) DO UPDATE SET total_creations=$2,qualified_works=$3,average_score=$4,highest_score=$5,last_creation_time=$6',[uid,total,qual,avgSc,hiSc,now.toISOString()]);
+    console.log('+ creation_stats: 总'+total+'篇 均分'+avgSc+' 最高'+hiSc);
 
-        /* 能力评估 */
-        const lrRows=await new Promise(r=>db.all('SELECT lr.*,p.dynasty FROM learning_records lr JOIN poems p ON lr.poem_id=p.id WHERE lr.user_id=?',[uid],(e,rows)=>r(rows)));
-        const recited=lrRows.filter(r=>r.recite_attempts>0);
-        const mem=recited.length?Math.round(recited.reduce((s,r)=>s+r.best_score,0)/recited.length):60;
-        const under=Math.min(100,Math.round(mem*0.88+ri(-5,8)));
-        const app=Math.min(100,Math.round(100-(lrRows.filter(r=>r.best_score<80).length/Math.max(lrRows.length,1))*40));
-        await new Promise(r=>db.run('INSERT OR REPLACE INTO ability_assessments (user_id,memory_score,understanding_score,application_score,creativity_score,last_updated) VALUES (?,?,?,?,?,?)',[uid,mem,under,app,Math.min(100,avgSc||60),now.toISOString()],r));
-        console.log('+ 能力评估: 记忆'+mem+' 理解'+under+' 应用'+app+' 创作'+Math.min(100,avgSc||60));
+    /* 能力评估 */
+    const { rows: lrRows } = await client.query('SELECT lr.*,p.dynasty FROM learning_records lr JOIN poems p ON lr.poem_id=p.id WHERE lr.user_id=$1',[uid]);
+    const recited=lrRows.filter(r=>r.recite_attempts>0);
+    const mem=recited.length?Math.round(recited.reduce((s,r)=>s+r.best_score,0)/recited.length):60;
+    const under=Math.min(100,Math.round(mem*0.88+ri(-5,8)));
+    const app=Math.min(100,Math.round(100-(lrRows.filter(r=>r.best_score<80).length/Math.max(lrRows.length,1))*40));
+    await client.query('INSERT INTO ability_assessments (user_id,memory_score,understanding_score,application_score,creativity_score,last_updated) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id) DO UPDATE SET memory_score=$2,understanding_score=$3,application_score=$4,creativity_score=$5,last_updated=$6',[uid,mem,under,app,Math.min(100,avgSc||60),now.toISOString()]);
+    console.log('+ 能力评估: 记忆'+mem+' 理解'+under+' 应用'+app+' 创作'+Math.min(100,avgSc||60));
 
-        /* 学习路径 */
-        await new Promise(r=>db.run('INSERT OR REPLACE INTO learning_paths (user_id,level,recommendations,current_focus,created_at,updated_at) VALUES (?,?,?,?,?,?)',[uid,'中级',JSON.stringify(['深化宋词鉴赏','加强背诵流利度','拓展近代诗词视野','提升创作评分']),'七言律诗与豪放词',now.toISOString(),now.toISOString()],r));
-        console.log('+ 学习路径');
+    /* 学习路径 */
+    await client.query('INSERT INTO learning_paths (user_id,level,recommendations,current_focus,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id) DO UPDATE SET level=$2,recommendations=$3,current_focus=$4,updated_at=$6',[uid,'中级',JSON.stringify(['深化宋词鉴赏','加强背诵流利度','拓展近代诗词视野','提升创作评分']),'七言律诗与豪放词',now.toISOString(),now.toISOString()]);
+    console.log('+ 学习路径');
 
-        /* 飞花令对战 */
-        const oppIdRows = await new Promise(r => db.all('SELECT id FROM users WHERE id!=? LIMIT 10', [uid], (e, rows) => r(rows)));
-        const oppIds = oppIdRows.map(r => r.id);
-        const kw=['月','花','春','风','山','水','云','雨','雪','柳','鸟','江','夜','秋','日'];
-        for (let i=0;i<20;i++) {
-          if (!oppIds.length) break;
-          const opp=rand(oppIds);
-          const win=Math.random()>0.42;
-          const rnd=ri(5,22);
-          const st=recentTime(ri(0,8));
-          await new Promise(r=>db.run('INSERT INTO feihua_battles (player1_id,player2_id,keyword,winner_id,loser_id,total_rounds,player1_throw_count,player2_throw_count,started_at,ended_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[uid,opp,rand(kw),win?uid:opp,win?opp:uid,rnd,ri(2,rnd),ri(2,rnd),st,new Date(new Date(st).getTime()+ri(60000,600000)).toISOString()],r));
-        }
-        console.log('+ 飞花令对战 20 场');
+    /* 飞花令对战 */
+    const { rows: oppIdRows } = await client.query('SELECT id FROM users WHERE id!=$1 LIMIT 10', [uid]);
+    const oppIds = oppIdRows.map(r => r.id);
+    const kw=['月','花','春','风','山','水','云','雨','雪','柳','鸟','江','夜','秋','日'];
+    for (let i=0;i<20;i++) {
+      if (!oppIds.length) break;
+      const opp=rand(oppIds);
+      const win=Math.random()>0.42;
+      const rnd=ri(5,22);
+      const st=recentTime(ri(0,8));
+      await client.query('INSERT INTO feihua_battles (player1_id,player2_id,keyword,winner_id,loser_id,total_rounds,player1_throw_count,player2_throw_count,started_at,ended_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[uid,opp,rand(kw),win?uid:opp,win?opp:uid,rnd,ri(2,rnd),ri(2,rnd),st,new Date(new Date(st).getTime()+ri(60000,600000)).toISOString()]);
+    }
+    console.log('+ 飞花令对战 20 场');
 
-        /* 飞花令最高记录 */
-        for (const k of ['月','花','春','风','山','水']) {
-          const mr=ri(10,28),tb=ri(8,25);
-          await new Promise(r=>db.run('INSERT OR REPLACE INTO feihua_high_records (user_id,keyword,max_rounds,total_battles,wins,losses,updated_at) VALUES (?,?,?,?,?,?,?)',[uid,k,mr,tb,ri(3,tb),tb-ri(3,tb),now.toISOString()],r));
-        }
-        console.log('+ 飞花令最高记录 6 关键字');
+    /* 飞花令最高记录 */
+    for (const k of ['月','花','春','风','山','水']) {
+      const mr=ri(10,28),tb=ri(8,25);
+      await client.query('INSERT INTO feihua_high_records (user_id,keyword,max_rounds,total_battles,wins,losses,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (user_id,keyword) DO UPDATE SET max_rounds=$3,total_battles=$4,wins=$5,losses=$6,updated_at=$7',[uid,k,mr,tb,ri(3,tb),tb-ri(3,tb),now.toISOString()]);
+    }
+    console.log('+ 飞花令最高记录 6 关键字');
 
-        /* 闯关对战 */
-        for (let i=0;i<15;i++) {
-          if (!oppIds.length) break;
-          const opp=rand(oppIds);
-          const win=Math.random()>0.4;
-          const tot=ri(5,10);
-          const st=recentTime(ri(0,8));
-          await new Promise(r=>db.run('INSERT INTO challenge_battles (player1_id,player2_id,winner_id,loser_id,total_questions,player1_correct,player2_correct,total_rounds,started_at,ended_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[uid,opp,win?uid:opp,win?opp:uid,tot,win?ri(4,tot):ri(1,tot-1),win?ri(1,tot-1):ri(4,tot),tot,st,new Date(new Date(st).getTime()+ri(120000,300000)).toISOString()],r));
-        }
-        console.log('+ 闯关对战 15 场');
+    /* 闯关对战 */
+    for (let i=0;i<15;i++) {
+      if (!oppIds.length) break;
+      const opp=rand(oppIds);
+      const win=Math.random()>0.4;
+      const tot=ri(5,10);
+      const st=recentTime(ri(0,8));
+      await client.query('INSERT INTO challenge_battles (player1_id,player2_id,winner_id,loser_id,total_questions,player1_correct,player2_correct,total_rounds,started_at,ended_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[uid,opp,win?uid:opp,win?opp:uid,tot,win?ri(4,tot):ri(1,tot-1),win?ri(1,tot-1):ri(4,tot),tot,st,new Date(new Date(st).getTime()+ri(120000,300000)).toISOString()]);
+    }
+    console.log('+ 闯关对战 15 场');
 
-        /* 诗词创作挑战 */
-        const themes=['春天','送别','山水','思乡','咏物'];
-        for (let i=0;i<3;i++) {
-          const kw2=themes[i]==='春天'?'花':themes[i]==='送别'?'柳':null;
-          await new Promise(r=>db.run('INSERT INTO poetry_challenges (user_id,theme,keyword,generated_poem,user_score,ai_score,status,created_at) VALUES (?,?,?,?,?,?,?,?)',[uid,themes[i],kw2,'清风拂面柳丝长，明月照我还家乡。\n春光无限人陶醉，不知今夕在何方。',ri(72,92),ri(82,96),'completed',recentTime(ri(3,12))],r));
-        }
-        console.log('+ 诗词创作挑战 3 次');
+    /* 诗词创作挑战 */
+    const themes=['春天','送别','山水','思乡','咏物'];
+    for (let i=0;i<3;i++) {
+      const kw2=themes[i]==='春天'?'花':themes[i]==='送别'?'柳':null;
+      await client.query('INSERT INTO poetry_challenges (user_id,theme,keyword,generated_poem,user_score,ai_score,status,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',[uid,themes[i],kw2,'清风拂面柳丝长，明月照我还家乡。\n春光无限人陶醉，不知今夕在何方。',ri(72,92),ri(82,96),'completed',recentTime(ri(3,12))]);
+    }
+    console.log('+ 诗词创作挑战 3 次');
 
-        db.run('COMMIT', e => {
-          if (e) { db.run('ROLLBACK'); return reject(e); }
-          console.log('\n========================================');
-          console.log('  Studentdemo 演示数据填充完成！');
-          console.log('  账号: Studentdemo  密码: 123456');
-          console.log('========================================');
-          console.log('  学习诗词: ' + learnP.length + '首 (唐'+tang.length+'/宋'+song.length+'/清'+qing.length+'/近代'+modern.length+')');
-          console.log('  闯关最高: ' + topLvl + ' 关');
-          console.log('  每日打卡: 7天（3月28-4月3日）');
-          console.log('  诗词创作: ' + CREATIONS.length + '首 (均分' + avgSc + ' 最高' + hiSc + ')');
-          console.log('  能力评估: 记忆/理解/应用/创作 四维');
-          console.log('========================================');
-          resolve();
-        });
-      } catch(err) {
-        db.run('ROLLBACK');
-        reject(err);
-      }
-    });
-  });
+    await client.query('COMMIT');
+    console.log('\n========================================');
+    console.log('  Studentdemo 演示数据填充完成！');
+    console.log('  账号: Studentdemo  密码: 123456');
+    console.log('========================================');
+    console.log('  学习诗词: ' + learnP.length + '首 (唐'+tang.length+'/宋'+song.length+'/清'+qing.length+'/近代'+modern.length+')');
+    console.log('  闯关最高: ' + topLvl + ' 关');
+    console.log('  每日打卡: 7天（3月28-4月3日）');
+    console.log('  诗词创作: ' + CREATIONS.length + '首 (均分' + avgSc + ' 最高' + hiSc + ')');
+    console.log('  能力评估: 记忆/理解/应用/创作 四维');
+    console.log('========================================');
+  } catch(err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 main().then(()=>process.exit(0)).catch(e=>{console.error(e);process.exit(1);});

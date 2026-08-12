@@ -163,7 +163,7 @@
 </template>
 
 <script>
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 
 export default {
   name: 'InspirationPanel',
@@ -269,8 +269,19 @@ export default {
       if (loading) {
         typewriterText.value = '正在构思创意关键词...';
         showTypewriter.value = true;
+      } else {
+        showTypewriter.value = false;
       }
     };
+
+    // 监听isLoading变化
+    watch(
+      () => props.isLoading,
+      (newValue) => {
+        setLoading(newValue);
+      },
+      { immediate: true }
+    );
 
     const goToNext = () => {
       emit('next', {

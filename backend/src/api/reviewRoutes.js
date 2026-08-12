@@ -1,28 +1,22 @@
-// 复习计划API路由
 const express = require('express');
 const router = express.Router();
 const authenticateToken = require('../middleware/auth');
 const reviewService = require('../services/reviewService');
+const db = require('../utils/db');
 
-// 获取今日复习任务
 router.get('/today', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
     const tasks = await reviewService.getTodayReviewTasks(userId);
-    
-    // 填充诗词详情
-    const { db } = require('../utils/db');
+
     const enrichedTasks = await Promise.all(tasks.map(async (task) => {
-      return new Promise((resolve) => {
-        db.get('SELECT * FROM poems WHERE id = ?', [task.poem_id], (err, poem) => {
-          resolve({
-            ...task,
-            poem: poem || null
-          });
-        });
-      });
+      const poem = await db.get('SELECT * FROM poems WHERE id = $1', [task.poem_id]);
+      return {
+        ...task,
+        poem: poem || null
+      };
     }));
-    
+
     res.json({ success: true, data: enrichedTasks });
   } catch (error) {
     console.error('获取复习任务失败:', error);
@@ -30,7 +24,6 @@ router.get('/today', authenticateToken, async (req, res) => {
   }
 });
 
-// 获取复习统计
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
@@ -43,7 +36,6 @@ router.get('/stats', authenticateToken, async (req, res) => {
   }
 });
 
-// 获取未来复习计划
 router.get('/plan', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
@@ -56,7 +48,6 @@ router.get('/plan', authenticateToken, async (req, res) => {
   }
 });
 
-// 完成复习
 router.post('/complete', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
@@ -69,7 +60,6 @@ router.post('/complete', authenticateToken, async (req, res) => {
   }
 });
 
-// 分类错题
 router.post('/categorize', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
@@ -82,7 +72,6 @@ router.post('/categorize', authenticateToken, async (req, res) => {
   }
 });
 
-// 获取错题分类统计
 router.get('/categories', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;

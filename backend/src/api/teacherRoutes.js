@@ -1,75 +1,55 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 const config = require('../config/config');
+const knowledgeDiagnosis = require('../services/knowledgeDiagnosisService');
+const knowledgeStateService = require('../services/knowledgeStateService');
 const router = express.Router();
 
-// 教师注册
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   const { username, password } = req.body;
 
-  // 检查用户名是否已存在
-  db.get('SELECT * FROM teachers WHERE username = ?', [username], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: '数据库错误' });
-    }
+  try {
+    const row = await db.get('SELECT * FROM teachers WHERE username = $1', [username]);
     if (row) {
       return res.status(400).json({ error: '用户名已存在' });
     }
 
-    // 加密密码
-    bcrypt.hash(password, 10, (err, hash) => {
-      if (err) {
-        return res.status(500).json({ error: '密码加密失败' });
-      }
-
-      // 插入教师数据
-      db.run('INSERT INTO teachers (username, password) VALUES (?, ?)', [username, hash], (err) => {
-        if (err) {
-          return res.status(500).json({ error: '注册失败' });
-        }
-        res.status(201).json({ message: '注册成功' });
-      });
-    });
-  });
+    const hash = await bcrypt.hash(password, 10);
+    await db.run('INSERT INTO teachers (username, password) VALUES ($1, $2)', [username, hash]);
+    res.status(201).json({ message: '注册成功' });
+  } catch (err) {
+    return res.status(500).json({ error: '注册失败' });
+  }
 });
 
-// 教师登录
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { username, password } = req.body;
 
-  // 查找教师
-  db.get('SELECT * FROM teachers WHERE username = ?', [username], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: '数据库错误' });
-    }
+  try {
+    const row = await db.get('SELECT * FROM teachers WHERE username = $1', [username]);
     if (!row) {
       return res.status(401).json({ error: '用户名或密码错误' });
     }
 
-    // 验证密码
-    bcrypt.compare(password, row.password, (err, result) => {
-      if (err) {
-        return res.status(500).json({ error: '密码验证失败' });
-      }
-      if (!result) {
-        return res.status(401).json({ error: '用户名或密码错误' });
-      }
+    const result = await bcrypt.compare(password, row.password);
+    if (!result) {
+      return res.status(401).json({ error: '用户名或密码错误' });
+    }
 
-      // 生成JWT Token
-      const token = jwt.sign(
-        { id: row.id, username: row.username, role: 'teacher' },
-        config.jwt.secret,
-        { expiresIn: config.jwt.expiresIn }
-      );
+    const token = jwt.sign(
+      { id: row.id, username: row.username, role: 'teacher' },
+      config.jwt.secret,
+      { expiresIn: config.jwt.expiresIn }
+    );
 
-      res.json({ token, teacher: { id: row.id, username: row.username } });
-    });
-  });
+    res.json({ token, teacher: { id: row.id, username: row.username } });
+  } catch (err) {
+    return res.status(500).json({ error: '登录失败' });
+  }
 });
 
-// 教师认证中间件
 const authenticateTeacher = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) {
@@ -88,9 +68,8 @@ const authenticateTeacher = (req, res, next) => {
   });
 };
 
-/** feihua_battles.ended_at：毫秒时间戳字符串（Date.now）或 ISO8601（socket 保存） */
 function feihuaEndedAtUnixExpr(columnRef) {
-  return `(CASE WHEN instr(${columnRef},'-')>0 OR instr(${columnRef},'T')>0 THEN CAST(strftime('%s', ${columnRef}) AS INTEGER) ELSE CAST(${columnRef} AS INTEGER) / 1000 END)`;
+  return `(CASE WHEN POSITION('-' IN ${columnRef})>0 OR POSITION('T' IN ${columnRef})>0 THEN EXTRACT(EPOCH FROM ${columnRef}::timestamp)::INTEGER ELSE CAST(${columnRef} AS INTEGER) / 1000 END)`;
 }
 
 function normalizeFeihuaEndedAtForClient(raw) {
@@ -104,41 +83,38 @@ function normalizeFeihuaEndedAtForClient(raw) {
   return s;
 }
 
-// 获取学生学习统计数据
-router.get('/dashboard', authenticateTeacher, (req, res) => {
-  db.all('SELECT * FROM v_student_learning_stats ORDER BY poem_count DESC', (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: '数据库错误' });
-    }
+router.get('/dashboard', authenticateTeacher, async (req, res) => {
+  try {
+    const rows = await db.all('SELECT * FROM v_student_learning_stats ORDER BY poem_count DESC');
     res.json(rows);
-  });
+  } catch (err) {
+    return res.status(500).json({ error: '数据库错误' });
+  }
 });
 
-// 获取学生详细学习记录
-router.get('/student/:id/detail', authenticateTeacher, (req, res) => {
+router.get('/student/:id/detail', authenticateTeacher, async (req, res) => {
   const { id } = req.params;
 
-  db.all(`
-    SELECT 
-      lr.*, 
-      p.title, 
-      p.author, 
-      p.dynasty,
-      u.username as student_name
-    FROM learning_records lr
-    LEFT JOIN poems p ON lr.poem_id = p.id
-    LEFT JOIN users u ON lr.user_id = u.id
-    WHERE lr.user_id = ?
-    ORDER BY lr.last_view_time DESC
-  `, [id], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: '数据库错误' });
-    }
+  try {
+    const rows = await db.all(`
+      SELECT
+        lr.*,
+        p.title,
+        p.author,
+        p.dynasty,
+        u.username as student_name
+      FROM learning_records lr
+      LEFT JOIN poems p ON lr.poem_id = p.id
+      LEFT JOIN users u ON lr.user_id = u.id
+      WHERE lr.user_id = $1
+      ORDER BY lr.last_view_time DESC
+    `, [id]);
     res.json(rows);
-  });
+  } catch (err) {
+    return res.status(500).json({ error: '数据库错误' });
+  }
 });
 
-// 硅基流动 API 封装
 const axios = require('axios');
 
 const siliconFlowApi = axios.create({
@@ -150,7 +126,6 @@ const siliconFlowApi = axios.create({
   timeout: 30000
 });
 
-// 错误处理和重试逻辑
 siliconFlowApi.interceptors.response.use(
   response => response,
   async error => {
@@ -165,12 +140,10 @@ siliconFlowApi.interceptors.response.use(
   }
 );
 
-// 数据库扩展 - 新增表和触发器
-const initTeacherTables = () => {
-  // 教师备注表
-  db.run(`
+const initTeacherTables = async () => {
+  await db.run(`
     CREATE TABLE IF NOT EXISTS teacher_notes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       teacher_id INTEGER,
       student_id INTEGER,
       content TEXT,
@@ -180,11 +153,10 @@ const initTeacherTables = () => {
       FOREIGN KEY (student_id) REFERENCES users(id)
     )
   `);
-  
-  // 学生标签表
-  db.run(`
+
+  await db.run(`
     CREATE TABLE IF NOT EXISTS student_tags (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       student_id INTEGER,
       tag_name TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -193,24 +165,20 @@ const initTeacherTables = () => {
   `);
 };
 
-// 导出初始化函数
 module.exports.initTeacherTables = initTeacherTables;
 
-// 新增 - 看板聚合数据接口
 router.get('/dashboard/aggregate', authenticateTeacher, async (req, res) => {
   try {
     const { timeRange, classId } = req.query;
-    
-    // 调用硅基流动统计 API
+
     const response = await siliconFlowApi.post('/stats/aggregate', {
       timeRange,
       classId
     });
-    
+
     res.json(response.data);
   } catch (error) {
     console.error('获取聚合数据失败:', error);
-    // 返回模拟数据
     res.json({
       todayActiveStudents: 45,
       yesterdayActiveStudents: 40,
@@ -268,16 +236,12 @@ router.get('/dashboard/aggregate', authenticateTeacher, async (req, res) => {
   }
 });
 
-// 新增 - 待关注学生接口
 router.get('/students/at-risk', authenticateTeacher, async (req, res) => {
   try {
-    // 调用硅基流动学生行为分析 API
     const response = await siliconFlowApi.post('/analysis/student-risk', {});
-    
     res.json(response.data);
   } catch (error) {
     console.error('获取待关注学生失败:', error);
-    // 返回模拟数据
     res.json([
       { id: 1, name: '学生1', riskTag: '连续7天未学习', lastStudyTime: '2024-01-01' },
       { id: 2, name: '学生2', riskTag: '学习时长周环比下降30%以上', lastStudyTime: '2024-01-05' },
@@ -286,7 +250,6 @@ router.get('/students/at-risk', authenticateTeacher, async (req, res) => {
   }
 });
 
-// 新增 - 数据导出接口
 const XLSX = require('xlsx');
 
 router.post('/export', authenticateTeacher, async (req, res) => {
@@ -294,24 +257,19 @@ router.post('/export', authenticateTeacher, async (req, res) => {
     const { format = 'xlsx', data } = req.body;
 
     if (format === 'xlsx') {
-      // 准备Excel数据
       let excelData = [];
 
-      // 根据数据类型选择不同的数据结构
       if (data && data.type === 'game') {
-        // 对战数据导出
         const gameData = data.gameData || {};
         const sheetData = [];
 
-        // 添加对战统计概览
         sheetData.push({ 类型: '对战统计数据' });
         sheetData.push({ 统计项: '总对战数', 数值: gameData.stats?.totalGames || 0 });
         sheetData.push({ 统计项: '参与人数', 数值: gameData.stats?.activePlayers || 0 });
         sheetData.push({ 统计项: '平均时长(秒)', 数值: gameData.stats?.avgDuration || 0 });
         sheetData.push({ 统计项: '最高胜场', 数值: gameData.stats?.mostWins || 0 });
-        sheetData.push({}); // 空行
+        sheetData.push({});
 
-        // 添加胜率排行
         sheetData.push({ 类型: '胜率排行' });
         sheetData.push({ 排名: '', 用户名: '', 总场次: '', 胜场: '', 胜率: '' });
         if (gameData.topPlayers && gameData.topPlayers.length > 0) {
@@ -325,9 +283,8 @@ router.post('/export', authenticateTeacher, async (req, res) => {
             });
           });
         }
-        sheetData.push({}); // 空行
+        sheetData.push({});
 
-        // 添加最近对战记录
         sheetData.push({ 类型: '最近对战记录' });
         sheetData.push({ 时间: '', 玩家1: '', 玩家2: '', 胜者: '', 回合数: '' });
         if (gameData.recentGames && gameData.recentGames.length > 0) {
@@ -344,9 +301,7 @@ router.post('/export', authenticateTeacher, async (req, res) => {
 
         excelData = sheetData;
       } else {
-        // 排名数据导出（原有功能）
         if (data && data.rankingTab === 'challenge' && data.challengeStudents && data.challengeStudents.length > 0) {
-          // 闯关排名数据
           excelData = data.challengeStudents.map((student, index) => ({
             排名: index + 1,
             用户名: student.username || '',
@@ -357,7 +312,6 @@ router.post('/export', authenticateTeacher, async (req, res) => {
             最后闯关时间: student.last_challenge_time ? new Date(student.last_challenge_time).toLocaleString('zh-CN') : '-'
           }));
         } else if (data && data.students && data.students.length > 0) {
-          // 学习排名数据
           excelData = data.students.map((student, index) => ({
             排名: index + 1,
             用户名: student.username || '',
@@ -366,23 +320,17 @@ router.post('/export', authenticateTeacher, async (req, res) => {
             最近学习时间: student.last_study_time ? new Date(student.last_study_time).toLocaleString('zh-CN') : '-'
           }));
         } else {
-          // 如果没有传入数据，从数据库获取
-          const rankings = await new Promise((resolve, reject) => {
-            db.all(`
-              SELECT u.username, u.class_id, COALESCE(ucp.highest_level, 0) as highest_level,
-                     COALESCE(ucp.total_ai_help_used, 0) as ai_help_count,
-                     COALESCE(ucp.total_errors, 0) as error_count,
-                     ucp.last_challenge_time
-              FROM users u
-              LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
-              WHERE u.class_id IS NOT NULL
-              ORDER BY highest_level DESC
-              LIMIT 100
-            `, (err, rows) => {
-              if (err) reject(err);
-              else resolve(rows || []);
-            });
-          });
+          const rankings = await db.all(`
+            SELECT u.username, u.class_id, COALESCE(ucp.highest_level, 0) as highest_level,
+                   COALESCE(ucp.total_ai_help_used, 0) as ai_help_count,
+                   COALESCE(ucp.total_errors, 0) as error_count,
+                   ucp.last_challenge_time
+            FROM users u
+            LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
+            WHERE u.class_id IS NOT NULL
+            ORDER BY highest_level DESC
+            LIMIT 100
+          `);
 
           excelData = rankings.map((student, index) => ({
             排名: index + 1,
@@ -396,33 +344,25 @@ router.post('/export', authenticateTeacher, async (req, res) => {
         }
       }
 
-      // 创建工作簿
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(excelData);
 
-      // 设置列宽
       ws['!cols'] = [
-        { wch: 8 },   // 排名
-        { wch: 15 },  // 用户名
-        { wch: 10 },  // 班级
-        { wch: 15 },  // 最高通关关卡/学习诗词数量/总场次
-        { wch: 12 },  // AI帮助次数/胜场
-        { wch: 10 },  // 错题数/胜率
-        { wch: 20 }   // 时间
+        { wch: 8 },
+        { wch: 15 },
+        { wch: 10 },
+        { wch: 15 },
+        { wch: 12 },
+        { wch: 10 },
+        { wch: 20 }
       ];
 
-      // 添加工作表
       XLSX.utils.book_append_sheet(wb, ws, '导出数据');
-
-      // 生成Excel文件
       const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' });
 
-      // 设置响应头
       const fileName = `古诗词学习数据_${new Date().toISOString().split('T')[0]}.xlsx`;
       res.setHeader('Content-Disposition', `attachment; filename=${encodeURIComponent(fileName)}`);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-
-      // 发送Excel文件
       res.send(excelBuffer);
     } else {
       res.status(400).json({ error: '不支持的导出格式' });
@@ -433,245 +373,216 @@ router.post('/export', authenticateTeacher, async (req, res) => {
   }
 });
 
-// 新增 - 学生个人分析接口
 router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const analysis = await new Promise((resolve, reject) => {
-      db.serialize(() => {
-        const result = {
-          avatar: '',
-          tags: [],
-          level: 1,
-          levelName: '童生',
-          levelProgress: 0,
-          learningTrend: [],
-          preferenceComparison: {
-            student: { dynasty: [], theme: [] },
-            school: { dynasty: [], theme: [] }
-          },
-          timeDistribution: [],
-          bestStudyTime: '晚上(18-24点)',
-          memoryCurve: [],
-          reviewSuggestions: [],
-          abilityAnalysis: {
-            memoryEfficiency: 0,
-            understandingDepth: 0,
-            reviewFrequency: 0,
-            expansionInterest: 0,
-            comment: ''
-          },
-          recommendedPoems: []
-        };
 
-        db.get('SELECT username FROM users WHERE id = ?', [id], (err, user) => {
-          if (err) return reject(err);
-          if (user) {
-            result.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=8b4513&color=fff`;
-          }
+    const result = {
+      avatar: '',
+      tags: [],
+      level: 1,
+      levelName: '童生',
+      levelProgress: 0,
+      learningTrend: [],
+      preferenceComparison: {
+        student: { dynasty: [], theme: [] },
+        school: { dynasty: [], theme: [] }
+      },
+      timeDistribution: [],
+      bestStudyTime: '晚上(18-24点)',
+      memoryCurve: [],
+      reviewSuggestions: [],
+      abilityAnalysis: {
+        memoryEfficiency: 0,
+        understandingDepth: 0,
+        reviewFrequency: 0,
+        expansionInterest: 0,
+        comment: ''
+      },
+      recommendedPoems: []
+    };
 
-          db.get('SELECT * FROM user_challenge_progress WHERE user_id = ?', [id], (err, progress) => {
-            if (err) return reject(err);
-            
-            if (progress) {
-              result.level = Math.floor((progress.highest_level || 0) / 10) + 1;
-              result.levelProgress = ((progress.highest_level || 0) % 10) * 10;
-              
-              const levelNames = ['童生', '秀才', '举人', '进士', '探花', '榜眼', '状元', '翰林', '大学士', '文豪'];
-              result.levelName = levelNames[Math.min(result.level - 1, levelNames.length - 1)];
-              
-              const tags = [];
-              if (progress.highest_level >= 100) tags.push('闯关达人');
-              if (progress.highest_level >= 50) tags.push('勤奋之星');
-              if ((progress.total_ai_help_used || 0) < 5) tags.push('独立思考');
-              result.tags = tags.length > 0 ? tags : ['诗词爱好者'];
-            } else {
-              result.tags = ['诗词爱好者'];
-            }
+    const user = await db.get('SELECT username FROM users WHERE id = $1', [id]);
+    if (user) {
+      result.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=8b4513&color=fff`;
+    }
 
-            const days = [];
-            const today = new Date();
-            for (let i = 6; i >= 0; i--) {
-              const date = new Date(today);
-              date.setDate(today.getDate() - i);
-              days.push(date.toISOString().split('T')[0]);
-            }
+    const progress = await db.get('SELECT * FROM user_challenge_progress WHERE user_id = $1', [id]);
 
-            db.all(
-              `SELECT DATE(answered_at) as date, 
-                      COUNT(*) as count,
-                      SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
-               FROM user_challenge_records 
-               WHERE user_id = ? AND DATE(answered_at) >= ?
-               GROUP BY DATE(answered_at)
-               ORDER BY date`,
-              [id, days[0]],
-              (err, trendRows) => {
-                if (err) return reject(err);
+    if (progress) {
+      result.level = Math.floor((progress.highest_level || 0) / 10) + 1;
+      result.levelProgress = ((progress.highest_level || 0) % 10) * 10;
 
-                result.learningTrend = days.map(day => {
-                  const found = trendRows.find(r => r.date === day);
-                  return {
-                    date: day,
-                    duration: found ? found.count * 30 : 0,
-                    poemCount: found ? found.correct : 0
-                  };
-                });
+      const levelNames = ['童生', '秀才', '举人', '进士', '探花', '榜眼', '状元', '翰林', '大学士', '文豪'];
+      result.levelName = levelNames[Math.min(result.level - 1, levelNames.length - 1)];
 
-                db.all(
-                  `SELECT p.dynasty, COUNT(*) as count
-                   FROM learning_records lr
-                   JOIN poems p ON lr.poem_id = p.id
-                   WHERE lr.user_id = ?
-                   GROUP BY p.dynasty
-                   ORDER BY count DESC
-                   LIMIT 5`,
-                  [id],
-                  (err, dynastyRows) => {
-                    if (err) return reject(err);
+      const tags = [];
+      if (progress.highest_level >= 100) tags.push('闯关达人');
+      if (progress.highest_level >= 50) tags.push('勤奋之星');
+      if ((progress.total_ai_help_used || 0) < 5) tags.push('独立思考');
+      result.tags = tags.length > 0 ? tags : ['诗词爱好者'];
+    } else {
+      result.tags = ['诗词爱好者'];
+    }
 
-                    const totalDynasty = dynastyRows.reduce((sum, r) => sum + r.count, 0) || 1;
-                    result.preferenceComparison.student.dynasty = dynastyRows.map(r => ({
-                      name: r.dynasty || '未知',
-                      value: Math.round((r.count / totalDynasty) * 100)
-                    }));
+    const days = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      days.push(date.toISOString().split('T')[0]);
+    }
 
-                    db.all(
-                      `SELECT strftime('%H', answered_at) as hour, COUNT(*) as count
-                       FROM user_challenge_records
-                       WHERE user_id = ?
-                       GROUP BY strftime('%H', answered_at)
-                       ORDER BY count DESC`,
-                      [id],
-                      (err, hourRows) => {
-                        if (err) return reject(err);
+    const trendRows = await db.all(
+      `SELECT (answered_at)::date as date,
+              COUNT(*) as count,
+              SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
+       FROM user_challenge_records
+       WHERE user_id = $1 AND (answered_at)::date >= $2
+       GROUP BY (answered_at)::date
+       ORDER BY date`,
+      [id, days[0]]
+    );
 
-                        const timeSlots = {
-                          '凌晨(0-6点)': 0,
-                          '上午(6-12点)': 0,
-                          '下午(12-18点)': 0,
-                          '晚上(18-24点)': 0
-                        };
-
-                        hourRows.forEach(r => {
-                          const hour = parseInt(r.hour);
-                          if (hour >= 0 && hour < 6) timeSlots['凌晨(0-6点)'] += r.count;
-                          else if (hour >= 6 && hour < 12) timeSlots['上午(6-12点)'] += r.count;
-                          else if (hour >= 12 && hour < 18) timeSlots['下午(12-18点)'] += r.count;
-                          else timeSlots['晚上(18-24点)'] += r.count;
-                        });
-
-                        result.timeDistribution = Object.entries(timeSlots).map(([period, value]) => ({
-                          period,
-                          value
-                        }));
-
-                        const maxTimeSlot = Object.entries(timeSlots).sort((a, b) => b[1] - a[1])[0];
-                        result.bestStudyTime = maxTimeSlot ? maxTimeSlot[0] : '晚上(18-24点)';
-
-                        const memoryCurve = [];
-                        for (let day = 1; day <= 7; day++) {
-                          memoryCurve.push({
-                            day,
-                            retention: Math.max(35, 100 - (day - 1) * 12 - Math.floor(Math.random() * 8))
-                          });
-                        }
-                        result.memoryCurve = memoryCurve;
-
-                        db.all(
-                          `SELECT p.id, p.title, p.author
-                           FROM wrong_questions wq
-                           JOIN poems p ON wq.title = p.title
-                           WHERE wq.user_id = ?
-                           ORDER BY wq.last_wrong_time DESC
-                           LIMIT 3`,
-                          [id.toString()],
-                          (err, wrongRows) => {
-                            if (err) return reject(err);
-
-                            const tomorrow = new Date();
-                            tomorrow.setDate(tomorrow.getDate() + 1);
-                            
-                            result.reviewSuggestions = (wrongRows.length > 0 ? wrongRows : [
-                              { id: 1, title: '静夜思', author: '李白' },
-                              { id: 2, title: '春晓', author: '孟浩然' }
-                            ]).map((r, i) => {
-                              const reviewDate = new Date(tomorrow);
-                              reviewDate.setDate(tomorrow.getDate() + i);
-                              return {
-                                poemId: r.id,
-                                title: r.title,
-                                author: r.author,
-                                bestReviewTime: `${reviewDate.toISOString().split('T')[0]} 19:00`
-                              };
-                            });
-
-                            db.get(
-                              `SELECT 
-                                AVG(CASE WHEN is_correct = 1 THEN 100 ELSE 0 END) as correct_rate,
-                                COUNT(DISTINCT DATE(answered_at)) as study_days,
-                                COUNT(*) as total_answers
-                               FROM user_challenge_records
-                               WHERE user_id = ?`,
-                              [id],
-                              (err, abilityRow) => {
-                                if (err) return reject(err);
-
-                                const correctRate = abilityRow?.correct_rate || 0;
-                                const studyDays = abilityRow?.study_days || 0;
-                                const totalAnswers = abilityRow?.total_answers || 0;
-
-                                result.abilityAnalysis = {
-                                  memoryEfficiency: Math.min(100, Math.round(correctRate * 0.8 + Math.random() * 20)),
-                                  understandingDepth: Math.min(100, Math.round(correctRate * 0.7 + studyDays * 2)),
-                                  reviewFrequency: Math.min(100, Math.round(studyDays * 10 + Math.random() * 20)),
-                                  expansionInterest: Math.min(100, Math.round(totalAnswers * 0.5 + Math.random() * 30)),
-                                  comment: generateAbilityComment(correctRate, studyDays, totalAnswers)
-                                };
-
-                                db.all(
-                                  `SELECT id, title, author FROM poems 
-                                   WHERE id NOT IN (SELECT poem_id FROM learning_records WHERE user_id = ?)
-                                   ORDER BY RANDOM()
-                                   LIMIT 5`,
-                                  [id],
-                                  (err, poemRows) => {
-                                    if (err) return reject(err);
-
-                                    result.recommendedPoems = (poemRows.length > 0 ? poemRows : [
-                                      { id: 1, title: '望天门山', author: '李白' },
-                                      { id: 2, title: '黄鹤楼送孟浩然之广陵', author: '李白' },
-                                      { id: 3, title: '山居秋暝', author: '王维' },
-                                      { id: 4, title: '登高', author: '杜甫' },
-                                      { id: 5, title: '钱塘湖春行', author: '白居易' }
-                                    ]).map(p => ({
-                                      id: p.id,
-                                      title: p.title,
-                                      author: p.author,
-                                      reason: '适合您当前学习阶段',
-                                      matchScore: 75 + Math.floor(Math.random() * 25)
-                                    }));
-
-                                    resolve(result);
-                                  }
-                                );
-                              }
-                            );
-                          }
-                        );
-                      }
-                    );
-                  }
-                );
-              }
-            );
-          });
-        });
-      });
+    result.learningTrend = days.map(day => {
+      const found = trendRows.find(r => r.date === day);
+      return {
+        date: day,
+        duration: found ? found.count * 30 : 0,
+        poemCount: found ? found.correct : 0
+      };
     });
 
-    res.json(analysis);
+    const dynastyRows = await db.all(
+      `SELECT p.dynasty, COUNT(*) as count
+       FROM learning_records lr
+       JOIN poems p ON lr.poem_id = p.id
+       WHERE lr.user_id = $1
+       GROUP BY p.dynasty
+       ORDER BY count DESC
+       LIMIT 5`,
+      [id]
+    );
+
+    const totalDynasty = dynastyRows.reduce((sum, r) => sum + r.count, 0) || 1;
+    result.preferenceComparison.student.dynasty = dynastyRows.map(r => ({
+      name: r.dynasty || '未知',
+      value: Math.round((r.count / totalDynasty) * 100)
+    }));
+
+    const hourRows = await db.all(
+      `SELECT EXTRACT(HOUR FROM answered_at)::INTEGER as hour, COUNT(*) as count
+       FROM user_challenge_records
+       WHERE user_id = $1
+       GROUP BY EXTRACT(HOUR FROM answered_at)
+       ORDER BY count DESC`,
+      [id]
+    );
+
+    const timeSlots = {
+      '凌晨(0-6点)': 0,
+      '上午(6-12点)': 0,
+      '下午(12-18点)': 0,
+      '晚上(18-24点)': 0
+    };
+
+    hourRows.forEach(r => {
+      const hour = parseInt(r.hour);
+      if (hour >= 0 && hour < 6) timeSlots['凌晨(0-6点)'] += r.count;
+      else if (hour >= 6 && hour < 12) timeSlots['上午(6-12点)'] += r.count;
+      else if (hour >= 12 && hour < 18) timeSlots['下午(12-18点)'] += r.count;
+      else timeSlots['晚上(18-24点)'] += r.count;
+    });
+
+    result.timeDistribution = Object.entries(timeSlots).map(([period, value]) => ({
+      period,
+      value
+    }));
+
+    const maxTimeSlot = Object.entries(timeSlots).sort((a, b) => b[1] - a[1])[0];
+    result.bestStudyTime = maxTimeSlot ? maxTimeSlot[0] : '晚上(18-24点)';
+
+    const memoryCurve = [];
+    for (let day = 1; day <= 7; day++) {
+      memoryCurve.push({
+        day,
+        retention: Math.max(35, 100 - (day - 1) * 12 - Math.floor(Math.random() * 8))
+      });
+    }
+    result.memoryCurve = memoryCurve;
+
+    const wrongRows = await db.all(
+      `SELECT p.id, p.title, p.author
+       FROM wrong_questions wq
+       JOIN poems p ON wq.title = p.title
+       WHERE wq.user_id = $1
+       ORDER BY wq.last_wrong_time DESC
+       LIMIT 3`,
+      [id.toString()]
+    );
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    result.reviewSuggestions = (wrongRows.length > 0 ? wrongRows : [
+      { id: 1, title: '静夜思', author: '李白' },
+      { id: 2, title: '春晓', author: '孟浩然' }
+    ]).map((r, i) => {
+      const reviewDate = new Date(tomorrow);
+      reviewDate.setDate(tomorrow.getDate() + i);
+      return {
+        poemId: r.id,
+        title: r.title,
+        author: r.author,
+        bestReviewTime: `${reviewDate.toISOString().split('T')[0]} 19:00`
+      };
+    });
+
+    const abilityRow = await db.get(
+      `SELECT
+        AVG(CASE WHEN is_correct = 1 THEN 100 ELSE 0 END) as correct_rate,
+        COUNT(DISTINCT (answered_at)::date) as study_days,
+        COUNT(*) as total_answers
+       FROM user_challenge_records
+       WHERE user_id = $1`,
+      [id]
+    );
+
+    const correctRate = abilityRow?.correct_rate || 0;
+    const studyDays = abilityRow?.study_days || 0;
+    const totalAnswers = abilityRow?.total_answers || 0;
+
+    result.abilityAnalysis = {
+      memoryEfficiency: Math.min(100, Math.round(correctRate * 0.8 + Math.random() * 20)),
+      understandingDepth: Math.min(100, Math.round(correctRate * 0.7 + studyDays * 2)),
+      reviewFrequency: Math.min(100, Math.round(studyDays * 10 + Math.random() * 20)),
+      expansionInterest: Math.min(100, Math.round(totalAnswers * 0.5 + Math.random() * 30)),
+      comment: generateAbilityComment(correctRate, studyDays, totalAnswers)
+    };
+
+    const poemRows = await db.all(
+      `SELECT id, title, author FROM poems
+       WHERE id NOT IN (SELECT poem_id FROM learning_records WHERE user_id = $1)
+       ORDER BY RANDOM()
+       LIMIT 5`,
+      [id]
+    );
+
+    result.recommendedPoems = (poemRows.length > 0 ? poemRows : [
+      { id: 1, title: '望天门山', author: '李白' },
+      { id: 2, title: '黄鹤楼送孟浩然之广陵', author: '李白' },
+      { id: 3, title: '山居秋暝', author: '王维' },
+      { id: 4, title: '登高', author: '杜甫' },
+      { id: 5, title: '钱塘湖春行', author: '白居易' }
+    ]).map(p => ({
+      id: p.id,
+      title: p.title,
+      author: p.author,
+      reason: '适合您当前学习阶段',
+      matchScore: 75 + Math.floor(Math.random() * 25)
+    }));
+
+    res.json(result);
   } catch (error) {
     console.error('获取学生分析失败:', error);
     res.status(500).json({ error: '获取学生分析失败' });
@@ -680,7 +591,7 @@ router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
 
 function generateAbilityComment(correctRate, studyDays, totalAnswers) {
   const comments = [];
-  
+
   if (correctRate >= 80) {
     comments.push('学习效率很高，正确率优秀');
   } else if (correctRate >= 60) {
@@ -688,7 +599,7 @@ function generateAbilityComment(correctRate, studyDays, totalAnswers) {
   } else {
     comments.push('需要加强基础知识学习');
   }
-  
+
   if (studyDays >= 10) {
     comments.push('学习坚持性很好');
   } else if (studyDays >= 5) {
@@ -696,7 +607,7 @@ function generateAbilityComment(correctRate, studyDays, totalAnswers) {
   } else {
     comments.push('建议增加学习频率');
   }
-  
+
   if (totalAnswers >= 100) {
     comments.push('练习量充足');
   } else if (totalAnswers >= 50) {
@@ -704,74 +615,70 @@ function generateAbilityComment(correctRate, studyDays, totalAnswers) {
   } else {
     comments.push('建议多做练习');
   }
-  
+
   return comments.join('，') + '。';
 }
 
-// 新增 - 教师备注管理接口
-router.get('/notes/:studentId', authenticateTeacher, (req, res) => {
+router.get('/notes/:studentId', authenticateTeacher, async (req, res) => {
   const { studentId } = req.params;
   const teacherId = req.teacher.id;
-  
-  db.all('SELECT * FROM teacher_notes WHERE teacher_id = ? AND student_id = ? ORDER BY created_at DESC', [teacherId, studentId], (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: '数据库错误' });
-    }
+
+  try {
+    const rows = await db.all('SELECT * FROM teacher_notes WHERE teacher_id = $1 AND student_id = $2 ORDER BY created_at DESC', [teacherId, studentId]);
     res.json(rows);
-  });
+  } catch (err) {
+    return res.status(500).json({ error: '数据库错误' });
+  }
 });
 
-router.post('/notes', authenticateTeacher, (req, res) => {
+router.post('/notes', authenticateTeacher, async (req, res) => {
   const { studentId, content } = req.body;
   const teacherId = req.teacher.id;
-  
-  db.run('INSERT INTO teacher_notes (teacher_id, student_id, content) VALUES (?, ?, ?)', [teacherId, studentId, content], (err) => {
-    if (err) {
-      return res.status(500).json({ error: '添加备注失败' });
-    }
+
+  try {
+    await db.run('INSERT INTO teacher_notes (teacher_id, student_id, content) VALUES ($1, $2, $3)', [teacherId, studentId, content]);
     res.status(201).json({ message: '备注添加成功' });
-  });
+  } catch (err) {
+    return res.status(500).json({ error: '添加备注失败' });
+  }
 });
 
-router.put('/notes/:id', authenticateTeacher, (req, res) => {
+router.put('/notes/:id', authenticateTeacher, async (req, res) => {
   const { id } = req.params;
   const { content } = req.body;
   const teacherId = req.teacher.id;
-  
-  db.run('UPDATE teacher_notes SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND teacher_id = ?', [content, id, teacherId], (err) => {
-    if (err) {
-      return res.status(500).json({ error: '更新备注失败' });
-    }
+
+  try {
+    await db.run('UPDATE teacher_notes SET content = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND teacher_id = $3', [content, id, teacherId]);
     res.json({ message: '备注更新成功' });
-  });
+  } catch (err) {
+    return res.status(500).json({ error: '更新备注失败' });
+  }
 });
 
-router.delete('/notes/:id', authenticateTeacher, (req, res) => {
+router.delete('/notes/:id', authenticateTeacher, async (req, res) => {
   const { id } = req.params;
   const teacherId = req.teacher.id;
-  
-  db.run('DELETE FROM teacher_notes WHERE id = ? AND teacher_id = ?', [id, teacherId], (err) => {
-    if (err) {
-      return res.status(500).json({ error: '删除备注失败' });
-    }
+
+  try {
+    await db.run('DELETE FROM teacher_notes WHERE id = $1 AND teacher_id = $2', [id, teacherId]);
     res.json({ message: '备注删除成功' });
-  });
+  } catch (err) {
+    return res.status(500).json({ error: '删除备注失败' });
+  }
 });
 
-// 新增 - 诗词全校详情接口
 router.get('/poem/:id/detail', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // 调用硅基流动诗词详情 API
+
     const response = await siliconFlowApi.post('/analysis/poem', {
       poemId: id
     });
-    
+
     res.json(response.data);
   } catch (error) {
     console.error('获取诗词详情失败:', error);
-    // 返回模拟数据
     res.json({
       id: id,
       title: '静夜思',
@@ -790,11 +697,10 @@ router.get('/poem/:id/detail', authenticateTeacher, async (req, res) => {
   }
 });
 
-// 新增 - 获取所有班级列表及统计数据
-router.get('/classes', authenticateTeacher, (req, res) => {
+router.get('/classes', authenticateTeacher, async (req, res) => {
   try {
-    db.all(
-      `SELECT 
+    const classes = await db.all(
+      `SELECT
         u.class_id,
         COUNT(DISTINCT u.id) as total_students,
         COUNT(DISTINCT lr.poem_id) as total_poems_studied,
@@ -803,295 +709,233 @@ router.get('/classes', authenticateTeacher, (req, res) => {
        LEFT JOIN learning_records lr ON u.id = lr.user_id
        WHERE u.class_id IS NOT NULL
        GROUP BY u.class_id
-       ORDER BY u.class_id`,
-      (err, classes) => {
-        if (err) {
-          console.error('获取班级列表失败:', err);
-          return res.status(500).json({ message: '获取班级列表失败' });
-        }
-        
-        res.json({
-          success: true,
-          data: classes
-        });
-      }
+       ORDER BY u.class_id`
     );
+
+    res.json({
+      success: true,
+      data: classes
+    });
   } catch (error) {
     console.error('获取班级列表失败:', error);
     res.status(500).json({ message: '获取班级列表失败' });
   }
 });
 
-// 新增 - 添加班级
-router.post('/classes/add', authenticateTeacher, (req, res) => {
+router.post('/classes/add', authenticateTeacher, async (req, res) => {
   try {
     const { className } = req.body;
-    
+
     if (!className || !className.trim()) {
       return res.status(400).json({ message: '班级名称不能为空' });
     }
-    
-    db.run(
-      'INSERT INTO classes (class_name) VALUES (?)',
-      [className.trim()],
-      function(err) {
-        if (err) {
-          console.error('添加班级失败:', err);
-          if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ message: '班级名称已存在' });
-          }
-          return res.status(500).json({ message: '添加班级失败' });
-        }
-        
-        res.status(201).json({
-          success: true,
-          message: '班级添加成功',
-          classId: this.lastID
-        });
-      }
+
+    const result = await db.run(
+      'INSERT INTO classes (class_name) VALUES ($1) RETURNING id',
+      [className.trim()]
     );
+
+    res.status(201).json({
+      success: true,
+      message: '班级添加成功',
+      classId: result.rows[0].id
+    });
   } catch (error) {
     console.error('添加班级失败:', error);
+    if (error.message?.includes('unique') || error.code === '23505') {
+      return res.status(400).json({ message: '班级名称已存在' });
+    }
     res.status(500).json({ message: '添加班级失败' });
   }
 });
 
-// 新增 - 添加学生
-router.post('/students/add', authenticateTeacher, (req, res) => {
+router.post('/students/add', authenticateTeacher, async (req, res) => {
   try {
     const { username, email, password, class_id } = req.body;
-    
+
     if (!username || !email || !password) {
       return res.status(400).json({ message: '用户名、邮箱和密码不能为空' });
     }
-    
+
     const bcrypt = require('bcrypt');
     const passwordHash = bcrypt.hashSync(password, 10);
     const now = new Date().toISOString();
-    
-    db.run(
-      'INSERT INTO users (username, email, password_hash, class_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [username, email, passwordHash, class_id || null, now, now],
-      function(err) {
-        if (err) {
-          console.error('添加学生失败:', err);
-          if (err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ message: '用户名或邮箱已存在' });
-          }
-          return res.status(500).json({ message: '添加学生失败' });
-        }
-        
-        res.status(201).json({
-          success: true,
-          message: '学生添加成功',
-          studentId: this.lastID
-        });
-      }
+
+    const result = await db.run(
+      'INSERT INTO users (username, email, password_hash, class_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+      [username, email, passwordHash, class_id || null, now, now]
     );
+
+    res.status(201).json({
+      success: true,
+      message: '学生添加成功',
+      studentId: result.rows[0].id
+    });
   } catch (error) {
     console.error('添加学生失败:', error);
+    if (error.message?.includes('unique') || error.code === '23505') {
+      return res.status(400).json({ message: '用户名或邮箱已存在' });
+    }
     res.status(500).json({ message: '添加学生失败' });
   }
 });
 
-// 新增 - 修改学生密码
-router.put('/students/:id/password', authenticateTeacher, (req, res) => {
+router.put('/students/:id/password', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
-    
+
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ message: '密码长度不能少于6位' });
     }
-    
+
     const bcrypt = require('bcrypt');
     const passwordHash = bcrypt.hashSync(newPassword, 10);
-    
-    db.run(
-      'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?',
-      [passwordHash, new Date().toISOString(), id],
-      function(err) {
-        if (err) {
-          console.error('修改密码失败:', err);
-          return res.status(500).json({ message: '修改密码失败' });
-        }
-        
-        if (this.changes === 0) {
-          return res.status(404).json({ message: '学生不存在' });
-        }
-        
-        res.json({
-          success: true,
-          message: '密码修改成功'
-        });
-      }
+
+    const result = await db.run(
+      'UPDATE users SET password_hash = $1, updated_at = $2 WHERE id = $3',
+      [passwordHash, new Date().toISOString(), id]
     );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: '学生不存在' });
+    }
+
+    res.json({
+      success: true,
+      message: '密码修改成功'
+    });
   } catch (error) {
     console.error('修改密码失败:', error);
     res.status(500).json({ message: '修改密码失败' });
   }
 });
 
-// 新增 - 获取指定班级的详情
-router.get('/classes/:classId', authenticateTeacher, (req, res) => {
+router.get('/classes/:classId', authenticateTeacher, async (req, res) => {
   try {
     const { classId } = req.params;
-    
-    db.get(
-      `SELECT 
+
+    const classData = await db.get(
+      `SELECT
         u.class_id,
         COUNT(DISTINCT u.id) as total_students,
         COUNT(DISTINCT lr.poem_id) as total_poems_studied,
         AVG(lr.study_time) as avg_study_time
        FROM users u
        LEFT JOIN learning_records lr ON u.id = lr.user_id
-       WHERE u.class_id = ?
+       WHERE u.class_id = $1
        GROUP BY u.class_id`,
-      [classId],
-      (err, classData) => {
-        if (err) {
-          console.error('获取班级详情失败:', err);
-          return res.status(500).json({ message: '获取班级详情失败' });
-        }
-        
-        if (!classData) {
-          return res.status(404).json({ message: '班级不存在' });
-        }
-        
-        res.json(classData);
-      }
+      [classId]
     );
+
+    if (!classData) {
+      return res.status(404).json({ message: '班级不存在' });
+    }
+
+    res.json(classData);
   } catch (error) {
     console.error('获取班级详情失败:', error);
     res.status(500).json({ message: '获取班级详情失败' });
   }
 });
 
-// 新增 - 获取指定班级的学生详情
-router.get('/classes/:classId/students', authenticateTeacher, (req, res) => {
+router.get('/classes/:classId/students', authenticateTeacher, async (req, res) => {
   try {
     const { classId } = req.params;
-    
-    db.all(
-      `SELECT u.id, u.username, u.email, 
-              COUNT(DISTINCT lr.poem_id) as poem_count, 
-              SUM(lr.study_time) as total_study_time,
-              MAX(lr.last_view_time) as last_study_time
-       FROM users u
-       LEFT JOIN learning_records lr ON u.id = lr.user_id
-       WHERE u.class_id = ?
-       GROUP BY u.id, u.username, u.email
-       ORDER BY total_study_time DESC`,
-      [classId],
-      (err, students) => {
-        if (err) {
-          console.error('获取班级学生详情失败:', err);
-          return res.status(500).json({ message: '获取班级学生详情失败' });
-        }
-        
-        res.json({
-          success: true,
-          data: students
-        });
-      }
-    );
-  } catch (error) {
-    console.error('获取班级学生详情失败:', error);
-    res.status(500).json({ message: '获取班级学生详情失败' });
-  }
-});
 
-// 新增 - 获取全平台学生总排名（带分页）
-router.get('/rankings/overall', authenticateTeacher, (req, res) => {
-  try {
-    const { page = 1, limit = 50 } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    
-    db.get(
-      `SELECT COUNT(DISTINCT u.id) as total
-       FROM users u
-       WHERE u.class_id IS NOT NULL`,
-      (err, countRow) => {
-        if (err) {
-          console.error('获取总排名数量失败:', err);
-          return res.status(500).json({ message: '获取总排名失败' });
-        }
-        
-        db.all(
-          `SELECT u.id, u.username, u.email, u.class_id,
-                  COUNT(DISTINCT lr.poem_id) as poem_count,
-                  COALESCE(SUM(lr.study_time), 0) as total_study_time,
-                  MAX(lr.last_view_time) as last_study_time
-           FROM users u
-           LEFT JOIN learning_records lr ON u.id = lr.user_id
-           WHERE u.class_id IS NOT NULL
-           GROUP BY u.id, u.username, u.email, u.class_id
-           ORDER BY total_study_time DESC
-           LIMIT ? OFFSET ?`,
-          [parseInt(limit), offset],
-          (err, students) => {
-            if (err) {
-              console.error('获取总排名失败:', err);
-              return res.status(500).json({ message: '获取总排名失败' });
-            }
-            
-            res.json({
-              success: true,
-              data: students || [],
-              total: countRow?.total || 0,
-              page: parseInt(page),
-              limit: parseInt(limit),
-              totalPages: Math.ceil((countRow?.total || 0) / parseInt(limit))
-            });
-          }
-        );
-      }
-    );
-  } catch (error) {
-    console.error('获取总排名失败:', error);
-    res.status(500).json({ message: '获取总排名失败' });
-  }
-});
-
-// 新增 - 获取指定班级内部排名
-router.get('/rankings/class/:classId', authenticateTeacher, (req, res) => {
-  try {
-    const { classId } = req.params;
-    
-    db.all(
+    const students = await db.all(
       `SELECT u.id, u.username, u.email,
               COUNT(DISTINCT lr.poem_id) as poem_count,
               SUM(lr.study_time) as total_study_time,
               MAX(lr.last_view_time) as last_study_time
        FROM users u
        LEFT JOIN learning_records lr ON u.id = lr.user_id
-       WHERE u.class_id = ?
+       WHERE u.class_id = $1
        GROUP BY u.id, u.username, u.email
        ORDER BY total_study_time DESC`,
-      [classId],
-      (err, students) => {
-        if (err) {
-          console.error('获取班级排名失败:', err);
-          return res.status(500).json({ message: '获取班级排名失败' });
-        }
-        
-        res.json({
-          success: true,
-          data: students
-        });
-      }
+      [classId]
     );
+
+    res.json({
+      success: true,
+      data: students
+    });
+  } catch (error) {
+    console.error('获取班级学生详情失败:', error);
+    res.status(500).json({ message: '获取班级学生详情失败' });
+  }
+});
+
+router.get('/rankings/overall', authenticateTeacher, async (req, res) => {
+  try {
+    const { page = 1, limit = 50 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    const countRow = await db.get(
+      `SELECT COUNT(DISTINCT u.id) as total
+       FROM users u
+       WHERE u.class_id IS NOT NULL`
+    );
+
+    const students = await db.all(
+      `SELECT u.id, u.username, u.email, u.class_id,
+              COUNT(DISTINCT lr.poem_id) as poem_count,
+              COALESCE(SUM(lr.study_time), 0) as total_study_time,
+              MAX(lr.last_view_time) as last_study_time
+       FROM users u
+       LEFT JOIN learning_records lr ON u.id = lr.user_id
+       WHERE u.class_id IS NOT NULL
+       GROUP BY u.id, u.username, u.email, u.class_id
+       ORDER BY total_study_time DESC
+       LIMIT $1 OFFSET $2`,
+      [parseInt(limit), offset]
+    );
+
+    res.json({
+      success: true,
+      data: students || [],
+      total: countRow?.total || 0,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil((countRow?.total || 0) / parseInt(limit))
+    });
+  } catch (error) {
+    console.error('获取总排名失败:', error);
+    res.status(500).json({ message: '获取总排名失败' });
+  }
+});
+
+router.get('/rankings/class/:classId', authenticateTeacher, async (req, res) => {
+  try {
+    const { classId } = req.params;
+
+    const students = await db.all(
+      `SELECT u.id, u.username, u.email,
+              COUNT(DISTINCT lr.poem_id) as poem_count,
+              SUM(lr.study_time) as total_study_time,
+              MAX(lr.last_view_time) as last_study_time
+       FROM users u
+       LEFT JOIN learning_records lr ON u.id = lr.user_id
+       WHERE u.class_id = $1
+       GROUP BY u.id, u.username, u.email
+       ORDER BY total_study_time DESC`,
+      [classId]
+    );
+
+    res.json({
+      success: true,
+      data: students
+    });
   } catch (error) {
     console.error('获取班级排名失败:', error);
     res.status(500).json({ message: '获取班级排名失败' });
   }
 });
 
-// 新增 - 获取班级对比数据
-router.get('/classes/comparison', authenticateTeacher, (req, res) => {
+router.get('/classes/comparison', authenticateTeacher, async (req, res) => {
   try {
-    db.all(
-      `SELECT 
+    const classes = await db.all(
+      `SELECT
         u.class_id,
         COUNT(DISTINCT u.id) as total_students,
         COUNT(DISTINCT lr.poem_id) as total_poems_studied,
@@ -1100,31 +944,24 @@ router.get('/classes/comparison', authenticateTeacher, (req, res) => {
        LEFT JOIN learning_records lr ON u.id = lr.user_id
        WHERE u.class_id IS NOT NULL
        GROUP BY u.class_id
-       ORDER BY u.class_id`,
-      (err, classes) => {
-        if (err) {
-          console.error('获取班级对比数据失败:', err);
-          return res.status(500).json({ message: '获取班级对比数据失败' });
-        }
-        
-        res.json({
-          success: true,
-          data: classes
-        });
-      }
+       ORDER BY u.class_id`
     );
+
+    res.json({
+      success: true,
+      data: classes
+    });
   } catch (error) {
     console.error('获取班级对比数据失败:', error);
     res.status(500).json({ message: '获取班级对比数据失败' });
   }
 });
 
-// 新增 - 获取闯关排名数据
-router.get('/challenge/rankings', authenticateTeacher, (req, res) => {
+router.get('/challenge/rankings', authenticateTeacher, async (req, res) => {
   try {
     const { classId, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
-    
+
     let query = `
       SELECT u.id, u.username, u.email, u.class_id,
               ucp.highest_level,
@@ -1136,52 +973,51 @@ router.get('/challenge/rankings', authenticateTeacher, (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    
+    let paramIdx = 0;
+
     if (classId) {
-      query += ' AND u.class_id = ?';
+      paramIdx++;
+      query += ` AND u.class_id = $${paramIdx}`;
       params.push(classId);
     }
-    
-    query += `
-      ORDER BY ucp.highest_level DESC, ucp.last_challenge_time ASC
-      LIMIT ? OFFSET ?
+
+    paramIdx++;
+    const limitIdx = paramIdx;
+    query += ` LIMIT $${limitIdx}`;
+    params.push(limit);
+
+    paramIdx++;
+    const offsetIdx = paramIdx;
+    query += ` OFFSET $${offsetIdx}`;
+    params.push(offset);
+
+    query += ` ORDER BY ucp.highest_level DESC, ucp.last_challenge_time ASC`;
+
+    const students = await db.all(query, params);
+
+    let countQuery = `
+      SELECT COUNT(*) as total
+      FROM users u
+      LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
+      WHERE 1=1
     `;
-    params.push(limit, offset);
-    
-    db.all(query, params, (err, students) => {
-      if (err) {
-        console.error('获取闯关排名失败:', err);
-        return res.status(500).json({ message: '获取闯关排名失败' });
-      }
-      
-      // 获取总数
-      let countQuery = `
-        SELECT COUNT(*) as total
-        FROM users u
-        LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
-        WHERE 1=1
-      `;
-      const countParams = [];
-      
-      if (classId) {
-        countQuery += ' AND u.class_id = ?';
-        countParams.push(classId);
-      }
-      
-      db.get(countQuery, countParams, (err, countResult) => {
-        if (err) {
-          console.error('获取闯关排名总数失败:', err);
-          return res.status(500).json({ message: '获取闯关排名失败' });
-        }
-        
-        res.json({
-          success: true,
-          data: students,
-          total: countResult.total,
-          page: parseInt(page),
-          limit: parseInt(limit)
-        });
-      });
+    const countParams = [];
+    let countParamIdx = 0;
+
+    if (classId) {
+      countParamIdx++;
+      countQuery += ` AND u.class_id = $${countParamIdx}`;
+      countParams.push(classId);
+    }
+
+    const countResult = await db.get(countQuery, countParams);
+
+    res.json({
+      success: true,
+      data: students,
+      total: countResult.total,
+      page: parseInt(page),
+      limit: parseInt(limit)
     });
   } catch (error) {
     console.error('获取闯关排名失败:', error);
@@ -1189,75 +1025,52 @@ router.get('/challenge/rankings', authenticateTeacher, (req, res) => {
   }
 });
 
-// 新增 - 获取学生闯关详情
-router.get('/challenge/student/:id', authenticateTeacher, (req, res) => {
+router.get('/challenge/student/:id', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 获取学生基本信息和闯关进度
-    db.get(
+    const studentInfo = await db.get(
       `SELECT u.id, u.username, u.email, u.class_id,
               ucp.highest_level, ucp.current_challenge_level, ucp.total_ai_help_used as ai_help_count, ucp.total_errors as error_count, ucp.last_challenge_time
       FROM users u
       LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
-      WHERE u.id = ?`,
-      [id],
-      (err, studentInfo) => {
-        if (err) {
-          console.error('获取学生闯关详情失败:', err);
-          return res.status(500).json({ message: '获取学生闯关详情失败' });
-        }
-
-        if (!studentInfo) {
-          return res.status(404).json({ message: '学生不存在' });
-        }
-
-        // 获取学生答题记录（最近100条）
-        db.all(
-          `SELECT * FROM user_challenge_records
-           WHERE user_id = ?
-           ORDER BY answered_at DESC
-           LIMIT 100`,
-          [id],
-          (err, challengeRecords) => {
-            if (err) {
-              console.error('获取学生答题记录失败:', err);
-              return res.status(500).json({ message: '获取学生闯关详情失败' });
-            }
-
-            // 获取学生错题复习列表
-            db.all(
-              `SELECT * FROM wrong_questions
-               WHERE user_id = ?
-               ORDER BY last_wrong_time DESC`,
-              [id.toString()],
-              (err, wrongQuestions) => {
-                if (err) {
-                  console.error('获取学生错题本失败:', err);
-                  return res.status(500).json({ message: '获取学生闯关详情失败' });
-                }
-
-                res.json({
-                  success: true,
-                  data: {
-                    student: studentInfo,
-                    challengeRecords,
-                    wrongQuestions
-                  }
-                });
-              }
-            );
-          }
-        );
-      }
+      WHERE u.id = $1`,
+      [id]
     );
+
+    if (!studentInfo) {
+      return res.status(404).json({ message: '学生不存在' });
+    }
+
+    const challengeRecords = await db.all(
+      `SELECT * FROM user_challenge_records
+       WHERE user_id = $1
+       ORDER BY answered_at DESC
+       LIMIT 100`,
+      [id]
+    );
+
+    const wrongQuestions = await db.all(
+      `SELECT * FROM wrong_questions
+       WHERE user_id = $1
+       ORDER BY last_wrong_time DESC`,
+      [id.toString()]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        student: studentInfo,
+        challengeRecords,
+        wrongQuestions
+      }
+    });
   } catch (error) {
     console.error('获取学生闯关详情失败:', error);
     res.status(500).json({ message: '获取学生闯关详情失败' });
   }
 });
 
-// 新增 - 导出全班学生闯关记录（支持按班级筛选）
 router.get('/challenge/records/export', authenticateTeacher, async (req, res) => {
   try {
     const { classId } = req.query;
@@ -1282,344 +1095,259 @@ router.get('/challenge/records/export', authenticateTeacher, async (req, res) =>
     const params = [];
 
     if (classId) {
-      query += ' AND u.class_id = ?';
+      query += ' AND u.class_id = $1';
       params.push(classId);
     }
 
     query += ' GROUP BY u.id, u.username, u.class_id, c.class_name, ucp.highest_level, ucp.current_challenge_level, ucp.total_errors, ucp.last_challenge_time ORDER BY highest_level DESC, u.username';
 
-    db.all(query, params, (err, rows) => {
-      if (err) {
-        console.error('导出闯关记录失败:', err);
-        return res.status(500).json({ message: '导出闯关记录失败' });
-      }
+    const rows = await db.all(query, params);
 
-      // 补充正确率
-      const data = (rows || []).map(row => ({
-        ...row,
-        accuracy: row.total_answers > 0
-          ? Math.round((row.correct_answers / row.total_answers) * 100) + '%'
-          : '0%'
-      }));
+    const data = (rows || []).map(row => ({
+      ...row,
+      accuracy: row.total_answers > 0
+        ? Math.round((row.correct_answers / row.total_answers) * 100) + '%'
+        : '0%'
+    }));
 
-      res.json({ success: true, data });
-    });
+    res.json({ success: true, data });
   } catch (error) {
     console.error('导出闯关记录失败:', error);
     res.status(500).json({ message: '导出闯关记录失败' });
   }
 });
 
-// 新增 - 数据概览接口
 router.get('/overview', authenticateTeacher, async (req, res) => {
   try {
-    const overview = await new Promise((resolve, reject) => {
-      db.get('SELECT COUNT(*) as total FROM users', (err, row) => {
-        if (err) return reject(err);
-        const totalStudents = row.total;
+    const row = await db.get('SELECT COUNT(*) as total FROM users');
+    const totalStudents = row.total;
 
-        // 今天活跃（基于学习记录最后查看时间）
-        const today = new Date().toISOString().split('T')[0];
-        db.get(
-          `SELECT COUNT(DISTINCT user_id) as active
-           FROM learning_records
-           WHERE DATE(last_view_time) = ?`,
-          [today],
-          (err, activeRow) => {
-            if (err) return reject(err);
-            const todayActive = activeRow.active || 0;
+    const today = new Date().toISOString().split('T')[0];
+    const activeRow = await db.get(
+      `SELECT COUNT(DISTINCT user_id) as active
+       FROM learning_records
+       WHERE (last_view_time)::date = $1`,
+      [today]
+    );
+    const todayActive = activeRow.active || 0;
 
-            // 本周活跃（最近7天）
-            db.get(
-              `SELECT COUNT(DISTINCT user_id) as active
-               FROM learning_records
-               WHERE DATE(last_view_time) >= DATE('now', '-6 days')`,
-              (err, weekRow) => {
-                if (err) return reject(err);
+    const weekRow = await db.get(
+      `SELECT COUNT(DISTINCT user_id) as active
+       FROM learning_records
+       WHERE (last_view_time)::date >= CURRENT_DATE - INTERVAL '6 days'`
+    );
 
-                // 全部时间活跃
-                db.get(
-                  `SELECT COUNT(DISTINCT user_id) as active FROM learning_records`,
-                  (err, allRow) => {
-                    if (err) return reject(err);
+    const allRow = await db.get(
+      `SELECT COUNT(DISTINCT user_id) as active FROM learning_records`
+    );
 
-                    db.get(
-                      `SELECT AVG(highest_level) as avg_level
-                       FROM user_challenge_progress`,
-                      (err, avgRow) => {
-                        if (err) return reject(err);
-                        const avgLevel = Math.round(avgRow.avg_level || 0);
+    const avgRow = await db.get(
+      `SELECT AVG(highest_level) as avg_level
+       FROM user_challenge_progress`
+    );
+    const avgLevel = Math.round(avgRow.avg_level || 0);
 
-                        db.get(
-                          `SELECT COUNT(DISTINCT question_content) as total_errors
-                           FROM user_challenge_records
-                           WHERE is_correct = 0`,
-                          (err, errRow) => {
-                            if (err) return reject(err);
-                            const totalErrors = errRow ? errRow.total_errors || 0 : 0;
+    const errRow = await db.get(
+      `SELECT COUNT(DISTINCT question_content) as total_errors
+       FROM user_challenge_records
+       WHERE is_correct = 0`
+    );
+    const totalErrors = errRow ? errRow.total_errors || 0 : 0;
 
-                            db.get('SELECT COUNT(*) as c FROM collections', (err, colRow) => {
-                              if (err) return reject(err);
-                              db.get('SELECT COUNT(*) as c FROM user_challenge_records', (err, ansRow) => {
-                                if (err) return reject(err);
-                                db.get('SELECT COUNT(*) as c FROM feihua_battles WHERE ended_at IS NOT NULL', (err, batRow) => {
-                                  if (err) return reject(err);
-                                  db.get('SELECT COUNT(*) as c FROM daily_checkin', (err, checkinRow) => {
-                                    if (err) return reject(err);
-                                    resolve({
-                                      totalStudents,
-                                      todayActive,
-                                      weekActive: weekRow?.active || 0,
-                                      allTimeActive: allRow?.active || 0,
-                                      avgLevel,
-                                      totalErrors,
-                                      totalCollections: colRow ? colRow.c : 0,
-                                      totalChallengeAnswers: ansRow ? ansRow.c : 0,
-                                      totalFeihuaBattles: batRow ? batRow.c : 0,
-                                      totalCheckins: checkinRow ? checkinRow.c : 0
-                                    });
-                                  });
-                                });
-                              });
-                            });
-                          }
-                        );
-                      }
-                    );
-                  }
-                );
-              }
-            );
-          }
-        );
-      });
+    const colRow = await db.get('SELECT COUNT(*) as c FROM collections');
+    const ansRow = await db.get('SELECT COUNT(*) as c FROM user_challenge_records');
+    const batRow = await db.get('SELECT COUNT(*) as c FROM feihua_battles WHERE ended_at IS NOT NULL');
+    const checkinRow = await db.get('SELECT COUNT(*) as c FROM daily_checkin');
+
+    res.json({
+      totalStudents,
+      todayActive,
+      weekActive: weekRow?.active || 0,
+      allTimeActive: allRow?.active || 0,
+      avgLevel,
+      totalErrors,
+      totalCollections: colRow ? colRow.c : 0,
+      totalChallengeAnswers: ansRow ? ansRow.c : 0,
+      totalFeihuaBattles: batRow ? batRow.c : 0,
+      totalCheckins: checkinRow ? checkinRow.c : 0
     });
-
-    res.json(overview);
   } catch (error) {
     console.error('获取概览数据失败:', error);
     res.status(500).json({ error: '获取数据失败' });
   }
 });
 
-// 新增 - 学习趋势接口（最近14天，含多维指标）
 router.get('/trend', authenticateTeacher, async (req, res) => {
   try {
-    const trend = await new Promise((resolve, reject) => {
-      const days = [];
-      const today = new Date();
-      for (let i = 13; i >= 0; i--) {
-        const date = new Date(today);
-        date.setDate(today.getDate() - i);
-        days.push(date.toISOString().split('T')[0]);
-      }
+    const days = [];
+    const today = new Date();
+    for (let i = 13; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      days.push(date.toISOString().split('T')[0]);
+    }
 
-      // 并行查询：学习记录（学习次数）、答题记录（答题次数）、飞花令（活跃学生）
-      Promise.all([
-        new Promise((res2, rej) => {
-          db.all(
-            `SELECT DATE(last_view_time) as date, COUNT(*) as count
-             FROM learning_records
-             WHERE DATE(last_view_time) >= ?
-             GROUP BY DATE(last_view_time)
-             ORDER BY date`,
-            [days[0]],
-            (err, rows) => (err ? rej(err) : res2(rows || []))
-          );
-        }),
-        new Promise((res2, rej) => {
-          db.all(
-            `SELECT DATE(answered_at) as date, COUNT(*) as count
-             FROM user_challenge_records
-             WHERE DATE(answered_at) >= ?
-             GROUP BY DATE(answered_at)
-             ORDER BY date`,
-            [days[0]],
-            (err, rows) => (err ? rej(err) : res2(rows || []))
-          );
-        }),
-        new Promise((res2, rej) => {
-          db.all(
-            `SELECT DATE(last_view_time) as date, COUNT(DISTINCT user_id) as count
-             FROM learning_records
-             WHERE DATE(last_view_time) >= ?
-             GROUP BY DATE(last_view_time)
-             ORDER BY date`,
-            [days[0]],
-            (err, rows) => (err ? rej(err) : res2(rows || []))
-          );
-        })
-      ]).then(([learnRows, challengeRows, activeRows]) => {
-        const result = days.map(day => {
-          const learn = learnRows.find(r => r.date === day);
-          const challenge = challengeRows.find(r => r.date === day);
-          const active = activeRows.find(r => r.date === day);
-          return {
-            date: day,
-            learnCount: learn ? learn.count : 0,
-            challengeCount: challenge ? challenge.count : 0,
-            activeStudents: active ? active.count : 0,
-            // 为前端兼容旧字段
-            count: (learn ? learn.count : 0) + (challenge ? challenge.count : 0)
-          };
-        });
-        resolve(result);
-      }).catch(reject);
+    const [learnRows, challengeRows, activeRows] = await Promise.all([
+      db.all(
+        `SELECT (last_view_time)::date as date, COUNT(*) as count
+         FROM learning_records
+         WHERE (last_view_time)::date >= $1
+         GROUP BY (last_view_time)::date
+         ORDER BY date`,
+        [days[0]]
+      ),
+      db.all(
+        `SELECT (answered_at)::date as date, COUNT(*) as count
+         FROM user_challenge_records
+         WHERE (answered_at)::date >= $1
+         GROUP BY (answered_at)::date
+         ORDER BY date`,
+        [days[0]]
+      ),
+      db.all(
+        `SELECT (last_view_time)::date as date, COUNT(DISTINCT user_id) as count
+         FROM learning_records
+         WHERE (last_view_time)::date >= $1
+         GROUP BY (last_view_time)::date
+         ORDER BY date`,
+        [days[0]]
+      )
+    ]);
+
+    const result = days.map(day => {
+      const learn = learnRows.find(r => r.date === day);
+      const challenge = challengeRows.find(r => r.date === day);
+      const active = activeRows.find(r => r.date === day);
+      return {
+        date: day,
+        learnCount: learn ? learn.count : 0,
+        challengeCount: challenge ? challenge.count : 0,
+        activeStudents: active ? active.count : 0,
+        count: (learn ? learn.count : 0) + (challenge ? challenge.count : 0)
+      };
     });
 
-    res.json(trend);
+    res.json(result);
   } catch (error) {
     console.error('获取趋势数据失败:', error);
     res.status(500).json({ error: '获取数据失败' });
   }
 });
 
-// 新增 - 关卡分布接口
 router.get('/level-distribution', authenticateTeacher, async (req, res) => {
   try {
-    const distribution = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT 
-          CASE 
-            WHEN highest_level <= 50 THEN '1-50'
-            WHEN highest_level <= 100 THEN '51-100'
-            WHEN highest_level <= 150 THEN '101-150'
-            ELSE '151-200'
-          END as range,
-          COUNT(*) as count
-         FROM user_challenge_progress
-         WHERE highest_level > 0
-         GROUP BY 
-          CASE 
-            WHEN highest_level <= 50 THEN '1-50'
-            WHEN highest_level <= 100 THEN '51-100'
-            WHEN highest_level <= 150 THEN '101-150'
-            ELSE '151-200'
-          END
-         ORDER BY range,
-          CASE range
-            WHEN '1-50'    THEN 1
-            WHEN '51-100'  THEN 2
-            WHEN '101-150' THEN 3
-            WHEN '151-200' THEN 4
-          END`,
-        (err, rows) => {
-          if (err) return reject(err);
+    const rows = await db.all(
+      `SELECT
+        CASE
+          WHEN highest_level <= 50 THEN '1-50'
+          WHEN highest_level <= 100 THEN '51-100'
+          WHEN highest_level <= 150 THEN '101-150'
+          ELSE '151-200'
+        END as range,
+        COUNT(*) as count
+       FROM user_challenge_progress
+       WHERE highest_level > 0
+       GROUP BY
+        CASE
+          WHEN highest_level <= 50 THEN '1-50'
+          WHEN highest_level <= 100 THEN '51-100'
+          WHEN highest_level <= 150 THEN '101-150'
+          ELSE '151-200'
+        END
+       ORDER BY range,
+        CASE range
+          WHEN '1-50'    THEN 1
+          WHEN '51-100'  THEN 2
+          WHEN '101-150' THEN 3
+          WHEN '151-200' THEN 4
+        END`
+    );
 
-          const ranges = ['1-50', '51-100', '101-150', '151-200'];
-          const result = ranges.map(range => {
-            const found = rows.find(r => r.range === range);
-            return {
-              range,
-              count: found ? found.count : 0
-            };
-          });
-          
-          resolve(result);
-        }
-      );
+    const ranges = ['1-50', '51-100', '101-150', '151-200'];
+    const result = ranges.map(range => {
+      const found = rows.find(r => r.range === range);
+      return {
+        range,
+        count: found ? found.count : 0
+      };
     });
-    
-    res.json(distribution);
+
+    res.json(result);
   } catch (error) {
     console.error('获取关卡分布失败:', error);
     res.status(500).json({ error: '获取数据失败' });
   }
 });
 
-// 新增 - 错题TOP10接口
 router.get('/wrong-top', authenticateTeacher, async (req, res) => {
   try {
-    const wrongTop = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT 
-          question_content as question,
-          COUNT(*) as error_count
-         FROM user_challenge_records
-         WHERE is_correct = 0
-         GROUP BY question_content
-         ORDER BY error_count DESC
-         LIMIT 10`,
-        (err, rows) => {
-          if (err) return reject(err);
-          resolve(rows);
-        }
-      );
-    });
-    
-    res.json(wrongTop);
+    const rows = await db.all(
+      `SELECT
+        question_content as question,
+        COUNT(*) as error_count
+       FROM user_challenge_records
+       WHERE is_correct = 0
+       GROUP BY question_content
+       ORDER BY error_count DESC
+       LIMIT 10`
+    );
+
+    res.json(rows);
   } catch (error) {
     console.error('获取错题TOP10失败:', error);
     res.status(500).json({ error: '获取数据失败' });
   }
 });
 
-// 新增 - 排行榜接口
 router.get('/ranking', authenticateTeacher, async (req, res) => {
   try {
-    const ranking = await new Promise((resolve, reject) => {
-      db.all(
-        `SELECT 
-          u.username,
-          ucp.highest_level as level
-         FROM users u
-         LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
-         WHERE ucp.highest_level > 0
-         ORDER BY ucp.highest_level DESC
-         LIMIT 50`,
-        (err, rows) => {
-          if (err) return reject(err);
-          resolve(rows);
-        }
-      );
-    });
-    
-    res.json(ranking);
+    const rows = await db.all(
+      `SELECT
+        u.username,
+        ucp.highest_level as level
+       FROM users u
+       LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
+       WHERE ucp.highest_level > 0
+       ORDER BY ucp.highest_level DESC
+       LIMIT 50`
+    );
+
+    res.json(rows);
   } catch (error) {
     console.error('获取排行榜失败:', error);
     res.status(500).json({ error: '获取数据失败' });
   }
 });
 
-// 新增 - 正确率vs错误率接口
 router.get('/correct-rate', authenticateTeacher, async (req, res) => {
   try {
-    const rates = await new Promise((resolve, reject) => {
-      db.get(
-        `SELECT 
-          SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct,
-          SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as wrong
-         FROM user_challenge_records`,
-        (err, row) => {
-          if (err) return reject(err);
-          
-          const total = (row.correct || 0) + (row.wrong || 0);
-          const correctRate = total > 0 ? Math.round((row.correct / total) * 100) : 0;
-          const wrongRate = total > 0 ? Math.round((row.wrong / total) * 100) : 0;
-          
-          resolve({
-            correct: row.correct || 0,
-            wrong: row.wrong || 0,
-            correctRate,
-            wrongRate
-          });
-        }
-      );
+    const row = await db.get(
+      `SELECT
+        SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct,
+        SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as wrong
+       FROM user_challenge_records`
+    );
+
+    const total = (row.correct || 0) + (row.wrong || 0);
+    const correctRate = total > 0 ? Math.round((row.correct / total) * 100) : 0;
+    const wrongRate = total > 0 ? Math.round((row.wrong / total) * 100) : 0;
+
+    res.json({
+      correct: row.correct || 0,
+      wrong: row.wrong || 0,
+      correctRate,
+      wrongRate
     });
-    
-    res.json(rates);
   } catch (error) {
     console.error('获取正确率失败:', error);
     res.status(500).json({ error: '获取数据失败' });
   }
 });
 
-// 对战数据API - 获取所有对战数据（用于趋势图表）
 router.get('/game-data', authenticateTeacher, async (req, res) => {
   try {
     const { period = 'week' } = req.query;
 
-    // 根据时间范围确定查询日期
     let daysBack = 7;
     if (period === 'month') {
       daysBack = 30;
@@ -1627,7 +1355,6 @@ router.get('/game-data', authenticateTeacher, async (req, res) => {
       daysBack = 365;
     }
 
-    // 生成目标日期序列
     const targetDays = [];
     const today = new Date();
     for (let i = daysBack - 1; i >= 0; i--) {
@@ -1636,95 +1363,61 @@ router.get('/game-data', authenticateTeacher, async (req, res) => {
       targetDays.push(d.toISOString().split('T')[0]);
     }
 
-    // 获取对战统计数据（整体概览，不限时间）
-    const stats = await new Promise((resolve, reject) => {
-      db.serialize(() => {
-        const result = { totalGames: 0, activePlayers: 0, avgDuration: 0, mostWins: 0 };
-
-        db.get(`SELECT COUNT(*) as count FROM feihua_battles WHERE ended_at IS NOT NULL`, (err, row) => {
-          if (err) { reject(err); return; }
-          result.totalGames = row ? row.count : 0;
-
-          db.get(`
-            SELECT COUNT(DISTINCT player1_id) + COUNT(DISTINCT player2_id) as count
-            FROM feihua_battles WHERE ended_at IS NOT NULL
-          `, (err, row) => {
-            if (err) { reject(err); return; }
-            result.activePlayers = row ? Math.floor(row.count / 2) : 0;
-
-            db.get(`SELECT AVG(total_rounds * 30) as avg FROM feihua_battles WHERE ended_at IS NOT NULL`, (err, row) => {
-              if (err) { reject(err); return; }
-              result.avgDuration = row && row.avg ? Math.round(row.avg) : 0;
-
-              db.get(`
-                SELECT MAX(wins) as max_wins FROM (
-                  SELECT COUNT(*) as wins FROM feihua_battles WHERE winner_id = player1_id GROUP BY player1_id
-                  UNION ALL
-                  SELECT COUNT(*) as wins FROM feihua_battles WHERE winner_id = player2_id GROUP BY player2_id
-                )
-              `, (err, row) => {
-                if (err) { reject(err); return; }
-                result.mostWins = row && row.max_wins ? row.max_wins : 0;
-                resolve(result);
-              });
-            });
-          });
-        });
-      });
-    });
-
-    // 获取每日多维趋势数据
     const endedUnix = feihuaEndedAtUnixExpr('fb.ended_at');
-    const dateFilter = `date('now', '-${daysBack - 1} days')`;
+    const dateFilterExpr = `CURRENT_DATE - INTERVAL '${daysBack - 1} days'`;
 
-    const [gameCountRows, avgRoundsRows, playerCountRows] = await Promise.all([
-      // 每日对战场数
-      new Promise((resolve, reject) => {
-        db.all(`
-          SELECT date(${endedUnix}, 'unixepoch') as date, COUNT(*) as count
-          FROM feihua_battles fb
-          WHERE fb.ended_at IS NOT NULL
-            AND ${endedUnix} >= strftime('%s', ${dateFilter})
-          GROUP BY date(${endedUnix}, 'unixepoch')
-          ORDER BY date
-        `, (err, rows) => {
-          if (err) { reject(err); return; }
-          resolve(rows || []);
-        });
-      }),
-      // 每日平均回合数
-      new Promise((resolve, reject) => {
-        db.all(`
-          SELECT date(${endedUnix}, 'unixepoch') as date,
-                 ROUND(AVG(total_rounds), 1) as avg_rounds
-          FROM feihua_battles fb
-          WHERE fb.ended_at IS NOT NULL
-            AND ${endedUnix} >= strftime('%s', ${dateFilter})
-          GROUP BY date(${endedUnix}, 'unixepoch')
-          ORDER BY date
-        `, (err, rows) => {
-          if (err) { reject(err); return; }
-          resolve(rows || []);
-        });
-      }),
-      // 每日参与人数
-      new Promise((resolve, reject) => {
-        db.all(`
-          SELECT date(${endedUnix}, 'unixepoch') as date,
-                 COUNT(DISTINCT player1_id) + COUNT(DISTINCT player2_id) as player_count
-          FROM feihua_battles fb
-          WHERE fb.ended_at IS NOT NULL
-            AND ${endedUnix} >= strftime('%s', ${dateFilter})
-          GROUP BY date(${endedUnix}, 'unixepoch')
-          ORDER BY date
-        `, (err, rows) => {
-          if (err) { reject(err); return; }
-          resolve(rows || []);
-        });
-      })
+    const [totalGamesRow, activePlayersRow, avgDurationRow, mostWinsRow] = await Promise.all([
+      db.get(`SELECT COUNT(*) as count FROM feihua_battles WHERE ended_at IS NOT NULL`),
+      db.get(`
+        SELECT COUNT(DISTINCT player1_id) + COUNT(DISTINCT player2_id) as count
+        FROM feihua_battles WHERE ended_at IS NOT NULL
+      `),
+      db.get(`SELECT AVG(total_rounds * 30) as avg FROM feihua_battles WHERE ended_at IS NOT NULL`),
+      db.get(`
+        SELECT MAX(wins) as max_wins FROM (
+          SELECT COUNT(*) as wins FROM feihua_battles WHERE winner_id = player1_id GROUP BY player1_id
+          UNION ALL
+          SELECT COUNT(*) as wins FROM feihua_battles WHERE winner_id = player2_id GROUP BY player2_id
+        ) sub
+      `)
     ]);
 
-    // 合并为趋势数组，每个日期都有完整指标
+    const stats = {
+      totalGames: totalGamesRow ? totalGamesRow.count : 0,
+      activePlayers: activePlayersRow ? Math.floor(activePlayersRow.count / 2) : 0,
+      avgDuration: avgDurationRow && avgDurationRow.avg ? Math.round(avgDurationRow.avg) : 0,
+      mostWins: mostWinsRow && mostWinsRow.max_wins ? mostWinsRow.max_wins : 0
+    };
+
+    const [gameCountRows, avgRoundsRows, playerCountRows] = await Promise.all([
+      db.all(`
+        SELECT TO_TIMESTAMP(${endedUnix})::date as date, COUNT(*) as count
+        FROM feihua_battles fb
+        WHERE fb.ended_at IS NOT NULL
+          AND ${endedUnix} >= EXTRACT(EPOCH FROM ${dateFilterExpr})::INTEGER
+        GROUP BY TO_TIMESTAMP(${endedUnix})::date
+        ORDER BY date
+      `),
+      db.all(`
+        SELECT TO_TIMESTAMP(${endedUnix})::date as date,
+               ROUND(AVG(total_rounds), 1) as avg_rounds
+        FROM feihua_battles fb
+        WHERE fb.ended_at IS NOT NULL
+          AND ${endedUnix} >= EXTRACT(EPOCH FROM ${dateFilterExpr})::INTEGER
+        GROUP BY TO_TIMESTAMP(${endedUnix})::date
+        ORDER BY date
+      `),
+      db.all(`
+        SELECT TO_TIMESTAMP(${endedUnix})::date as date,
+               COUNT(DISTINCT player1_id) + COUNT(DISTINCT player2_id) as player_count
+        FROM feihua_battles fb
+        WHERE fb.ended_at IS NOT NULL
+          AND ${endedUnix} >= EXTRACT(EPOCH FROM ${dateFilterExpr})::INTEGER
+        GROUP BY TO_TIMESTAMP(${endedUnix})::date
+        ORDER BY date
+      `)
+    ]);
+
     const trend = targetDays.map((day) => {
       const gameRow = gameCountRows.find(r => r.date === day);
       const roundsRow = avgRoundsRows.find(r => r.date === day);
@@ -1737,90 +1430,76 @@ router.get('/game-data', authenticateTeacher, async (req, res) => {
       };
     });
 
-    // 获取胜率排行
-    const topPlayers = await new Promise((resolve, reject) => {
-      db.all(`
-        SELECT
-          u.username as player,
-          COUNT(*) as total_games,
-          SUM(CASE WHEN fb.winner_id = u.id THEN 1 ELSE 0 END) as wins,
-          ROUND(CAST(SUM(CASE WHEN fb.winner_id = u.id THEN 1 ELSE 0 END) AS FLOAT) / COUNT(*) * 100, 1) as winRate
-        FROM feihua_battles fb
-        JOIN users u ON (fb.player1_id = u.id OR fb.player2_id = u.id)
-        WHERE fb.ended_at IS NOT NULL
-        GROUP BY u.id, u.username
-        HAVING COUNT(*) >= 1
-        ORDER BY winRate DESC, total_games DESC
-        LIMIT 10
-      `, (err, rows) => {
-        if (err) { reject(err); return; }
-        resolve((rows || []).map((r) => ({
-          ...r,
-          winRate: r.winRate != null ? Number(r.winRate) : 0
-        })));
-      });
-    });
+    const topPlayers = await db.all(`
+      SELECT
+        u.username as player,
+        COUNT(*) as total_games,
+        SUM(CASE WHEN fb.winner_id = u.id THEN 1 ELSE 0 END) as wins,
+        ROUND(CAST(SUM(CASE WHEN fb.winner_id = u.id THEN 1 ELSE 0 END) AS FLOAT) / COUNT(*) * 100, 1) as winRate
+      FROM feihua_battles fb
+      JOIN users u ON (fb.player1_id = u.id OR fb.player2_id = u.id)
+      WHERE fb.ended_at IS NOT NULL
+      GROUP BY u.id, u.username
+      HAVING COUNT(*) >= 1
+      ORDER BY winRate DESC, total_games DESC
+      LIMIT 10
+    `);
+    const topPlayersMapped = (topPlayers || []).map((r) => ({
+      ...r,
+      winRate: r.winRate != null ? Number(r.winRate) : 0
+    }));
 
-    // 获取热门对战词
-    const hotWords = await new Promise((resolve, reject) => {
-      db.all(`
-        SELECT keyword, COUNT(*) as count
-        FROM feihua_battles
-        WHERE ended_at IS NOT NULL
-        GROUP BY keyword
-        ORDER BY count DESC
-        LIMIT 10
-      `, (err, rows) => {
-        if (err) { reject(err); return; }
-        const list = rows || [];
-        if (list.length > 0) {
-          const maxCount = Math.max(...list.map((r) => r.count));
-          resolve(list.map((r) => ({
-            word: r.keyword || '',
-            keyword: r.keyword,
-            count: r.count,
-            percentage: maxCount ? Math.round((r.count / maxCount) * 100) : 0
-          })));
-        } else {
-          resolve([]);
-        }
-      });
-    });
+    const hotWordRows = await db.all(`
+      SELECT keyword, COUNT(*) as count
+      FROM feihua_battles
+      WHERE ended_at IS NOT NULL
+      GROUP BY keyword
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+    const hotWords = (() => {
+      const list = hotWordRows || [];
+      if (list.length > 0) {
+        const maxCount = Math.max(...list.map((r) => r.count));
+        return list.map((r) => ({
+          word: r.keyword || '',
+          keyword: r.keyword,
+          count: r.count,
+          percentage: maxCount ? Math.round((r.count / maxCount) * 100) : 0
+        }));
+      }
+      return [];
+    })();
 
-    // 获取最近对战记录
-    const recentGames = await new Promise((resolve, reject) => {
-      db.all(`
-        SELECT
-          fb.id,
-          fb.ended_at as date,
-          fb.keyword,
-          u1.username as player1,
-          u2.username as player2,
-          CASE
-            WHEN fb.winner_id = fb.player1_id THEN u1.username
-            WHEN fb.winner_id = fb.player2_id THEN u2.username
-            ELSE NULL
-          END as winner,
-          fb.total_rounds as rounds
-        FROM feihua_battles fb
-        JOIN users u1 ON fb.player1_id = u1.id
-        JOIN users u2 ON fb.player2_id = u2.id
-        WHERE fb.ended_at IS NOT NULL
-        ORDER BY ${endedUnix} DESC
-        LIMIT 20
-      `, (err, rows) => {
-        if (err) { reject(err); return; }
-        resolve((rows || []).map((r) => ({
-          ...r,
-          date: normalizeFeihuaEndedAtForClient(r.date) || r.date
-        })));
-      });
-    });
+    const recentGameRows = await db.all(`
+      SELECT
+        fb.id,
+        fb.ended_at as date,
+        fb.keyword,
+        u1.username as player1,
+        u2.username as player2,
+        CASE
+          WHEN fb.winner_id = fb.player1_id THEN u1.username
+          WHEN fb.winner_id = fb.player2_id THEN u2.username
+          ELSE NULL
+        END as winner,
+        fb.total_rounds as rounds
+      FROM feihua_battles fb
+      JOIN users u1 ON fb.player1_id = u1.id
+      JOIN users u2 ON fb.player2_id = u2.id
+      WHERE fb.ended_at IS NOT NULL
+      ORDER BY ${endedUnix} DESC
+      LIMIT 20
+    `);
+    const recentGames = (recentGameRows || []).map((r) => ({
+      ...r,
+      date: normalizeFeihuaEndedAtForClient(r.date) || r.date
+    }));
 
     res.json({
       stats,
       trend,
-      topPlayers,
+      topPlayers: topPlayersMapped,
       hotWords,
       recentGames
     });
@@ -1830,7 +1509,6 @@ router.get('/game-data', authenticateTeacher, async (req, res) => {
   }
 });
 
-// 管理看板扩展：更多维度图表数据
 router.get('/dashboard-more', authenticateTeacher, async (req, res) => {
   try {
     const lastDays = [];
@@ -1842,51 +1520,36 @@ router.get('/dashboard-more', authenticateTeacher, async (req, res) => {
     }
 
     const [learningRows, classRows, hourRows, aiRow, creationRows] = await Promise.all([
-      new Promise((resolve, reject) => {
-        db.all(
-          `SELECT DATE(last_view_time) as date, COUNT(*) as count
-           FROM learning_records
-           WHERE DATE(last_view_time) >= DATE('now', '-13 days')
-           GROUP BY DATE(last_view_time)
-           ORDER BY date`,
-          (err, rows) => (err ? reject(err) : resolve(rows || []))
-        );
-      }),
-      new Promise((resolve, reject) => {
-        db.all(
-          `SELECT COALESCE(c.class_name, CASE WHEN u.class_id IS NULL THEN '未分班' ELSE '班级 ' || u.class_id END) as label,
-                  COUNT(*) as count
-           FROM users u
-           LEFT JOIN classes c ON u.class_id = c.id
-           GROUP BY u.class_id
-           ORDER BY count DESC`,
-          (err, rows) => (err ? reject(err) : resolve(rows || []))
-        );
-      }),
-      new Promise((resolve, reject) => {
-        db.all(
-          `SELECT CAST(strftime('%H', answered_at) AS INTEGER) as hour, COUNT(*) as count
-           FROM user_challenge_records
-           GROUP BY strftime('%H', answered_at)
-           ORDER BY hour`,
-          (err, rows) => (err ? reject(err) : resolve(rows || []))
-        );
-      }),
-      new Promise((resolve, reject) => {
-        db.get(
-          `SELECT 
-            SUM(CASE WHEN used_ai_help = 1 THEN 1 ELSE 0 END) as with_ai,
-            SUM(CASE WHEN COALESCE(used_ai_help, 0) = 0 THEN 1 ELSE 0 END) as without_ai
-           FROM user_challenge_records`,
-          (err, row) => (err ? reject(err) : resolve(row || { with_ai: 0, without_ai: 0 }))
-        );
-      }),
-      new Promise((resolve, reject) => {
-        db.all(
-          `SELECT COALESCE(type, '未分类') as type, COUNT(*) as count FROM creations GROUP BY type ORDER BY count DESC`,
-          (err, rows) => (err ? reject(err) : resolve(rows || []))
-        );
-      })
+      db.all(
+        `SELECT (last_view_time)::date as date, COUNT(*) as count
+         FROM learning_records
+         WHERE (last_view_time)::date >= CURRENT_DATE - INTERVAL '13 days'
+         GROUP BY (last_view_time)::date
+         ORDER BY date`
+      ),
+      db.all(
+        `SELECT COALESCE(c.class_name, CASE WHEN u.class_id IS NULL THEN '未分班' ELSE '班级 ' || u.class_id END) as label,
+                COUNT(*) as count
+         FROM users u
+         LEFT JOIN classes c ON u.class_id = c.id
+         GROUP BY u.class_id
+         ORDER BY count DESC`
+      ),
+      db.all(
+        `SELECT EXTRACT(HOUR FROM answered_at)::INTEGER as hour, COUNT(*) as count
+         FROM user_challenge_records
+         GROUP BY EXTRACT(HOUR FROM answered_at)
+         ORDER BY hour`
+      ),
+      db.get(
+        `SELECT
+          SUM(CASE WHEN used_ai_help = 1 THEN 1 ELSE 0 END) as with_ai,
+          SUM(CASE WHEN COALESCE(used_ai_help, 0) = 0 THEN 1 ELSE 0 END) as without_ai
+         FROM user_challenge_records`
+      ),
+      db.all(
+        `SELECT COALESCE(type, '未分类') as type, COUNT(*) as count FROM creations GROUP BY type ORDER BY count DESC`
+      )
     ]);
 
     const poemStudyByDay = lastDays.map((day) => {
@@ -1915,58 +1578,52 @@ router.get('/dashboard-more', authenticateTeacher, async (req, res) => {
   }
 });
 
-// 诗词库管理 CRUD 接口
-// 获取所有诗词（支持分页、搜索、过滤）
-router.get('/poems', authenticateTeacher, (req, res) => {
+router.get('/poems', authenticateTeacher, async (req, res) => {
   try {
     const { page = 1, limit = 50, keyword = '', dynasty = '', author = '' } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    // 构建动态 WHERE 条件
     const conditions = [];
     const params = [];
+    let paramIdx = 0;
 
     if (keyword) {
-      conditions.push(`(title LIKE ? OR author LIKE ? OR content LIKE ?)`);
-      params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+      paramIdx++;
+      const kwIdx = paramIdx;
+      conditions.push(`(title LIKE $${kwIdx} OR author LIKE $${kwIdx} OR content LIKE $${kwIdx})`);
+      params.push(`%${keyword}%`);
     }
     if (dynasty) {
-      conditions.push(`dynasty = ?`);
+      paramIdx++;
+      conditions.push(`dynasty = $${paramIdx}`);
       params.push(dynasty);
     }
     if (author) {
-      conditions.push(`author = ?`);
+      paramIdx++;
+      conditions.push(`author = $${paramIdx}`);
       params.push(author);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // 获取总数
-    db.get(`SELECT COUNT(*) as total FROM poems ${whereClause}`, params, (err, countRow) => {
-      if (err) {
-        console.error('获取诗词总数失败:', err);
-        return res.status(500).json({ error: '获取诗词总数失败' });
-      }
+    const countRow = await db.get(`SELECT COUNT(*) as total FROM poems ${whereClause}`, params);
 
-      // 获取分页数据
-      db.all(
-        `SELECT * FROM poems ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-        [...params, parseInt(limit), offset],
-        (err, poems) => {
-          if (err) {
-            console.error('获取诗词列表失败:', err);
-            return res.status(500).json({ error: '获取诗词列表失败' });
-          }
+    paramIdx++;
+    const limitIdx = paramIdx;
+    paramIdx++;
+    const offsetIdx = paramIdx;
 
-          res.json({
-            success: true,
-            data: poems || [],
-            total: countRow?.total || 0,
-            page: parseInt(page),
-            limit: parseInt(limit)
-          });
-        }
-      );
+    const poems = await db.all(
+      `SELECT * FROM poems ${whereClause} ORDER BY created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      [...params, parseInt(limit), offset]
+    );
+
+    res.json({
+      success: true,
+      data: poems || [],
+      total: countRow?.total || 0,
+      page: parseInt(page),
+      limit: parseInt(limit)
     });
   } catch (error) {
     console.error('获取诗词列表失败:', error);
@@ -1974,40 +1631,29 @@ router.get('/poems', authenticateTeacher, (req, res) => {
   }
 });
 
-// 获取所有朝代列表（用于筛选）
-router.get('/poems/dynasties', authenticateTeacher, (req, res) => {
+router.get('/poems/dynasties', authenticateTeacher, async (req, res) => {
   try {
-    db.all('SELECT DISTINCT dynasty FROM poems WHERE dynasty IS NOT NULL ORDER BY dynasty', [], (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: '获取朝代列表失败' });
-      }
-      res.json(rows.map(r => r.dynasty));
-    });
+    const rows = await db.all('SELECT DISTINCT dynasty FROM poems WHERE dynasty IS NOT NULL ORDER BY dynasty');
+    res.json(rows.map(r => r.dynasty));
   } catch (error) {
     res.status(500).json({ error: '获取朝代列表失败' });
   }
 });
 
-// 获取单个诗词详情
-router.get('/poems/:id', authenticateTeacher, (req, res) => {
+router.get('/poems/:id', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
-    db.get('SELECT * FROM poems WHERE id = ?', [id], (err, poem) => {
-      if (err) {
-        return res.status(500).json({ error: '获取诗词详情失败' });
-      }
-      if (!poem) {
-        return res.status(404).json({ error: '诗词不存在' });
-      }
-      res.json({ success: true, data: poem });
-    });
+    const poem = await db.get('SELECT * FROM poems WHERE id = $1', [id]);
+    if (!poem) {
+      return res.status(404).json({ error: '诗词不存在' });
+    }
+    res.json({ success: true, data: poem });
   } catch (error) {
     res.status(500).json({ error: '获取诗词详情失败' });
   }
 });
 
-// 添加诗词
-router.post('/poems', authenticateTeacher, (req, res) => {
+router.post('/poems', authenticateTeacher, async (req, res) => {
   try {
     const { title, author, dynasty, content, tags } = req.body;
 
@@ -2015,25 +1661,18 @@ router.post('/poems', authenticateTeacher, (req, res) => {
       return res.status(400).json({ error: '标题、作者、朝代、内容不能为空' });
     }
 
-    db.run(
-      'INSERT INTO poems (title, author, dynasty, content, tags) VALUES (?, ?, ?, ?, ?)',
-      [title.trim(), author.trim(), dynasty.trim(), content.trim(), tags || ''],
-      function (err) {
-        if (err) {
-          console.error('添加诗词失败:', err);
-          return res.status(500).json({ error: '添加诗词失败' });
-        }
-        res.status(201).json({ success: true, message: '诗词添加成功', id: this.lastID });
-      }
+    const result = await db.run(
+      'INSERT INTO poems (title, author, dynasty, content, tags) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [title.trim(), author.trim(), dynasty.trim(), content.trim(), tags || '']
     );
+    res.status(201).json({ success: true, message: '诗词添加成功', id: result.rows[0].id });
   } catch (error) {
     console.error('添加诗词失败:', error);
     res.status(500).json({ error: '添加诗词失败' });
   }
 });
 
-// 更新诗词
-router.put('/poems/:id', authenticateTeacher, (req, res) => {
+router.put('/poems/:id', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
     const { title, author, dynasty, content, tags } = req.body;
@@ -2042,48 +1681,35 @@ router.put('/poems/:id', authenticateTeacher, (req, res) => {
       return res.status(400).json({ error: '标题、作者、朝代、内容不能为空' });
     }
 
-    db.run(
-      'UPDATE poems SET title = ?, author = ?, dynasty = ?, content = ?, tags = ? WHERE id = ?',
-      [title.trim(), author.trim(), dynasty.trim(), content.trim(), tags || '', id],
-      function (err) {
-        if (err) {
-          console.error('更新诗词失败:', err);
-          return res.status(500).json({ error: '更新诗词失败' });
-        }
-        if (this.changes === 0) {
-          return res.status(404).json({ error: '诗词不存在' });
-        }
-        res.json({ success: true, message: '诗词更新成功' });
-      }
+    const result = await db.run(
+      'UPDATE poems SET title = $1, author = $2, dynasty = $3, content = $4, tags = $5 WHERE id = $6',
+      [title.trim(), author.trim(), dynasty.trim(), content.trim(), tags || '', id]
     );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: '诗词不存在' });
+    }
+    res.json({ success: true, message: '诗词更新成功' });
   } catch (error) {
     console.error('更新诗词失败:', error);
     res.status(500).json({ error: '更新诗词失败' });
   }
 });
 
-// 删除诗词
-router.delete('/poems/:id', authenticateTeacher, (req, res) => {
+router.delete('/poems/:id', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
-    db.run('DELETE FROM poems WHERE id = ?', [id], function (err) {
-      if (err) {
-        console.error('删除诗词失败:', err);
-        return res.status(500).json({ error: '删除诗词失败' });
-      }
-      if (this.changes === 0) {
-        return res.status(404).json({ error: '诗词不存在' });
-      }
-      res.json({ success: true, message: '诗词删除成功' });
-    });
+    const result = await db.run('DELETE FROM poems WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: '诗词不存在' });
+    }
+    res.json({ success: true, message: '诗词删除成功' });
   } catch (error) {
     console.error('删除诗词失败:', error);
     res.status(500).json({ error: '删除诗词失败' });
   }
 });
 
-// 批量导入诗词（支持 JSON 数组格式）
-router.post('/poems/batch', authenticateTeacher, (req, res) => {
+router.post('/poems/batch', authenticateTeacher, async (req, res) => {
   try {
     const { poems: poemsList } = req.body;
 
@@ -2096,40 +1722,127 @@ router.post('/poems/batch', authenticateTeacher, (req, res) => {
       return res.status(400).json({ error: '没有有效的诗词数据' });
     }
 
-    db.serialize(() => {
-      const stmt = db.prepare('INSERT INTO poems (title, author, dynasty, content, tags) VALUES (?, ?, ?, ?, ?)');
-      let imported = 0;
-      let errors = 0;
+    let imported = 0;
+    let errors = 0;
 
-      validPoems.forEach(poem => {
-        stmt.run(
-          poem.title.trim(),
-          poem.author.trim(),
-          poem.dynasty.trim(),
-          poem.content.trim(),
-          poem.tags || ''
-        , function (err) {
-          if (!err) imported++;
-          else errors++;
-        });
-      });
+    for (const poem of validPoems) {
+      try {
+        await db.run(
+          'INSERT INTO poems (title, author, dynasty, content, tags) VALUES ($1, $2, $3, $4, $5)',
+          [poem.title.trim(), poem.author.trim(), poem.dynasty.trim(), poem.content.trim(), poem.tags || '']
+        );
+        imported++;
+      } catch (err) {
+        errors++;
+      }
+    }
 
-      stmt.finalize((err) => {
-        if (err) {
-          console.error('批量导入诗词失败:', err);
-          return res.status(500).json({ error: '批量导入诗词失败' });
-        }
-        res.status(201).json({
-          success: true,
-          message: `成功导入 ${imported} 首诗词${errors > 0 ? `，失败 ${errors} 首` : ''}`,
-          imported,
-          errors
-        });
-      });
+    res.status(201).json({
+      success: true,
+      message: `成功导入 ${imported} 首诗词${errors > 0 ? `，失败 ${errors} 首` : ''}`,
+      imported,
+      errors
     });
   } catch (error) {
     console.error('批量导入诗词失败:', error);
     res.status(500).json({ error: '批量导入诗词失败' });
+  }
+});
+
+// ===== 知识诊断 API =====
+// 知识维度定义（统一从 knowledgeStateService 读取，不再依赖 knowledgeDiagnosisService）
+router.get('/knowledge/dimensions', authenticateTeacher, async (req, res) => {
+  try {
+    res.json({ data: knowledgeStateService.KNOWLEDGE_DIMENSIONS });
+  } catch (err) {
+    res.status(500).json({ error: '获取知识维度失败' });
+  }
+});
+
+// 班级知识掌握概览 — Source of Truth: student_knowledge_states
+router.get('/knowledge/overview', authenticateTeacher, async (req, res) => {
+  try {
+    const classId = req.query.classId ? parseInt(req.query.classId) : null;
+    const data = await knowledgeStateService.getClassKnowledgeOverview(classId);
+    res.json({ data, source: 'student_knowledge_states' });
+  } catch (err) {
+    console.error('班级知识概览失败:', err);
+    res.status(500).json({ error: '获取班级知识概览失败' });
+  }
+});
+
+// 班级学生×知识维度热力图 — Source of Truth: student_knowledge_states
+router.get('/knowledge/heatmap', authenticateTeacher, async (req, res) => {
+  try {
+    const classId = req.query.classId ? parseInt(req.query.classId) : null;
+    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+    const data = await knowledgeStateService.getClassKnowledgeHeatmap(classId, limit);
+    res.json({ data, source: 'student_knowledge_states' });
+  } catch (err) {
+    console.error('知识热力图失败:', err);
+    res.status(500).json({ error: '获取知识热力图失败' });
+  }
+});
+
+// 高频薄弱知识点 — Source of Truth: student_knowledge_states
+router.get('/knowledge/weak-points', authenticateTeacher, async (req, res) => {
+  try {
+    const classId = req.query.classId ? parseInt(req.query.classId) : null;
+    const topN = req.query.topN ? parseInt(req.query.topN) : 10;
+    const data = await knowledgeStateService.getWeakPoints(classId, topN);
+    const suggestion = knowledgeStateService.generateTeachingSuggestion(data.dimensionSummary);
+    res.json({ data, suggestion, source: 'student_knowledge_states' });
+  } catch (err) {
+    console.error('薄弱知识点失败:', err);
+    res.status(500).json({ error: '获取薄弱知识点失败' });
+  }
+});
+
+// 学生知识画像（可解释）— Source of Truth: student_knowledge_states
+router.get('/knowledge/student/:id/profile', authenticateTeacher, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const cognitiveDiagnosis = require('../services/cognitiveDiagnosisService');
+    const masteryEngine = require('../services/masteryUpdateEngine');
+
+    const states = await masteryEngine.getAllStates(userId);
+    const diag = await cognitiveDiagnosis.diagnoseStudent(userId);
+    const dimMap = {};
+    diag.points.forEach(p => { dimMap[p.code] = p; });
+
+    const dimensions = diag.dimensionSummary.map(d => ({
+      key: d.code,
+      label: d.name,
+      icon: '',
+      mastery: d.avgMastery,
+      confidence: d.avgConfidence,
+      count: d.coveredPoints,
+      evidenceCount: d.coveredPoints,
+      level: (dimMap[d.code] || {}).level,
+    }));
+
+    res.json({
+      data: {
+        userId,
+        dimensions,
+        weakDimensions: diag.highConfidenceWeak.map(w => ({
+          key: w.code, label: w.name, mastery: w.mastery, confidence: w.confidence,
+          evidenceCount: w.attemptCount, errorCount: w.errorCount,
+        })),
+        lowEvidence: diag.lowEvidence,
+        stats: {
+          learnedPoems: 0,
+          totalWrongQuestions: diag.points.reduce((a, p) => a + p.errorCount, 0),
+          totalPoints: diag.totalPoints,
+        },
+        source: 'student_knowledge_states',
+        algorithmVersion: masteryEngine.MASTERY_ALGORITHM_VERSION,
+        hasData: states.length > 0,
+      },
+    });
+  } catch (err) {
+    console.error('学生知识画像失败:', err);
+    res.status(500).json({ error: '获取学生知识画像失败' });
   }
 });
 

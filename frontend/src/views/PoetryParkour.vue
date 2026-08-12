@@ -1275,7 +1275,7 @@ export default {
         const apiBaseUrl = 'http://localhost:3000/api';
 
         for (const wq of wrongQuestions.value) {
-          const questionContent = `${wq.beforeBlank}【${wq.correctChar}】${wq.afterBlank}`;
+          const questionContent = `${wq.beforeBlank}【】${wq.afterBlank}`;
 
           try {
             const response = await fetch(`${apiBaseUrl}/wrong-questions/add`, {

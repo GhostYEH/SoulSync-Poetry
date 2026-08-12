@@ -1,12 +1,9 @@
-// 首页 API 路由：排行榜 + 个人学习数据
 const express = require('express');
 const router = express.Router();
 const { optionalAuthenticateToken } = require('../middleware/auth');
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 const learningService = require('../services/learningService');
 
-// ==================== 排行榜 ====================
-// 示例数据（当数据库没有数据时使用）
 const sampleRankingData = {
   feihua: [
     { id: 1, username: '李清照', score: 9850, unit: '分', meta: '飞花王者' },
@@ -32,20 +29,19 @@ const sampleRankingData = {
   ]
 };
 
-// 1. 诗词闯关排行榜（按最高关卡）
-router.get('/leaderboard/challenge', (req, res) => {
-  db.all(`
-    SELECT
-      u.id,
-      u.username,
-      COALESCE(ucp.highest_level, 0) AS score
-    FROM users u
-    LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
-    WHERE u.username IS NOT NULL
-    ORDER BY score DESC, u.id ASC
-    LIMIT 20
-  `, [], (err, rows) => {
-    if (err) return res.status(500).json({ message: '查询失败' });
+router.get('/leaderboard/challenge', async (req, res) => {
+  try {
+    const rows = await db.all(`
+      SELECT
+        u.id,
+        u.username,
+        COALESCE(ucp.highest_level, 0) AS score
+      FROM users u
+      LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
+      WHERE u.username IS NOT NULL
+      ORDER BY score DESC, u.id ASC
+      LIMIT 20
+    `, []);
     let list = [];
     if (rows && rows.length > 0) {
       list = rows.map((r, i) => ({
@@ -60,23 +56,24 @@ router.get('/leaderboard/challenge', (req, res) => {
       list = sampleRankingData.challenge;
     }
     res.json({ success: true, data: list });
-  });
+  } catch (err) {
+    res.status(500).json({ message: '查询失败' });
+  }
 });
 
-// 2. 飞花令排行榜（按 rating）
-router.get('/leaderboard/feihua', (req, res) => {
-  db.all(`
-    SELECT
-      u.id,
-      u.username,
-      COALESCE(fr.rating, 1000) AS score
-    FROM users u
-    LEFT JOIN feihua_rankings fr ON u.id = fr.user_id
-    WHERE u.username IS NOT NULL
-    ORDER BY score DESC, u.id ASC
-    LIMIT 20
-  `, [], (err, rows) => {
-    if (err) return res.status(500).json({ message: '查询失败' });
+router.get('/leaderboard/feihua', async (req, res) => {
+  try {
+    const rows = await db.all(`
+      SELECT
+        u.id,
+        u.username,
+        COALESCE(fr.rating, 1000) AS score
+      FROM users u
+      LEFT JOIN feihua_rankings fr ON u.id = fr.user_id
+      WHERE u.username IS NOT NULL
+      ORDER BY score DESC, u.id ASC
+      LIMIT 20
+    `, []);
     let list = [];
     if (rows && rows.length > 0) {
       list = rows.map((r, i) => ({
@@ -91,23 +88,24 @@ router.get('/leaderboard/feihua', (req, res) => {
       list = sampleRankingData.feihua;
     }
     res.json({ success: true, data: list });
-  });
+  } catch (err) {
+    res.status(500).json({ message: '查询失败' });
+  }
 });
 
-// 3. 创作排行榜（按平均 AI 评分）
-router.get('/leaderboard/creation', (req, res) => {
-  db.all(`
-    SELECT
-      u.id,
-      u.username,
-      ROUND(COALESCE(cs.average_score, 0), 1) AS score
-    FROM users u
-    LEFT JOIN creation_stats cs ON u.id = cs.user_id
-    WHERE u.username IS NOT NULL
-    ORDER BY score DESC, u.id ASC
-    LIMIT 20
-  `, [], (err, rows) => {
-    if (err) return res.status(500).json({ message: '查询失败' });
+router.get('/leaderboard/creation', async (req, res) => {
+  try {
+    const rows = await db.all(`
+      SELECT
+        u.id,
+        u.username,
+        ROUND(COALESCE(cs.average_score, 0), 1) AS score
+      FROM users u
+      LEFT JOIN creation_stats cs ON u.id = cs.user_id
+      WHERE u.username IS NOT NULL
+      ORDER BY score DESC, u.id ASC
+      LIMIT 20
+    `, []);
     let list = [];
     if (rows && rows.length > 0) {
       list = rows.map((r, i) => ({
@@ -122,26 +120,27 @@ router.get('/leaderboard/creation', (req, res) => {
       list = sampleRankingData.creation;
     }
     res.json({ success: true, data: list });
-  });
+  } catch (err) {
+    res.status(500).json({ message: '查询失败' });
+  }
 });
 
-// 4. 综合排行榜（闯关 + 飞花令 + 创作加权总分）
-router.get('/leaderboard/overall', (req, res) => {
-  db.all(`
-    SELECT
-      u.id,
-      u.username,
-      COALESCE(ucp.highest_level * 100, 0) +
-      COALESCE(fr.rating, 1000) +
-      COALESCE(cs.average_score * 10, 0) AS score
-    FROM users u
-    LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
-    LEFT JOIN feihua_rankings fr ON u.id = fr.user_id
-    LEFT JOIN creation_stats cs ON u.id = cs.user_id
-    ORDER BY score DESC, u.id ASC
-    LIMIT 20
-  `, [], (err, rows) => {
-    if (err) return res.status(500).json({ message: '查询失败' });
+router.get('/leaderboard/overall', async (req, res) => {
+  try {
+    const rows = await db.all(`
+      SELECT
+        u.id,
+        u.username,
+        COALESCE(ucp.highest_level * 100, 0) +
+        COALESCE(fr.rating, 1000) +
+        COALESCE(cs.average_score * 10, 0) AS score
+      FROM users u
+      LEFT JOIN user_challenge_progress ucp ON u.id = ucp.user_id
+      LEFT JOIN feihua_rankings fr ON u.id = fr.user_id
+      LEFT JOIN creation_stats cs ON u.id = cs.user_id
+      ORDER BY score DESC, u.id ASC
+      LIMIT 20
+    `, []);
     const list = rows.map((r, i) => ({
       id: r.id,
       username: r.username,
@@ -150,11 +149,11 @@ router.get('/leaderboard/overall', (req, res) => {
       meta: getOverallRank(r.score, i + 1)
     }));
     res.json({ success: true, data: list });
-  });
+  } catch (err) {
+    res.status(500).json({ message: '查询失败' });
+  }
 });
 
-// ==================== 个人学习数据 ====================
-// 必须登录，否则返回空数据（前端展示"请登录"提示）
 router.get('/learning-stats', optionalAuthenticateToken, async (req, res) => {
   if (!req.user) {
     return res.json({ success: true, data: { loggedIn: false } });
@@ -162,10 +161,8 @@ router.get('/learning-stats', optionalAuthenticateToken, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    // 使用和学习仪表盘一样的数据来源
     const dashboardData = await learningService.getLearningDashboard(userId);
-    
-    // 构建返回数据
+
     const stats = {
       loggedIn: true,
       poemsStudied: dashboardData.totalLearned || 0,
@@ -184,71 +181,30 @@ router.get('/learning-stats', optionalAuthenticateToken, async (req, res) => {
       weeklyCheckins: 0
     };
 
-    // 尝试获取其他数据（闯关、飞花令、创作等）
     try {
-      const challengePromise = new Promise((resolve) => {
+      const [challengeData, feihuaData, creationData, checkinData] = await Promise.all([
         db.get(`
-          SELECT COALESCE(highest_level, 0) AS challengeLevel,
-                 COALESCE(current_challenge_level, 1) AS currentLevel
-          FROM user_challenge_progress WHERE user_id = ?
-        `, [userId], (err, r) => {
-          if (!err && r) {
-            resolve({ challengeLevel: r.challengeLevel, currentLevel: r.currentLevel });
-          } else {
-            resolve(null);
-          }
-        });
-      });
-
-      const feihuaPromise = new Promise((resolve) => {
+          SELECT COALESCE(highest_level, 0) AS "challengeLevel",
+                 COALESCE(current_challenge_level, 1) AS "currentLevel"
+          FROM user_challenge_progress WHERE user_id = $1
+        `, [userId]),
         db.get(`
           SELECT COALESCE(rating, 1000) AS rating,
                  COALESCE(wins, 0) AS wins,
                  COALESCE(losses, 0) AS losses,
-                 COALESCE(total_battles, 0) AS totalBattles
-          FROM feihua_rankings WHERE user_id = ?
-        `, [userId], (err, r) => {
-          if (!err && r) {
-            resolve(r);
-          } else {
-            resolve(null);
-          }
-        });
-      });
-
-      const creationPromise = new Promise((resolve) => {
+                 COALESCE(total_battles, 0) AS "totalBattles"
+          FROM feihua_rankings WHERE user_id = $1
+        `, [userId]),
         db.get(`
-          SELECT COALESCE(total_creations, 0) AS totalCreations,
-                 COALESCE(average_score, 0) AS avgCreationScore,
-                 COALESCE(highest_score, 0) AS bestCreationScore
-          FROM creation_stats WHERE user_id = ?
-        `, [userId], (err, r) => {
-          if (!err && r) {
-            resolve(r);
-          } else {
-            resolve(null);
-          }
-        });
-      });
-
-      const checkinPromise = new Promise((resolve) => {
+          SELECT COALESCE(total_creations, 0) AS "totalCreations",
+                 COALESCE(average_score, 0) AS "avgCreationScore",
+                 COALESCE(highest_score, 0) AS "bestCreationScore"
+          FROM creation_stats WHERE user_id = $1
+        `, [userId]),
         db.get(`
           SELECT COUNT(*) AS checkins FROM daily_checkin
-          WHERE user_id = ? AND date >= date('now', '-7 days')
-        `, [userId], (err, r) => {
-          if (!err && r) {
-            resolve(r.checkins);
-          } else {
-            resolve(0);
-          }
-        });
-      });
-
-      const [challengeData, feihuaData, creationData, weeklyCheckins] = await Promise.all([
-        challengePromise,
-        feihuaPromise,
-        creationPromise,
-        checkinPromise
+          WHERE user_id = $1 AND date >= CURRENT_DATE - INTERVAL '7 days'
+        `, [userId])
       ]);
 
       if (challengeData) {
@@ -266,7 +222,7 @@ router.get('/learning-stats', optionalAuthenticateToken, async (req, res) => {
         stats.avgCreationScore = creationData.avgCreationScore;
         stats.bestCreationScore = creationData.bestCreationScore;
       }
-      stats.weeklyCheckins = weeklyCheckins;
+      stats.weeklyCheckins = checkinData ? checkinData.checkins : 0;
 
     } catch (additionalErr) {
       console.warn('获取额外学习数据失败:', additionalErr);
@@ -279,7 +235,6 @@ router.get('/learning-stats', optionalAuthenticateToken, async (req, res) => {
   }
 });
 
-// ==================== 段位/称号辅助函数 ====================
 function getChallengeRank(score, pos) {
   if (pos <= 2) return pos === 1 ? '闯关之王' : pos === 2 ? '闯关宗师' : '闯关大师';
   if (score >= 50) return '闯关达人';

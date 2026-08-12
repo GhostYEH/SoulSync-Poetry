@@ -144,6 +144,7 @@ import poetryLevels from '../data/poetryLevels.json';
 import { ref, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import api from '../services/api';
+import { generateAttemptId } from '../utils/attemptId';
 
 export default {
   name: 'PoemChallenge',
@@ -157,6 +158,7 @@ export default {
     const currentLevel = ref(1);
     const highestLevel = ref(0);
     const currentQuestion = ref(null);
+    const clientAttemptId = ref(null);
     const userAnswer = ref('');
     const answered = ref(false);
     const isCorrect = ref(false);
@@ -265,6 +267,7 @@ export default {
       const q = questions.value.find(q => q.level === currentLevel.value);
       if (q) {
         currentQuestion.value = q;
+        clientAttemptId.value = generateAttemptId();
         loading.value = false;
       } else {
         const levelData = poetryLevels.find(l => l.level === currentLevel.value);
@@ -292,6 +295,7 @@ export default {
           questions.value.push(newQ);
           saveLocalQuestions(questions.value);
           currentQuestion.value = newQ;
+          clientAttemptId.value = generateAttemptId();
         }
         loading.value = false;
       }
@@ -380,7 +384,8 @@ export default {
           isCorrect: isCorrect.value,
           correctAnswer: correctAnswer,
           poemTitle: currentQuestion.value.title,
-          poemAuthor: currentQuestion.value.author
+          poemAuthor: currentQuestion.value.author,
+          clientAttemptId: clientAttemptId.value
         });
 
         currentRecordId.value = result.recordId;
@@ -469,6 +474,7 @@ export default {
           }
           saveLocalQuestions(questions.value);
           currentQuestion.value = newQ;
+          clientAttemptId.value = generateAttemptId();
         }
       } catch (error) {
         console.error('刷新题目失败:', error);

@@ -4,7 +4,7 @@
  * 数据格式: { poem: 诗句, author: 作者, dynasty: 朝代, title: 诗题 }
  */
 
-export const feihuaPoems = {
+const feihuaPoems = {
   '春': [
     { poem: '春眠不觉晓，处处闻啼鸟', author: '孟浩然', dynasty: '唐', title: '春晓' },
     { poem: '春江潮水连海平，海上明月共潮生', author: '张若虚', dynasty: '唐', title: '春江花月夜' },
@@ -552,18 +552,18 @@ export const feihuaPoems = {
 }
 
 // 获取所有可用的关键字
-export const getAvailableKeywords = () => {
+const getAvailableKeywords = () => {
   return Object.keys(feihuaPoems).filter(k => feihuaPoems[k] && feihuaPoems[k].length > 0)
 }
 
 // 根据关键字获取诗句列表（排除已使用的）
-export const getPoemsForKeyword = (keyword, usedPoems = []) => {
+const getPoemsForKeyword = (keyword, usedPoems = []) => {
   const poems = feihuaPoems[keyword] || []
   return poems.filter(p => !usedPoems.includes(p.poem))
 }
 
 // 验证诗句是否有效（包含关键字且在数据库中）
-export const validatePoem = (input, keyword, usedPoems = []) => {
+const validatePoem = (input, keyword, usedPoems = []) => {
   const normalized = input.replace(/[，。！？；：、""''（）【】]/g, '').trim()
   
   if (!normalized) {
@@ -602,7 +602,7 @@ export const validatePoem = (input, keyword, usedPoems = []) => {
 }
 
 // 带AI验证的完整验证函数（用于需要AI验证的场景）
-export const validatePoemWithAI = async (input, keyword, usedPoems = []) => {
+const validatePoemWithAI = async (input, keyword, usedPoems = []) => {
   // 先尝试本地验证
   const localResult = validatePoem(input, keyword, usedPoems)
   
@@ -635,12 +635,12 @@ export const validatePoemWithAI = async (input, keyword, usedPoems = []) => {
 }
 
 // 获取关键字对应的诗句数量
-export const getKeywordCount = (keyword) => {
+const getKeywordCount = (keyword) => {
   return feihuaPoems[keyword]?.length || 0
 }
 
 // 调用后端AI验证诗句（当本地数据库没有时使用）
-export const validatePoemByAI = async (input, keyword) => {
+const validatePoemByAI = async (input, keyword) => {
   try {
     const token = localStorage.getItem('token');
     const baseUrl = window.electronAPI 
@@ -685,3 +685,13 @@ export const validatePoemByAI = async (input, keyword) => {
     };
   }
 }
+
+module.exports = {
+  feihuaPoems,
+  getAvailableKeywords,
+  getPoemsForKeyword,
+  validatePoem,
+  validatePoemWithAI,
+  getKeywordCount,
+  validatePoemByAI
+};

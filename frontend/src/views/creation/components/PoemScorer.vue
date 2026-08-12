@@ -18,6 +18,38 @@
       </div>
     </div>
 
+    <!-- 意境图片 -->
+    <div class="image-section" v-if="score && score.image && score.image.imageUrl">
+      <h3 class="section-title">
+        <span class="title-icon">🖼️</span>
+        意境图
+      </h3>
+      <div class="image-container" @click="showFullscreenImage = true">
+        <img 
+          :src="score.image.imageUrl" 
+          alt="诗词意境图" 
+          class="poem-image"
+          @load="imageLoaded"
+        />
+        <div class="image-overlay">
+          <span class="overlay-text">点击查看全屏</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 全屏图片模态框 -->
+    <div class="fullscreen-modal" v-if="showFullscreenImage && score && score.image && score.image.imageUrl" @click="closeFullscreen">
+      <div class="fullscreen-content" @click.stop>
+        <button class="fullscreen-close" @click="closeFullscreen">×</button>
+        <img 
+          :src="score.image.imageUrl" 
+          alt="诗词意境图" 
+          class="fullscreen-image"
+          :class="{ 'scaling': isScaling }"
+        />
+      </div>
+    </div>
+
     <!-- 总分展示 -->
     <div class="total-score-section" v-if="score">
       <div class="score-circle-container">
@@ -279,6 +311,26 @@ export default {
   emits: ['close', 'save', 'polish', 'apply'],
   setup(props, { emit }) {
     const showCompare = ref(false);
+    const showFullscreenImage = ref(false);
+    const isScaling = ref(false);
+
+    // 图片加载完成后开始缩放动画
+    const imageLoaded = () => {
+      if (showFullscreenImage.value) {
+        startScalingAnimation();
+      }
+    };
+
+    // 开始缩放动画
+    const startScalingAnimation = () => {
+      isScaling.value = true;
+    };
+
+    // 关闭全屏
+    const closeFullscreen = () => {
+      showFullscreenImage.value = false;
+      isScaling.value = false;
+    };
 
     // 计算圆环进度
     const circleProgress = computed(() => {
@@ -360,6 +412,10 @@ export default {
 
     return {
       showCompare,
+      showFullscreenImage,
+      isScaling,
+      imageLoaded,
+      closeFullscreen,
       circleProgress,
       getScoreColor,
       getGradeText,
@@ -966,6 +1022,122 @@ export default {
   max-height: 0;
 }
 
+/* 意境图片 */
+.image-section {
+  margin-bottom: 28px;
+}
+
+.image-container {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.3s ease;
+}
+
+.image-container:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 30px rgba(139, 115, 85, 0.15);
+}
+
+.poem-image {
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.image-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.image-container:hover .image-overlay {
+  opacity: 1;
+}
+
+.overlay-text {
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* 全屏图片模态框 */
+.fullscreen-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.fullscreen-content {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+
+.fullscreen-close {
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fullscreen-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+.fullscreen-image {
+  max-width: 100%;
+  max-height: 90vh;
+  border-radius: 8px;
+  transition: transform 8s ease-in-out;
+}
+
+.fullscreen-image.scaling {
+  animation: scaleAnimation 8s ease-in-out infinite;
+}
+
+@keyframes scaleAnimation {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 /* 响应式 */
 @media (max-width: 600px) {
   .poem-scorer {
@@ -983,6 +1155,18 @@ export default {
 
   .polish-actions {
     flex-direction: column;
+  }
+
+  .poem-image {
+    height: 150px;
+  }
+
+  .fullscreen-close {
+    top: -30px;
+    right: -30px;
+    width: 30px;
+    height: 30px;
+    font-size: 18px;
   }
 }
 </style>

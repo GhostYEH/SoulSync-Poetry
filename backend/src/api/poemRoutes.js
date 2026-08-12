@@ -72,20 +72,19 @@ router.get('/poems/:id', (req, res) => {
   }
 });
 
-// 获取每日一诗（改为随机一诗）
+// 获取每日一诗
 router.get('/daily-poem', (req, res) => {
   if (poems.length === 0) {
     return res.status(503).json({ message: '数据加载中' });
   }
   
-  // 完全随机选择
+
   const index = Math.floor(Math.random() * poems.length);
   const dailyPoem = poems[index];
   
   res.json(dailyPoem);
 });
 
-// 导出router和setPoems函数
 module.exports = {
   router,
   setPoems

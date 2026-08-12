@@ -1,7 +1,9 @@
 const express = require('express');
+
 const router = express.Router();
-const { db } = require('../utils/db');
+const db = require('../utils/db');
 const challengeService = require('../services/challengeService');
+const learningEventService = require('../services/learningEventService');
 
 const authenticateToken = require('../middleware/auth');
 
@@ -47,7 +49,7 @@ router.post('/questions/generate', authenticateToken, async (req, res) => {
 router.post('/answer/submit', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { level, question, userAnswer, correctAnswer, isCorrect, poemTitle, poemAuthor } = req.body;
+    const { level, question, userAnswer, correctAnswer, isCorrect, poemTitle, poemAuthor, usedAiHelp, clientAttemptId } = req.body;
     const result = await challengeService.submitAnswer(
       userId,
       level,
@@ -57,6 +59,28 @@ router.post('/answer/submit', authenticateToken, async (req, res) => {
       poemTitle,
       poemAuthor
     );
+
+    // 接入学习事件闭环（异步，不阻塞答题主流程）
+    // 幂等设计：clientAttemptId 由前端在一次答题开始时生成 UUID，HTTP 重试复用同一值
+    // 同一次 attempt 的 retry → 相同 eventKey → LearningEvent 不重复
+    // 不同时间重新答题 → 不同 clientAttemptId → 新 LearningEvent
+    const attemptKey = clientAttemptId || `legacy_record_${result.recordId}`;
+    if (!clientAttemptId) {
+      console.warn('[challengeRoutes] 未提供 clientAttemptId，无法保证幂等，回退到 recordId');
+    }
+    learningEventService.recordEvent({
+      userId,
+      eventType: isCorrect ? learningEventService.EVENT_TYPES.CORRECT_ANSWER
+                            : learningEventService.EVENT_TYPES.WRONG_ANSWER,
+      questionId: result.recordId ? String(result.recordId) : null,
+      questionText: question,
+      correct: !!isCorrect,
+      difficulty: level || 3,
+      hintCount: usedAiHelp ? 1 : 0,
+      eventKey: `answer:${userId}:${attemptKey}`,
+      metadata: { userAnswer, correctAnswer, poemTitle, poemAuthor, level, clientAttemptId: attemptKey },
+    }).catch(err => console.error('[learningEvent] 答题事件记录失败:', err.message));
+
     res.json(result);
   } catch (error) {
     console.error('提交答案失败:', error);

@@ -2,27 +2,30 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
 
-// 认证中间件
+// 认证中间件（严格模式）
+// 合法 Token → 正常用户
+// 缺失/无效/过期 Token → 401
+// 公开接口请使用 optionalAuthenticateToken
 function authenticateToken(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
-    
+
     if (!token) {
-      return res.status(401).json({ message: '未提供认证令牌' });
+      return res.status(401).json({ message: '未提供认证令牌', code: 'NO_TOKEN' });
     }
-    
+
     jwt.verify(token, config.jwt.secret, (err, decoded) => {
       if (err) {
-        return res.status(403).json({ message: '无效的认证令牌' });
+        const code = err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID';
+        return res.status(401).json({ message: '认证令牌无效或已过期', code });
       }
-      
-      // 将用户信息存储到请求对象中
+
       req.user = {
         userId: decoded.userId,
         username: decoded.username
       };
-      
+
       next();
     });
   } catch (error) {

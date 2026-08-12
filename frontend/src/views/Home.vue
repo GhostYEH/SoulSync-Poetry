@@ -116,7 +116,6 @@
             </div>
             <div class="daily-poem-right">
               <button
-                v-if="speechSynthesisSupported"
                 class="read-btn"
                 @click.stop="toggleRead(dailyPoem)"
               >
@@ -271,7 +270,6 @@
                 </div>
               </div>
               <button
-                v-if="speechSynthesisSupported"
                 class="read-btn-small"
                 @click.stop="toggleRead(poem)"
               >
@@ -384,6 +382,7 @@ export default {
       isReading: false,
       readingPoemId: null,
       speechUtterance: null,
+      audio: null,
       // 一言
       hitokotoText: '心有猛虎，细嗅蔷薇',
       hitokotoFrom: '余光中',
@@ -755,51 +754,57 @@ export default {
     },
     // 朗读
     toggleRead(poem) {
-      if (!this.speechSynthesisSupported) {
-        return
-      }
       if (this.isReading) {
-        speechSynthesis.cancel()
-        this.isReading = false
-        this.readingPoemId = null
+        this.stopReading()
         return
       }
       this.startReading(poem)
     },
-    startReading(poem) {
-      if (!poem || !poem.content) return
-      speechSynthesis.cancel()
-      let text = poem.content
-      text = text.replace(/([。！？；])\s*/g, '$1，').replace(/\n/g, '。')
-      const sentences = text.split(/(?<=[。！？；，])/).filter(s => s.trim())
-      let queue = [...sentences]
-      const speakNext = () => {
-        if (queue.length === 0) {
-          this.isReading = false
-          this.readingPoemId = null
-          return
-        }
-        const utterance = new SpeechSynthesisUtterance(queue.shift())
-        utterance.lang = 'zh-CN'
-        utterance.rate = 0.8
-        utterance.pitch = 1.1
-        utterance.volume = 1
-        const voices = speechSynthesis.getVoices()
-        const preferred = voices.find(v =>
-          v.name.includes('Xiaoxiao') ||
-          v.name.includes('Yunxi') ||
-          v.name.includes('女') ||
-          v.name.includes('Chinese')
-        )
-        if (preferred) utterance.voice = preferred
-        utterance.onend = () => {
-          setTimeout(speakNext, 600)
-        }
-        speechSynthesis.speak(utterance)
+    stopReading() {
+      if (this.audio) {
+        this.audio.pause()
+        this.audio.currentTime = 0
+        this.audio = null
       }
+      if (this.speechSynthesisSupported) {
+        speechSynthesis.cancel()
+      }
+      this.isReading = false
+      this.readingPoemId = null
+    },
+    async startReading(poem) {
+      if (!poem || !poem.content) return
+      
+      this.stopReading()
       this.isReading = true
       this.readingPoemId = poem.id
-      speakNext()
+      
+      try {
+        let text = poem.content
+        text = text.replace(/([。！？；])\s*/g, '$1，').replace(/\n/g, '。')
+        
+        const audioBlob = await api.ai.tts(text)
+        const audioUrl = URL.createObjectURL(audioBlob)
+        
+        this.audio = new Audio(audioUrl)
+        this.audio.onended = () => {
+          this.isReading = false
+          this.readingPoemId = null
+          URL.revokeObjectURL(audioUrl)
+        }
+        this.audio.onerror = () => {
+          console.error('音频播放失败')
+          this.isReading = false
+          this.readingPoemId = null
+          URL.revokeObjectURL(audioUrl)
+        }
+        
+        this.audio.play()
+      } catch (error) {
+        console.error('朗读失败:', error)
+        this.isReading = false
+        this.readingPoemId = null
+      }
     },
   },
 }

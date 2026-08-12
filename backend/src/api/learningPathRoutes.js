@@ -92,4 +92,29 @@ router.get('/assessment', authenticateToken, async (req, res) => {
   }
 });
 
+// 自适应推荐（基于知识状态）
+router.get('/adaptive', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const limit = req.query.limit ? parseInt(req.query.limit) : 5;
+    const data = await learningPathService.getAdaptiveRecommendation(userId, limit);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('自适应推荐失败:', error);
+    res.status(500).json({ message: '自适应推荐失败' });
+  }
+});
+
+// 今日复习
+router.get('/today-review', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.user;
+    const data = await learningPathService.getTodayReview(userId);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('获取今日复习失败:', error);
+    res.status(500).json({ message: '获取今日复习失败' });
+  }
+});
+
 module.exports = router;

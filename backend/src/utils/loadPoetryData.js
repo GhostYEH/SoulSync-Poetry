@@ -1,7 +1,7 @@
 // 数据加载脚本，将poetry文件夹中的诗词数据加载到数据库中
 const fs = require('fs');
 const path = require('path');
-const { db } = require('./db');
+const db = require('./db');
 
 // 诗词文件夹路径
 const POETRY_DIR = path.join(__dirname, '../../../poetry');
@@ -92,43 +92,27 @@ function traverseDirectory(dir, dynasty) {
 }
 
 // 检查诗词是否已存在
-function checkPoemExists(title, author) {
-  return new Promise((resolve, reject) => {
-    db.get(
-      'SELECT id FROM poems WHERE title = ? AND author = ?',
-      [title, author],
-      (err, row) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(!!row);
-        }
-      }
-    );
-  });
+async function checkPoemExists(title, author) {
+  const row = await db.get(
+    'SELECT id FROM poems WHERE title = $1 AND author = $2',
+    [title, author]
+  );
+  return !!row;
 }
 
 // 插入诗词数据
-function insertPoem(poem) {
-  return new Promise((resolve, reject) => {
-    db.run(
-      'INSERT INTO poems (title, author, dynasty, content, tags) VALUES (?, ?, ?, ?, ?)',
-      [poem.title, poem.author, poem.dynasty, poem.content, JSON.stringify(poem.tags)],
-      function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(this.lastID);
-        }
-      }
-    );
-  });
+async function insertPoem(poem) {
+  const result = await db.run(
+    'INSERT INTO poems (title, author, dynasty, content, tags) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+    [poem.title, poem.author, poem.dynasty, poem.content, JSON.stringify(poem.tags)]
+  );
+  return result.rows[0].id;
 }
 
 // 主函数
 async function loadPoetryData() {
   console.log('开始加载诗词数据...');
-  
+
   try {
     let totalPoems = 0;
     let newPoems = 0;
@@ -140,10 +124,10 @@ async function loadPoetryData() {
       if (fs.existsSync(folderPath)) {
         console.log(`正在处理 ${folderName}...`);
         const poems = traverseDirectory(folderPath, dynasty);
-        
+
         for (const poem of poems) {
           totalPoems++;
-          
+
           // 检查是否已存在
           const exists = await checkPoemExists(poem.title, poem.author);
           if (exists) {
@@ -166,7 +150,7 @@ async function loadPoetryData() {
     console.error('数据加载失败:', error);
   } finally {
     // 关闭数据库连接
-    db.close();
+    await db.close();
   }
 }
 

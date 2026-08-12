@@ -258,112 +258,59 @@ module.exports.callZhipuGenerateJSON = callZhipuGenerateJSON;
 // 构建AI讲解提示词
 function buildPrompt(poem, title, author, explanationType) {
   if (explanationType === "daily_life_explanation") {
-    return `
-      请赏析以下古诗文，重点从生活化诗意解释的角度进行分析：
-      将诗词意境转化为现代生活场景描述，让读者更容易理解
-      
-      古诗文信息：
-      标题：${title}
-      作者：${author}
-      内容：${poem}
-      
-      要求：
-      - 分析要具体，结合诗词的具体内容
-      - 语言要流畅、简洁
-      - 回答长度控制在50-100字之间
-      - 请按照JSON格式返回结果，包含以下字段：
-      - daily_life_explanation: 生活化诗意解释
-      
-      示例JSON格式：
-      {"daily_life_explanation": "..."}
-      `;
+    return `请从生活化角度赏析以下古诗文，将意境转化为现代生活场景，让读者易懂。
+
+标题：${title}
+作者：${author}
+内容：${poem}
+
+要求：具体分析，语言简洁，50-100字，JSON格式返回。
+
+{"daily_life_explanation": "..."}`;
   } else if (explanationType === "keyword_analysis") {
-    return `
-      请赏析以下古诗文，重点从关键词深度解析的角度进行分析：
-      对核心意象、典故、修辞手法的专业解读
-      
-      古诗文信息：
-      标题：${title}
-      作者：${author}
-      内容：${poem}
-      
-      要求：
-      - 分析要具体，结合诗词的具体内容
-      - 语言要流畅、简洁
-      - 回答长度控制在50-100字之间
-      - 请按照JSON格式返回结果，包含以下字段：
-      - keyword_analysis: 关键词深度解析
-      
-      示例JSON格式：
-      {"keyword_analysis": "..."}
-      `;
+    return `请从关键词角度赏析以下古诗文，解析核心意象、典故和修辞手法。
+
+标题：${title}
+作者：${author}
+内容：${poem}
+
+要求：具体分析，语言简洁，50-100字，JSON格式返回。
+
+{"keyword_analysis": "..."}`;
   } else if (explanationType === "artistic_conception") {
-    return `
-      请赏析以下古诗文，重点从意境赏析的角度进行分析：
-      分析诗词营造的具体意境，表达的情感和思想
-      
-      古诗文信息：
-      标题：${title}
-      作者：${author}
-      内容：${poem}
-      
-      要求：
-      - 分析要具体，结合诗词的具体内容
-      - 语言要流畅、简洁
-      - 回答长度控制在50-100字之间
-      - 请按照JSON格式返回结果，包含以下字段：
-      - artistic_conception: 意境赏析
-      
-      示例JSON格式：
-      {"artistic_conception": "..."}
-      `;
+    return `请从意境角度赏析以下古诗文，分析营造的意境和表达的情感思想。
+
+标题：${title}
+作者：${author}
+内容：${poem}
+
+要求：具体分析，语言简洁，50-100字，JSON格式返回。
+
+{"artistic_conception": "..."}`;
   } else if (explanationType === "thinking_questions") {
-    return `
-      请赏析以下古诗文，重点从引导性思考题的角度进行分析：
-      设计开放性问题，促进深度学习与思考
-      
-      古诗文信息：
-      标题：${title}
-      作者：${author}
-      内容：${poem}
-      
-      要求：
-      - 问题要具体，结合诗词的具体内容
-      - 语言要流畅、简洁
-      - 请设计3个问题，每个问题控制在20-30字之间
-      - 请按照JSON格式返回结果，包含以下字段：
-      - thinking_questions: 引导性思考题（数组格式）
-      
-      示例JSON格式：
-      {"thinking_questions": ["...", "...", "..."]}
-      `;
+    return `请为以下古诗文设计3个引导性思考题，促进深度学习与思考。
+
+标题：${title}
+作者：${author}
+内容：${poem}
+
+要求：问题具体，结合内容，每个问题20-30字，JSON数组格式返回。
+
+{"thinking_questions": ["...", "...", "..."]}`;
   } else {
-    return `
-      请赏析以下古诗文，从以下四个方面进行分析：
-      1. 生活化诗意解释：将诗词意境转化为现代生活场景描述
-      2. 关键词深度解析：对核心意象、典故、修辞手法的解读
-      3. 意境赏析：分析诗词营造的具体意境，表达的情感
-      4. 引导性思考题：设计开放性问题，促进思考
-      
-      古诗文信息：
-      标题：${title}
-      作者：${author}
-      内容：${poem}
-      
-      要求：
-      - 分析要具体，结合诗词的具体内容
-      - 语言要流畅、简洁
-      - 前三个方面的回答长度各控制在50-100字之间
-      - 请设计3个引导性问题，每个问题控制在20-30字之间
-      - 请按照JSON格式返回结果，包含以下字段：
-      - daily_life_explanation: 生活化诗意解释
-      - keyword_analysis: 关键词深度解析
-      - artistic_conception: 意境赏析
-      - thinking_questions: 引导性思考题（数组格式）
-      
-      示例JSON格式：
-      {"daily_life_explanation": "...", "keyword_analysis": "...", "artistic_conception": "...", "thinking_questions": ["...", "...", "..."]}
-      `;
+    return `请从四个方面赏析以下古诗文：
+1. 生活化解释：转化为现代场景
+2. 关键词解析：分析意象、典故、修辞
+3. 意境赏析：分析意境和情感
+4. 引导性问题：设计3个思考问题
+
+标题：${title}
+作者：${author}
+内容：${poem}
+
+要求：具体分析，语言简洁，前三点50-100字，问题20-30字，JSON格式返回。
+
+{"daily_life_explanation": "...", "keyword_analysis": "...", "artistic_conception": "...", "thinking_questions": ["...", "...", "..."]}`;
   }
 }
 
@@ -373,74 +320,115 @@ async function getAIRecitationCheck(original, input, poemTitle, poemAuthor, lear
     const apiKey = config.zhipu.apiKey;
     if (!apiKey) {
       console.error('[aiService] 缺少硅基流动API密钥');
-      return getMockRecitationCheck(original, input, learningRecord);
+      return {
+        score: 0,
+        wrongChars: [],
+        missing: [],
+        extra: [],
+        aiAdvice: 'AI服务暂时不可用，请稍后重试。'
+      };
     }
 
-    const prompt = `请对学生的古诗词背诵进行检测评分，对比原文和学生输入。
-
-【诗词信息】
-标题：${poemTitle || '未知'}
+    // 先进行程序化检测，获取错误信息
+    const programResult = checkRecitation(original, input);
+    
+    // 构建错误摘要，不发送原文内容
+    let errorSummary = '';
+    if (programResult.wrongChars.length > 0) {
+      errorSummary += `错字：${programResult.wrongChars.map(item => `"${item.input}"应为"${item.original}"`).join('、')}。`;
+    }
+    if (programResult.missing.length > 0) {
+      errorSummary += `漏字：${programResult.missing.map(item => `"${item.char}"`).join('、')}。`;
+    }
+    if (programResult.extra.length > 0) {
+      errorSummary += `多字：${programResult.extra.map(item => `"${item.char}"`).join('、')}。`;
+    }
+    
+    // 检查是否有特殊请求
+    const hasSpecialRequest = input.includes('满分') || input.includes('给我满分') || input.includes('请给我满分');
+    
+    // 根据分数和错误情况生成不同的提示词
+    let prompt = '';
+    if (hasSpecialRequest) {
+      prompt = `学生背诵检测：
+题目：《${poemTitle || '未知'}》
 作者：${poemAuthor || '未知'}
-原文：
-${original}
+得分：${programResult.score}分
+学生请求：学生请求给满分
 
-【学生输入】
-${input}
+作为语文老师，请用亲切、鼓励的语气回应学生的请求，告诉他背诵的真正意义，并给出学习建议（不超过50字）。`;
+    } else if (programResult.score >= 90) {
+      prompt = `学生背诵检测：
+题目：《${poemTitle || '未知'}》
+作者：${poemAuthor || '未知'}
+得分：${programResult.score}分
+错误：${errorSummary || '无'}
 
-【评分规则】
-1. score（总分，0-100分）：
-   - 90-100分：完全正确或仅有1-2处细微差异（如标点）
-   - 80-89分：有1-2个错字或漏字，整体流畅
-   - 70-79分：有3-5个错误，但主体内容正确
-   - 60-69分：有较多错误，但能看出是在背诵这首诗
-   - 0-59分：错误过多或背诵内容与原文严重不符
+学生背诵得非常好，作为语文老师，请给予表扬和鼓励（不超过50字）。`;
+    } else if (programResult.score >= 70) {
+      prompt = `学生背诵检测：
+题目：《${poemTitle || '未知'}》
+作者：${poemAuthor || '未知'}
+得分：${programResult.score}分
+错误：${errorSummary}
 
-2. wrongChars（错字数组）：记录学生写错的字
-   格式：[{"position": 位置序号, "original": "原字", "input": "错字"}]
-   注意：position从0开始，仅统计汉字位置
+学生背诵还不错，作为语文老师，请指出问题并给出改进建议（不超过50字）。`;
+    } else {
+      prompt = `学生背诵检测：
+题目：《${poemTitle || '未知'}》
+作者：${poemAuthor || '未知'}
+得分：${programResult.score}分
+错误：${errorSummary}
 
-3. missing（漏字数组）：记录学生漏掉的字
-   格式：[{"position": 位置序号, "char": "漏字"}]
+学生背诵需要加强，作为语文老师，请给予鼓励并给出具体的学习建议（不超过50字）。`;
+    }
 
-4. extra（多字数组）：记录学生多写的字
-   格式：[{"position": 位置序号, "char": "多字"}]
-
-5. aiAdvice（学习建议，50-80字）：
-   - 针对学生的具体错误给出个性化建议
-   - 语气亲切鼓励，像一位耐心的语文老师
-   - 指出错误原因和改进方法
-   - 如果背得好，要给予肯定和表扬
-
-【返回格式】严格返回JSON，不要有任何额外文字：
-{"score": 85, "wrongChars": [{"position": 5, "original": "明", "input": "名"}], "missing": [], "extra": [], "aiAdvice": "背诵得很流畅！注意'明月'的'明'是明亮的明，不是名字的名。建议多读几遍，感受诗人望月思乡的意境，这样就不容易写错了。"}`;
-
-    const systemContent = "你是一位经验丰富的中学语文老师，专门负责古诗词背诵检测。你善于发现学生的错误并给出针对性的学习建议，语气亲切自然，像一位耐心的老师。";
+    const systemContent = "你是一位亲切、有耐心的语文老师，善于鼓励学生并给出针对性的学习建议。";
 
     console.log('[aiService] 发送AI背诵检测请求:', {
       poemTitle,
       poemAuthor,
-      inputLength: input.length,
-      originalLength: original.length
+      score: programResult.score,
+      errorCount: programResult.wrongChars.length + programResult.missing.length + programResult.extra.length,
+      hasSpecialRequest
     });
 
-    const result = await callZhipuGenerateJSON(prompt, systemContent, { temperature: 0.2, maxTokens: 600 });
+    // 使用更短的maxTokens以保证速度
+    const result = await callZhipuGenerateJSON(prompt, systemContent, { temperature: 0.7, maxTokens: 100 });
 
-    if (result && result.score !== undefined) {
-      console.log('[aiService] AI背诵检测成功:', { score: result.score });
-      return {
-        score: result.score,
-        wrongChars: result.wrongChars || [],
-        missing: result.missing || [],
-        extra: result.extra || [],
-        aiAdvice: result.aiAdvice || '继续努力，多读多背！'
-      };
-    }
+    const aiAdvice = result?.advice || result?.suggestion || result?.message || '继续努力，多读多背！';
 
-    console.error('[aiService] AI背诵检测返回格式错误');
-    return getMockRecitationCheck(original, input, learningRecord);
+    console.log('[aiService] AI背诵检测成功:', { score: programResult.score });
+    
+    return {
+      score: programResult.score,
+      wrongChars: programResult.wrongChars,
+      missing: programResult.missing,
+      extra: programResult.extra,
+      aiAdvice: aiAdvice
+    };
   } catch (error) {
     console.error('[aiService] AI背诵检测失败:', error.message);
-    return getMockRecitationCheck(original, input, learningRecord);
+    // 如果AI失败，仍然返回程序化检测结果
+    const programResult = checkRecitation(original, input);
+    
+    // 根据分数生成默认建议
+    let defaultAdvice = '';
+    if (programResult.score >= 90) {
+      defaultAdvice = '太棒了！你背诵得非常准确，继续保持！';
+    } else if (programResult.score >= 70) {
+      defaultAdvice = '不错哦！注意纠正错误，继续加油！';
+    } else {
+      defaultAdvice = '继续努力！建议分段背诵，理解诗意后再记忆。';
+    }
+    
+    return {
+      score: programResult.score,
+      wrongChars: programResult.wrongChars,
+      missing: programResult.missing,
+      extra: programResult.extra,
+      aiAdvice: defaultAdvice
+    };
   }
 }
 
@@ -1436,7 +1424,7 @@ async function generatePoemImage(poem, title, author) {
   try {
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
-      console.log('[aiService] 缺少API密钥，无法生成图片');
+      console.log('[aiService] 缺少硅基流动API密钥，无法生成图片');
       return null;
     }
 
@@ -1444,23 +1432,19 @@ async function generatePoemImage(poem, title, author) {
 
     console.log('[aiService] 生成诗词意境图:', { title, author, promptLength: imagePrompt.length });
 
-    const response = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis', {
+    const response = await fetch('https://api.siliconflow.cn/v1/images/generations', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'X-DashScope-Async': 'enable'
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'wanx-v1',
-        input: {
-          prompt: imagePrompt
-        },
-        parameters: {
-          style: '<auto>',
-          size: '512*512',
-          n: 1
-        }
+        model: 'Kwai-Kolors/Kolors',
+        prompt: imagePrompt,
+        image_size: '1024x1024',
+        batch_size: 1,
+        num_inference_steps: 30,
+        guidance_scale: 7.5
       })
     });
 
@@ -1471,14 +1455,14 @@ async function generatePoemImage(poem, title, author) {
     }
 
     const responseData = await response.json();
-    console.log('[aiService] 图片生成任务已提交:', responseData);
+    console.log('[aiService] 图片生成成功:', responseData);
 
-    if (responseData.output && responseData.output.task_id) {
+    if (responseData.images && responseData.images.length > 0) {
       return {
         success: true,
-        taskId: responseData.output.task_id,
+        imageUrl: responseData.images[0].url,
         prompt: imagePrompt,
-        message: '图片生成任务已提交'
+        message: '图片生成成功'
       };
     }
 
@@ -1498,30 +1482,22 @@ async function evaluateFeihuaPoem(poem, keyword, difficulty = 'medium', usedPoem
       return getMockFeihuaEvaluation(poem, keyword);
     }
 
-    const prompt = `请严格判断以下诗句是否符合飞花令要求。
+    // 简洁的提示词，确保速度和严格性
+    const prompt = `判断飞花令诗句：
+诗句：${poem}
+令字：${keyword}
 
-待验证诗句：「${poem}」
-令字：「${keyword}」
+严格判断：1. 是否包含令字？2. 是否是真实的中国古典诗词？
 
-请回答两个问题：
-1. 该诗句中是否包含令字「${keyword}」？
-2. 该诗句是否是真实存在的中国古典诗词？
+只返回JSON：{"isValid": true或false, "reason": "简要原因"}`;
 
-只有当以上两个问题的答案都是"是"时，isValid才为true。
+    const systemContent = "你是严格的飞花令验证专家，只返回正确或错误，判断要严格。";
 
-请严格返回JSON格式：
-{
-  "isValid": true或false,
-  "hasKeyword": true或false,
-  "isRealPoem": true或false,
-  "reason": "简要说明原因"
-}`;
-
-    const systemContent = "你是一位精通中国古典诗词的专家，专门负责飞花令游戏的诗句验证。请严格按照要求判断，不要遗漏任何细节。只返回JSON，不要有其他文字。";
-
+    // 优化参数以提高速度
     const result = await callZhipuGenerateJSON(prompt, systemContent, {
-      temperature: 0.05,
-      maxTokens: 150
+      temperature: 0.01, // 更低的temperature确保判断严格
+      maxTokens: 100, // 减少返回内容以提高速度
+      timeout: 10000 // 设置超时时间以避免长时间等待
     });
 
     if (!result || typeof result.isValid !== 'boolean') {
@@ -2047,13 +2023,9 @@ async function aiPoemSearch(query, limit = 50) {
 
   let poems = [];
   try {
-    const { db } = require('../utils/db');
-    poems = await new Promise((resolve, reject) => {
-      db.all('SELECT * FROM poems ORDER BY id', [], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      });
-    });
+    const db = require('../utils/db');
+    const result = await db.query('SELECT * FROM poems ORDER BY id');
+    poems = result.rows || [];
   } catch (err) {
     console.warn('[aiService] 读取诗词库失败:', err.message);
     return { poems: [], didYouMean: null, intent: 'general', emotion: null };
@@ -2627,6 +2599,7 @@ module.exports = {
   analyzeSearchResults,
   detectSearchEmotion,
   generateAuthorAvatar,
+  generateTTS
 };
 
 // 生成诗句意境图
@@ -2878,5 +2851,91 @@ async function generateAuthorAvatar(author) {
   } catch (error) {
     console.error('[aiService] 生成诗人头像失败:', error);
     return { success: false, url: null, message: '生成失败，请稍后重试' };
+  }
+}
+
+// 语音合成
+async function generateTTS(text) {
+  const apiKey = process.env.ALIYUN_BAILIAN_API_KEY;
+  
+  if (!apiKey) {
+    console.error('[aiService] 阿里云百炼API密钥未配置');
+    throw new Error('API密钥未配置');
+  }
+
+  const url = 'https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer';
+  
+  try {
+    console.log('[aiService] 开始语音合成, 文本长度:', text.length);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'cosyvoice-v2',
+        input: {
+          text: text,
+          voice: 'libai_v2',
+          format: 'mp3',
+          sample_rate: 22050
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('[aiService] 语音合成失败:', response.status, errorData);
+      throw new Error(`语音合成API请求失败: ${response.status} - ${JSON.stringify(errorData)}`);
+    }
+
+    const contentType = response.headers.get('content-type');
+    console.log('[aiService] 响应Content-Type:', contentType);
+    
+    if (contentType && contentType.includes('application/json')) {
+      const data = await response.json();
+      console.log('[aiService] 语音合成API返回JSON:', JSON.stringify(data).substring(0, 500));
+      
+      if (data.output && data.output.audio) {
+        const audioInfo = data.output.audio;
+        
+        if (audioInfo.data && audioInfo.data.length > 0) {
+          console.log('[aiService] 获得Base64音频数据');
+          return Buffer.from(audioInfo.data, 'base64');
+        } else if (audioInfo.url) {
+          console.log('[aiService] 获得音频URL:', audioInfo.url);
+          const audioResponse = await fetch(audioInfo.url);
+          if (!audioResponse.ok) {
+            throw new Error('下载音频失败');
+          }
+          const audioData = await audioResponse.arrayBuffer();
+          return Buffer.from(audioData);
+        } else {
+          throw new Error('API返回的音频数据为空');
+        }
+      } else if (data.output && data.output.audio_url) {
+        const audioUrl = data.output.audio_url;
+        console.log('[aiService] 获得音频URL:', audioUrl);
+        
+        const audioResponse = await fetch(audioUrl);
+        if (!audioResponse.ok) {
+          throw new Error('下载音频失败');
+        }
+        const audioData = await audioResponse.arrayBuffer();
+        return Buffer.from(audioData);
+      } else {
+        console.error('[aiService] API返回格式错误:', data);
+        throw new Error('API返回格式错误，未找到音频数据');
+      }
+    } else {
+      console.log('[aiService] 语音合成API直接返回音频数据');
+      const audioData = await response.arrayBuffer();
+      return Buffer.from(audioData);
+    }
+  } catch (error) {
+    console.error('[aiService] 语音合成失败:', error);
+    throw error;
   }
 }

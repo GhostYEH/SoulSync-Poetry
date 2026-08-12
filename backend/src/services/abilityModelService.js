@@ -1,241 +1,252 @@
-// 能力模型服务
-const { db } = require('../utils/db');
+/**
+ * 能力模型服务（聚合视图）
+ *
+ * Source of Truth: student_knowledge_states
+ *
+ * 高层 Ability 是底层 KnowledgeState 的聚合视图，不再独立计算或存储。
+ * 系统只有一套 mastery 算法（Weighted Bayesian Evidence Model v2），
+ * 本服务仅做读侧聚合，不产生第二套分数。
+ *
+ * 聚合映射（knowledge_points.category → 高层 Ability）：
+ *   memory_score        ← category='memory'                        (memorization)
+ *   comprehension_score ← category in ('meta','language','context') (author_dynasty, word_meaning, allusion_background)
+ *   expression_score    ← category='transfer'                       (application)
+ *   appreciation_score  ← category in ('imagery','emotion','rhetoric') (imagery, emotion_theme, rhetoric)
+ *
+ * 兼容接口：
+ *   getUserAbilityModel / getAbilityModel / calculateAbilityModel / calculateAbilityFromLearning
+ *   getAbilityTrend / getAbilityHistory / getWeakDimensions / getAbilityRanking
+ */
+
+const db = require('../utils/db');
+
+const CATEGORY_TO_DIMENSION = {
+  memory: 'memory',
+  meta: 'comprehension',
+  language: 'comprehension',
+  context: 'comprehension',
+  transfer: 'expression',
+  imagery: 'appreciation',
+  emotion: 'appreciation',
+  rhetoric: 'appreciation',
+};
+
+const DIMENSION_FIELDS = {
+  memory: 'memory_score',
+  comprehension: 'comprehension_score',
+  expression: 'expression_score',
+  appreciation: 'appreciation_score',
+};
+
+const DEFAULT_MODEL = {
+  memory_score: 50,
+  comprehension_score: 50,
+  expression_score: 50,
+  appreciation_score: 50,
+  overall_score: 50,
+};
 
 /**
- * 计算用户能力模型
+ * 从 student_knowledge_states 聚合高层能力分数
+ * @param {number} userId
+ * @returns {Promise<object>} { memory_score, comprehension_score, expression_score, appreciation_score, overall_score, ... }
  */
-function calculateAbilityModel(userId) {
-  return new Promise((resolve, reject) => {
-    // 并行查询多个数据源
-    Promise.all([
-      getMemoryScore(userId),
-      getUnderstandingScore(userId),
-      getApplicationScore(userId),
-      getCreativityScore(userId)
-    ]).then(([memory, understanding, application, creativity]) => {
-      const model = { memory, understanding, application, creativity };
-      // 保存到数据库
-      saveAbilityModel(userId, model).then(() => {
-        resolve(model);
-      }).catch(err => {
-        console.error('保存能力模型失败:', err);
-        resolve(model);
-      });
-    }).catch(reject);
-  });
-}
+async function aggregateAbilityFromKnowledgeStates(userId) {
+  const rows = await db.all(
+    `SELECT s.mastery, s.confidence, s.attempt_count, kp.category
+     FROM student_knowledge_states s
+     JOIN knowledge_points kp ON s.knowledge_point_id = kp.id
+     WHERE s.user_id = $1 AND s.attempt_count > 0`,
+    [userId]
+  );
 
-function getMemoryScore(userId) {
-  return new Promise((resolve, reject) => {
-    db.get(`
-      SELECT 
-        COUNT(DISTINCT poem_id) as poems_learned,
-        COALESCE(AVG(best_score), 0) as avg_best_score,
-        COALESCE(SUM(recite_attempts), 0) as total_attempts,
-        COALESCE((SELECT COUNT(*) FROM wrong_questions WHERE user_id = ? AND mastered = 1), 0) as mastered
-      FROM learning_records
-      WHERE user_id = ?
-    `, [userId, userId], (err, row) => {
-      if (err) { reject(err); return; }
-      
-      let score = 0;
-      score += Math.min(row.poems_learned * 3, 30);  // 已学诗词数量
-      score += Math.min(row.avg_best_score * 0.4, 40); // 最佳得分
-      score += Math.min(row.mastered * 5, 30);          // 已掌握数量
-      
-      resolve(Math.min(100, Math.round(score)));
-    });
-  });
-}
+  if (!rows || rows.length === 0) {
+    return {
+      ...DEFAULT_MODEL,
+      user_id: userId,
+      updated_at: new Date().toISOString(),
+      source: 'student_knowledge_states',
+      has_data: false,
+    };
+  }
 
-function getUnderstandingScore(userId) {
-  return new Promise((resolve, reject) => {
-    db.get(`
-      SELECT 
-        COALESCE(AVG(CASE WHEN best_score > 0 THEN best_score ELSE NULL END), 0) as avg_score,
-        (SELECT COUNT(*) FROM wrong_questions WHERE user_id = ? AND mastered = 0) as wrong_count,
-        (SELECT COUNT(*) FROM learning_records WHERE user_id = ? AND ai_explain_count > 0) as explained_count,
-        (SELECT COUNT(*) FROM learning_records WHERE user_id = ? AND view_count > 3) as deeply_viewed
-      FROM learning_records
-      WHERE user_id = ?
-    `, [userId, userId, userId, userId], (err, row) => {
-      if (err) { reject(err); return; }
-      
-      let score = 0;
-      score += Math.min(row.avg_score * 0.5, 50);       // 平均得分
-      score += Math.max(0, 30 - row.wrong_count * 3);   // 错题扣分
-      score += Math.min(row.explained_count * 5, 20);   // AI讲解次数
-      score += Math.min(row.deeply_viewed * 5, 20);      // 深度学习
-      
-      resolve(Math.min(100, Math.max(0, Math.round(score))));
-    });
-  });
-}
+  const buckets = {
+    memory: [],
+    comprehension: [],
+    expression: [],
+    appreciation: [],
+  };
 
-function getApplicationScore(userId) {
-  return new Promise((resolve, reject) => {
-    db.get(`
-      SELECT 
-        (SELECT COALESCE(current_challenge_level, 1) FROM user_challenge_progress WHERE user_id = ?) as challenge_level,
-        (SELECT COALESCE(MAX(max_rounds), 0) FROM feihua_high_records WHERE user_id = ?) as max_rounds,
-        (SELECT COUNT(*) FROM feihua_battles WHERE (player1_id = ? OR player2_id = ?) AND winner_id = ?) as wins,
-        (SELECT COUNT(*) FROM user_challenge_records WHERE user_id = ? AND is_correct = 1) as correct_answers
-      FROM learning_records
-      LIMIT 1
-    `, [userId, userId, userId, userId, userId, userId], (err, row) => {
-      if (err) { reject(err); return; }
-      
-      let score = 0;
-      score += Math.min(row.challenge_level * 0.8, 40);   // 闯关等级
-      score += Math.min(row.max_rounds * 2, 20);           // 飞花令最高轮次
-      score += Math.min(row.correct_answers * 0.2, 20);   // 正确答题数
-      score += Math.min(row.wins * 2, 20);                 // 胜场数
-      
-      resolve(Math.min(100, Math.max(0, Math.round(score))));
-    });
-  });
-}
+  for (const r of rows) {
+    const dim = CATEGORY_TO_DIMENSION[r.category];
+    if (dim && buckets[dim]) {
+      buckets[dim].push(r.mastery || 0);
+    }
+  }
 
-function getCreativityScore(userId) {
-  return new Promise((resolve, reject) => {
-    db.get(`
-      SELECT 
-        (SELECT COALESCE(COUNT(*), 0) FROM user_creations WHERE user_id = ?) as creations_count,
-        (SELECT COALESCE(MAX(score_data->>'$.user_score'), 0) FROM user_creations WHERE user_id = ? AND score_data IS NOT NULL) as max_creation_score,
-        (SELECT COALESCE(AVG(CAST(json_extract(score_data, '$.user_score') AS INTEGER)), 0) FROM user_creations WHERE user_id = ? AND score_data IS NOT NULL) as avg_creation_score,
-        (SELECT COALESCE(COUNT(*), 0) FROM poetry_challenges WHERE user_id = ? AND user_score > 0) as challenge_participations
-      FROM learning_records
-      LIMIT 1
-    `, [userId, userId, userId, userId], (err, row) => {
-      if (err) { reject(err); return; }
-      
-      let score = 0;
-      score += Math.min(row.creations_count * 5, 25);     // 创作次数
-      score += Math.min(row.max_creation_score * 0.25, 25); // 最高创作得分
-      score += Math.min(row.avg_creation_score * 0.25, 25); // 平均创作得分
-      score += Math.min(row.challenge_participations * 5, 25); // 挑战参与
-      
-      resolve(Math.min(100, Math.max(0, Math.round(score))));
-    });
-  });
-}
+  const avg = (arr) => arr.length > 0 ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 100) : 50;
 
-function saveAbilityModel(userId, model) {
-  return new Promise((resolve, reject) => {
-    db.run(`
-      INSERT INTO ability_assessments 
-        (user_id, memory_score, understanding_score, application_score, creativity_score, last_updated)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(user_id) DO UPDATE SET
-        memory_score = excluded.memory_score,
-        understanding_score = excluded.understanding_score,
-        application_score = excluded.application_score,
-        creativity_score = excluded.creativity_score,
-        last_updated = CURRENT_TIMESTAMP
-    `, [userId, model.memory, model.understanding, model.application, model.creativity], (err) => {
-      if (err) { reject(err); return; }
-      resolve();
-    });
-  });
+  const memory_score = avg(buckets.memory);
+  const comprehension_score = avg(buckets.comprehension);
+  const expression_score = avg(buckets.expression);
+  const appreciation_score = avg(buckets.appreciation);
+  const overall_score = Math.round((memory_score + comprehension_score + expression_score + appreciation_score) / 4);
+
+  return {
+    user_id: userId,
+    memory_score,
+    comprehension_score,
+    expression_score,
+    appreciation_score,
+    overall_score,
+    updated_at: new Date().toISOString(),
+    source: 'student_knowledge_states',
+    has_data: true,
+    dimension_counts: {
+      memory: buckets.memory.length,
+      comprehension: buckets.comprehension.length,
+      expression: buckets.expression.length,
+      appreciation: buckets.appreciation.length,
+    },
+  };
 }
 
 /**
- * 获取用户能力模型
+ * 获取用户能力模型（聚合视图，兼容旧接口名）
  */
-function getAbilityModel(userId) {
-  return new Promise((resolve, reject) => {
-    db.get(`
-      SELECT 
-        memory_score as memory,
-        understanding_score as understanding,
-        application_score as application,
-        creativity_score as creativity,
-        last_updated
-      FROM ability_assessments
-      WHERE user_id = ?
-    `, [userId], async (err, row) => {
-      if (err) { reject(err); return; }
-      
-      if (row) {
-        resolve(row);
-      } else {
-        // 如果没有记录，计算并返回
-        const model = await calculateAbilityModel(userId);
-        resolve({ ...model, last_updated: new Date().toISOString() });
-      }
-    });
-  });
+async function getUserAbilityModel(userId) {
+  return aggregateAbilityFromKnowledgeStates(userId);
+}
+
+async function getAbilityModel(userId) {
+  return aggregateAbilityFromKnowledgeStates(userId);
 }
 
 /**
- * 获取能力模型历史趋势
+ * 从学习数据计算能力（兼容旧接口名，实际仍从 KnowledgeState 聚合）
  */
-function getAbilityTrend(userId, days = 30) {
-  return new Promise((resolve, reject) => {
-    // 简化的趋势数据生成（基于活动日志）
-    db.all(`
-      SELECT 
-        DATE(created_at) as date,
-        COUNT(*) as activity_count
-      FROM activity_logs
-      WHERE user_id = ? AND created_at >= DATE('now', '-${days} days')
-      GROUP BY DATE(created_at)
-      ORDER BY date
-    `, [userId], (err, rows) => {
-      if (err) { reject(err); return; }
-      
-      // 填充缺失的日期
-      const trend = [];
-      const today = new Date();
-      for (let i = days - 1; i >= 0; i--) {
-        const date = new Date(today);
-        date.setDate(date.getDate() - i);
-        const dateStr = date.toISOString().split('T')[0];
-        const found = rows.find(r => r.date === dateStr);
-        trend.push({
-          date: dateStr,
-          activityCount: found ? found.activity_count : 0
-        });
-      }
-      
-      resolve(trend);
-    });
-  });
+async function calculateAbilityFromLearning(userId) {
+  return aggregateAbilityFromKnowledgeStates(userId);
+}
+
+async function calculateAbilityModel(userId) {
+  return aggregateAbilityFromKnowledgeStates(userId);
 }
 
 /**
- * 获取能力排名
+ * 初始化用户能力模型（不再需要建表，返回默认值）
  */
-function getAbilityRanking(userId) {
-  return new Promise((resolve, reject) => {
-    db.get(`
-      WITH user_scores AS (
-        SELECT 
-          user_id,
-          memory_score + understanding_score + application_score + creativity_score as total_score
-        FROM ability_assessments
-      )
-      SELECT COUNT(*) + 1 as rank
-      FROM user_scores
-      WHERE total_score > (
-        SELECT COALESCE(memory_score + understanding_score + application_score + creativity_score, 0)
-        FROM ability_assessments
-        WHERE user_id = ?
-      )
-    `, [userId], (err, row) => {
-      if (err) { reject(err); return; }
-      resolve({ rank: row?.rank || 1 });
-    });
-  });
+async function initializeUserAbilityModel(userId) {
+  return {
+    ...DEFAULT_MODEL,
+    user_id: userId,
+    updated_at: new Date().toISOString(),
+    source: 'student_knowledge_states',
+    has_data: false,
+  };
+}
+
+/**
+ * 更新能力模型（不再支持独立写入，返回聚合结果）
+ */
+async function updateAbilityModel(userId) {
+  return aggregateAbilityFromKnowledgeStates(userId);
+}
+
+/**
+ * 能力历史（从 learning_events 按天聚合，不再依赖 ability_history 表）
+ */
+async function getAbilityHistory(userId, days = 30) {
+  return db.all(
+    `SELECT (created_at)::date as date,
+       COUNT(*) as event_count,
+       COUNT(*) FILTER (WHERE correct = 1) as correct_count
+     FROM learning_events
+     WHERE user_id = $1 AND created_at >= CURRENT_DATE - $2::int
+     GROUP BY (created_at)::date
+     ORDER BY date ASC`,
+    [userId, days]
+  ).catch(() => []);
+}
+
+/**
+ * 记录能力快照（不再需要，保留空实现兼容调用方）
+ */
+async function recordAbilitySnapshot(userId) {
+  return { skipped: true, reason: 'ability_history table removed; use student_knowledge_states directly' };
+}
+
+/**
+ * 能力趋势（从 activity_logs 按天聚合活动量）
+ */
+async function getAbilityTrend(userId, days = 7) {
+  const rows = await db.all(
+    `SELECT
+      (created_at)::date as date,
+      COUNT(*) as activity_count
+    FROM activity_logs
+    WHERE user_id = $1 AND created_at >= CURRENT_DATE - $2::int
+    GROUP BY (created_at)::date
+    ORDER BY date`,
+    [userId, days]
+  ).catch(() => []);
+
+  return rows;
+}
+
+/**
+ * 薄弱能力维度（从聚合结果计算，score < 60）
+ */
+async function getWeakDimensions(userId) {
+  const model = await aggregateAbilityFromKnowledgeStates(userId);
+
+  const dimensions = [
+    { name: 'memory', label: '记忆能力', score: model.memory_score },
+    { name: 'comprehension', label: '理解能力', score: model.comprehension_score },
+    { name: 'expression', label: '应用能力', score: model.expression_score },
+    { name: 'appreciation', label: '鉴赏能力', score: model.appreciation_score },
+  ];
+
+  dimensions.sort((a, b) => a.score - b.score);
+
+  return dimensions.filter(d => d.score < 60);
+}
+
+/**
+ * 能力排名（从所有用户的 overall_score 排名）
+ */
+async function getAbilityRanking(userId) {
+  const allUsers = await db.all(
+    `SELECT DISTINCT user_id FROM student_knowledge_states WHERE attempt_count > 0`
+  ).catch(() => []);
+
+  if (allUsers.length === 0) {
+    return { rank: 1, total: 1 };
+  }
+
+  const scores = [];
+  for (const u of allUsers) {
+    const model = await aggregateAbilityFromKnowledgeStates(u.user_id);
+    scores.push({ userId: u.user_id, overall: model.overall_score });
+  }
+
+  scores.sort((a, b) => b.overall - a.overall);
+
+  const rank = scores.findIndex(s => s.userId === userId) + 1;
+  return { rank: rank || scores.length, total: scores.length };
 }
 
 module.exports = {
-  calculateAbilityModel,
+  getUserAbilityModel,
   getAbilityModel,
+  calculateAbilityFromLearning,
+  calculateAbilityModel,
+  initializeUserAbilityModel,
+  updateAbilityModel,
+  getAbilityHistory,
+  recordAbilitySnapshot,
   getAbilityTrend,
+  getWeakDimensions,
   getAbilityRanking,
-  getMemoryScore,
-  getUnderstandingScore,
-  getApplicationScore,
-  getCreativityScore
+  aggregateAbilityFromKnowledgeStates,
 };
