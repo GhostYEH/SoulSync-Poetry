@@ -1590,7 +1590,7 @@ router.get('/poems', authenticateTeacher, async (req, res) => {
     if (keyword) {
       paramIdx++;
       const kwIdx = paramIdx;
-      conditions.push(`(title LIKE $${kwIdx} OR author LIKE $${kwIdx} OR content LIKE $${kwIdx})`);
+      conditions.push(`(title ILIKE $${kwIdx} OR author ILIKE $${kwIdx} OR content ILIKE $${kwIdx})`);
       params.push(`%${keyword}%`);
     }
     if (dynasty) {

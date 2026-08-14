@@ -1,4 +1,7 @@
+const path = require('path');
 const db = require('./db');
+
+const SQLITE_PATH = path.join(__dirname, '..', '..', 'db', 'poetry.db');
 
 async function loadPoems() {
   try {
@@ -11,11 +14,31 @@ async function loadPoems() {
       content: row.content,
       tags: row.tags ? row.tags.split(',') : []
     }));
-    console.log(`成功从数据库加载 ${poems.length} 首诗词`);
+    console.log(`成功从 PostgreSQL 加载 ${poems.length} 首诗词`);
     return poems;
   } catch (err) {
-    console.error('从数据库加载诗词数据失败:', err);
-    throw err;
+    console.warn(`PostgreSQL 不可用 (${err.code || err.message})，尝试从本地 SQLite 加载诗词...`);
+    return loadPoemsFromSqlite();
+  }
+}
+
+function loadPoemsFromSqlite() {
+  const { DatabaseSync } = require('node:sqlite');
+  const sqliteDb = new DatabaseSync(SQLITE_PATH, { readOnly: true });
+  try {
+    const rows = sqliteDb.prepare('SELECT id, title, author, dynasty, content, tags FROM poems').all();
+    const poems = rows.map(row => ({
+      id: row.id,
+      title: row.title,
+      author: row.author,
+      dynasty: row.dynasty,
+      content: row.content,
+      tags: row.tags ? row.tags.split(',') : []
+    }));
+    console.log(`成功从本地 SQLite 加载 ${poems.length} 首诗词 (${SQLITE_PATH})`);
+    return poems;
+  } finally {
+    sqliteDb.close();
   }
 }
 
@@ -74,5 +97,6 @@ function useDefaultPoems() {
 module.exports = {
   loadPoems,
   loadPoemsSync,
-  useDefaultPoems
+  useDefaultPoems,
+  loadPoemsFromSqlite
 };

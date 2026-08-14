@@ -29,7 +29,13 @@
   --text-light: #999;
   --border-radius: 20px;
   --glass-blur: 12px;
-  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+               box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+               border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+               background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+               color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+               opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+               filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   
   /* 字体变量 */
   --font-ancient: 'Noto Serif SC', 'SimSun', 'STSong', serif;
@@ -67,15 +73,16 @@ body::before {
     radial-gradient(circle at 40% 80%, rgba(218, 165, 32, 0.1) 0%, transparent 50%);
   pointer-events: none;
   z-index: -1;
-  animation: backgroundShift 20s ease-in-out infinite;
+  animation: backgroundShift 30s ease-in-out infinite;
+  will-change: opacity;
 }
 
 @keyframes backgroundShift {
   0%, 100% {
-    transform: scale(1);
+    opacity: 0.85;
   }
   50% {
-    transform: scale(1.1);
+    opacity: 1;
   }
 }
 
@@ -140,8 +147,8 @@ h3 {
   position: relative;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: var(--text-primary);
   box-shadow: var(--glass-shadow);
   z-index: 1;
@@ -300,8 +307,8 @@ h3 {
 /* 卡片样式 - 液态玻璃风格 */
 .card {
   background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--glass-border);
   border-radius: var(--border-radius);
   box-shadow: var(--glass-shadow);
@@ -440,8 +447,8 @@ h3 {
   font-size: 14px;
   transition: var(--transition);
   background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 4px 16px rgba(31, 38, 135, 0.05);
   font-family: var(--font-sans);
 }
@@ -487,7 +494,7 @@ h3 {
   --nav-glass-bg-hover: transparent;
   --nav-glass-border: rgba(255, 255, 255, 0.15);
   --nav-glass-border-hover: rgba(255, 255, 255, 0.25);
-  --nav-glass-blur: 28px;
+  --nav-glass-blur: 12px;
   --nav-glass-shadow: 0 8px 40px rgba(0, 0, 0, 0.2), 0 2px 12px rgba(0, 0, 0, 0.1);
   --nav-glass-shadow-hover: 0 16px 60px rgba(0, 0, 0, 0.3), 0 4px 20px rgba(0, 0, 0, 0.15);
   --liquid-duration: 0.5s;
@@ -704,8 +711,8 @@ h3 {
   position: relative;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   font-family: var(--font-ancient);

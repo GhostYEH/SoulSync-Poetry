@@ -161,8 +161,7 @@ export const api = {
   // 诗词相关
   poems: {
     getAll: () => request('/poems'),
-    getById: (id) => request(`/poems/${id}`),
-    search: (keyword) => request(`/poems/search?keyword=${encodeURIComponent(keyword)}`)
+    getById: (id) => request(`/poems/${id}`)
   },
   
   // 学习记录相关

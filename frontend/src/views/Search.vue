@@ -522,7 +522,10 @@ export default {
     localSearch(query, terms) {
       const poems = this._poemCache;
       if (!poems || poems.length === 0) return [];
-      return poems.filter((p) => {
+      const q = query.toLowerCase().trim();
+      // 评分排序：整体子串匹配 > 多词匹配 > 单字匹配
+      const scored = [];
+      for (const p of poems) {
         const hay = [
           p.title || '',
           p.author || '',
@@ -532,8 +535,17 @@ export default {
         ]
           .join('\n')
           .toLowerCase();
-        return terms.every((t) => hay.includes(t));
-      });
+        let score = 0;
+        if (q && hay.includes(q)) score += 100;
+        terms.forEach((t) => {
+          if (hay.includes(t)) {
+            score += t.length === 1 ? 2 : 10;
+          }
+        });
+        if (score > 0) scored.push({ poem: p, score });
+      }
+      scored.sort((a, b) => b.score - a.score);
+      return scored.map((s) => s.poem);
     },
 
     // 后台请求后端AI搜索，结果回来后替换本地结果

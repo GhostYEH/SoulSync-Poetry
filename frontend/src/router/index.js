@@ -74,7 +74,8 @@ const routes = [
     name: 'FeiHuaLingSingle',
     component: FeiHuaLingSingle,
     meta: {
-      title: '飞花令 - 古诗词学习系统'
+      title: '飞花令 - 古诗词学习系统',
+      requiresAuth: true
     }
   },
   {
@@ -222,7 +223,8 @@ const routes = [
     name: 'PoetryWorkbench',
     component: () => import('../views/creation/PoetryWorkbench.vue'),
     meta: {
-      title: 'AI诗词创作工作台 - 古诗词学习系统'
+      title: 'AI诗词创作工作台 - 古诗词学习系统',
+      requiresAuth: true
     }
   },
   {
@@ -240,7 +242,8 @@ const routes = [
     name: 'PoemChallenge',
     component: () => import('../views/PoemChallenge.vue'),
     meta: {
-      title: '诗词闯关 - 古诗词学习系统'
+      title: '诗词闯关 - 古诗词学习系统',
+      requiresAuth: true
     }
   },
   {
@@ -361,18 +364,40 @@ const router = createRouter({
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
-      return savedPosition
+      return { ...savedPosition, behavior: 'instant' }
     } else {
-      return { top: 0 }
+      return { top: 0, behavior: 'instant' }
     }
   }
 })
 
+// 主导航栏顺序，用于判定页面切换方向（替代路径深度，解决同级切换方向恒 forward 的问题）
+const navOrder = [
+  '/',
+  '/search',
+  '/dashboard',
+  '/feihualing/single',
+  '/challenge',
+  '/creation',
+  '/challenge/error-book',
+  '/profile'
+]
+
 // 导航守卫：自动判断页面切换方向并通知 App.vue
 router.beforeEach((to, from, next) => {
-  const toDepth = to.path.split('/').filter(Boolean).length
-  const fromDepth = from.path.split('/').filter(Boolean).length
-  const direction = toDepth >= fromDepth ? 'forward' : 'back'
+  const toIdx = navOrder.indexOf(to.path)
+  const fromIdx = navOrder.indexOf(from.path)
+  let direction
+  if (toIdx !== -1 && fromIdx !== -1) {
+    // 两个都是主导航项：按导航栏顺序判定
+    direction = toIdx >= fromIdx ? 'forward' : 'back'
+  } else if (toIdx !== -1) {
+    // 从详情/子页回到主导航：视为后退
+    direction = 'back'
+  } else {
+    // 进入详情/子页/教师端：视为前进
+    direction = 'forward'
+  }
   // 通过自定义事件通知 App.vue 更新过渡名称
   window.dispatchEvent(new CustomEvent('page-transition', { detail: { direction } }))
 

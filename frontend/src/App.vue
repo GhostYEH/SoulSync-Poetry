@@ -153,36 +153,19 @@ export default {
       collectionCount: 0,
       mobileMenuOpen: false,
       isElectron: false,
+      isTeacher: false,
       transitionName: 'page-forward',
       lastPath: '/',
       keepAliveIncludes: ['PoemDetail'],
       appReady: false // 全局就绪状态，防止页面一直转圈
     }
   },
-  computed: {
-    isTeacher() {
-      // 检查是否是教师登录状态
-      const teacherToken = localStorage.getItem('teacherToken');
-      const currentLoginType = localStorage.getItem('currentLoginType');
 
-      // 如果有教师token，肯定是教师
-      if (teacherToken) {
-        return true;
-      }
-
-      // 如果当前登录类型是教师（即使没有token，比如退出登录后），也保持教师界面
-      if (currentLoginType === 'teacher') {
-        return true;
-      }
-
-      // 其他情况显示学生界面
-      return false;
-    }
-  },
 
   mounted() {
     // 检测是否在Electron环境中
     this.isElectron = typeof window !== 'undefined' && window.electronAPI;
+    this.refreshIsTeacher();
 
     // 检测URL参数，启动演示模式
     const params = new URLSearchParams(window.location.search)
@@ -250,6 +233,12 @@ export default {
     handlePageTransition(e) {
       this.transitionName = `page-${e.detail.direction}`
     },
+    // 刷新教师身份判定（替代 $forceUpdate，避免整个 App 重渲染）
+    refreshIsTeacher() {
+      const teacherToken = localStorage.getItem('teacherToken');
+      const currentLoginType = localStorage.getItem('currentLoginType');
+      this.isTeacher = !!(teacherToken || currentLoginType === 'teacher');
+    },
     // 导航栏鼠标跟踪效果
     handleNavbarMouseMove(e) {
       const navbar = e.currentTarget;
@@ -303,10 +292,9 @@ export default {
       if (event.key === 'collectedPoems') {
         this.updateCollectionCount()
       }
-      // 监听身份相关数据变化
-      if (['token', 'teacherToken', 'user', 'teacher', 'userInfo', 'teacherInfo', 'studentId', 'teacherId', 'userRole', 'teacherRole'].includes(event.key)) {
-        // 强制重新渲染导航栏
-        this.$forceUpdate()
+      // 监听身份相关数据变化，仅刷新教师判定而非整个 App
+      if (['token', 'teacherToken', 'user', 'teacher', 'userInfo', 'teacherInfo', 'studentId', 'teacherId', 'userRole', 'teacherRole', 'currentLoginType'].includes(event.key)) {
+        this.refreshIsTeacher()
       }
     },
     createDynamicElements() {
@@ -322,11 +310,11 @@ export default {
       // 定时创建新的动态元素
       this.petalInterval = setInterval(() => {
         this.createPetal()
-      }, 2000)
+      }, 5000)
       
       this.textInterval = setInterval(() => {
         this.createFloatingText()
-      }, 3000)
+      }, 8000)
     },
     stopCreatingDynamicElements() {
       if (this.petalInterval) {
@@ -496,6 +484,7 @@ export default {
       this.clearAuthData()
       // 跳转到教师登录页
       this.$router.push('/teacher/login')
+      this.refreshIsTeacher()
     },
     // 清除身份数据但保留登录类型
     clearAuthData() {
@@ -533,6 +522,7 @@ export default {
       localStorage.removeItem('userRole')
       // 跳转到教师登录页
       this.$router.push('/teacher/login')
+      this.refreshIsTeacher()
     },
     // 切换到学生端
     switchToStudent() {
@@ -546,6 +536,7 @@ export default {
       localStorage.removeItem('teacherRole')
       // 跳转到学生登录页
       this.$router.push('/login')
+      this.refreshIsTeacher()
     }
   }
 }
@@ -565,39 +556,41 @@ export default {
 /* 前进：旧页向下滑出，新页从上方滑入 */
 .page-forward-enter-active,
 .page-forward-leave-active {
-  transition: all 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .page-forward-enter-from {
   opacity: 0;
-  transform: translateY(-32px) scale(0.97);
+  transform: translateY(-16px);
 }
 .page-forward-leave-to {
   opacity: 0;
-  transform: translateY(24px) scale(0.97);
+  transform: translateY(16px);
 }
 .page-forward-enter-to,
 .page-forward-leave-from {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: translateY(0);
 }
 
 /* 后退：旧页向上滑出，新页从下方滑入 */
 .page-back-enter-active,
 .page-back-leave-active {
-  transition: all 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .page-back-enter-from {
   opacity: 0;
-  transform: translateY(32px) scale(0.97);
+  transform: translateY(16px);
 }
 .page-back-leave-to {
   opacity: 0;
-  transform: translateY(-24px) scale(0.97);
+  transform: translateY(-16px);
 }
 .page-back-enter-to,
 .page-back-leave-from {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: translateY(0);
 }
 
 /* 旧 fade 保持兼容 */
@@ -660,7 +653,7 @@ export default {
   height: 20px;
   background: linear-gradient(135deg, #ffb3ba, #ffc0cb);
   border-radius: 10px 0 10px 0;
-  animation: petal-float linear infinite;
+  animation: petal-float linear forwards;
   opacity: 0.7;
 }
 
@@ -698,7 +691,7 @@ export default {
   font-size: 14px;
   font-family: 'SimSun', 'STSong', serif;
   color: var(--text-secondary);
-  animation: text-float linear infinite;
+  animation: text-float linear forwards;
   opacity: 0.6;
   white-space: nowrap;
 }

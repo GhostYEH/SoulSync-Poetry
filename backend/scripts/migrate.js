@@ -33,7 +33,7 @@ const tables = [
       class_id INTEGER DEFAULT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      FOREIGN KEY (class_id) REFERENCES class_stats(class_id) ON DELETE SET NULL
+      FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE SET NULL
     )`
   },
   {
@@ -72,6 +72,18 @@ const tables = [
       last_view_time TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (poem_id) REFERENCES poems(id)
+    )`
+  },
+  {
+    name: 'feihua_games',
+    sql: `CREATE TABLE IF NOT EXISTS feihua_games (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER,
+      keyword TEXT,
+      score INTEGER,
+      poem_count INTEGER,
+      history TEXT,
+      created_at TEXT
     )`
   },
   {

@@ -2018,14 +2018,29 @@ function scorePoemsByEmotion(matchedTheme, poems) {
 }
 
 // 语义搜索
+// 诗词库内存缓存，避免每次搜索都全量加载
+let _poemsCache = null;
+let _poemsCacheTime = 0;
+const _POEMS_CACHE_TTL = 5 * 60 * 1000; // 5分钟刷新
+
+async function _loadPoemsWithCache() {
+  const now = Date.now();
+  if (_poemsCache && (now - _poemsCacheTime) < _POEMS_CACHE_TTL) {
+    return _poemsCache;
+  }
+  const db = require('../utils/db');
+  const result = await db.query('SELECT * FROM poems ORDER BY id');
+  _poemsCache = result.rows || [];
+  _poemsCacheTime = now;
+  return _poemsCache;
+}
+
 async function aiPoemSearch(query, limit = 50) {
   const apiKey = config.ai.apiKey;
 
   let poems = [];
   try {
-    const db = require('../utils/db');
-    const result = await db.query('SELECT * FROM poems ORDER BY id');
-    poems = result.rows || [];
+    poems = await _loadPoemsWithCache();
   } catch (err) {
     console.warn('[aiService] 读取诗词库失败:', err.message);
     return { poems: [], didYouMean: null, intent: 'general', emotion: null };
@@ -2161,19 +2176,24 @@ function fallbackSearch(query, poems, limit) {
     const dynasty = (p.dynasty || '').toLowerCase();
     const tags = Array.isArray(p.tags) ? p.tags.join(' ').toLowerCase() : (p.tags || '').toLowerCase();
 
-    if (title === q) score += 100;
-    else if (title.includes(q)) score += 60;
-    if (author === q) score += 50;
-    else if (author.includes(q)) score += 30;
-    if (content.includes(q)) score += 20;
-    if (dynasty.includes(q)) score += 10;
+    if (q.length > 0) {
+      if (title === q) score += 100;
+      else if (title.includes(q)) score += 60;
+      if (author === q) score += 50;
+      else if (author.includes(q)) score += 30;
+      if (content.includes(q)) score += 20;
+      if (dynasty.includes(q)) score += 10;
+    }
 
-    const keywords = q.split(/\s+/);
+    const keywords = q.split(/\s+/).filter(k => k.length > 0);
     keywords.forEach(kw => {
-      if (kw.length < 2) return;
-      if (title.includes(kw)) score += 40;
-      if (author.includes(kw)) score += 25;
-      if (content.includes(kw)) score += 15;
+      const isSingleChar = kw.length === 1;
+      const titleWeight = isSingleChar ? 20 : 40;
+      const authorWeight = isSingleChar ? 15 : 25;
+      const contentWeight = isSingleChar ? 8 : 15;
+      if (title.includes(kw)) score += titleWeight;
+      if (author.includes(kw)) score += authorWeight;
+      if (content.includes(kw)) score += contentWeight;
     });
 
     if (matchedTheme && EMOTION_THEME_MAP[matchedTheme]) {
