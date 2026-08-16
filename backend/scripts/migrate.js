@@ -75,18 +75,6 @@ const tables = [
     )`
   },
   {
-    name: 'feihua_games',
-    sql: `CREATE TABLE IF NOT EXISTS feihua_games (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER,
-      keyword TEXT,
-      score INTEGER,
-      poem_count INTEGER,
-      history TEXT,
-      created_at TEXT
-    )`
-  },
-  {
     name: 'mistakes',
     sql: `CREATE TABLE IF NOT EXISTS mistakes (
       id SERIAL PRIMARY KEY,
@@ -606,6 +594,8 @@ const alterColumns = [
   { name: 'le_event_key_unique', sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_le_event_key_unique ON learning_events(event_key) WHERE event_key IS NOT NULL` },
   { name: 'qkm_confidence', sql: `ALTER TABLE question_knowledge_mappings ADD COLUMN IF NOT EXISTS confidence FLOAT DEFAULT 0.8` },
   { name: 'qkm_source_default', sql: `ALTER TABLE question_knowledge_mappings ALTER COLUMN source SET DEFAULT 'rule'` },
+  { name: 'wq_added_at', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
+  { name: 'wq_last_reviewed_at', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS last_reviewed_at TIMESTAMP` },
 ];
 
 async function migrate() {

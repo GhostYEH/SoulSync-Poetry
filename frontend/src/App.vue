@@ -161,6 +161,11 @@ export default {
     }
   },
 
+  watch: {
+    $route() {
+      this.refreshIsTeacher();
+    }
+  },
 
   mounted() {
     // 检测是否在Electron环境中
@@ -234,10 +239,12 @@ export default {
       this.transitionName = `page-${e.detail.direction}`
     },
     // 刷新教师身份判定（替代 $forceUpdate，避免整个 App 重渲染）
+    // 仅依据真实教师凭证或当前处于教师路由，不再依赖持久化偏好 currentLoginType，
+    // 避免未登录时因残留偏好导致导航栏显示教师端而页面却是学生端的不一致问题
     refreshIsTeacher() {
       const teacherToken = localStorage.getItem('teacherToken');
-      const currentLoginType = localStorage.getItem('currentLoginType');
-      this.isTeacher = !!(teacherToken || currentLoginType === 'teacher');
+      const onTeacherRoute = !!(this.$route && this.$route.path && this.$route.path.startsWith('/teacher/'));
+      this.isTeacher = !!(teacherToken || onTeacherRoute);
     },
     // 导航栏鼠标跟踪效果
     handleNavbarMouseMove(e) {

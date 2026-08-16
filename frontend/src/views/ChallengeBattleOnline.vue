@@ -196,8 +196,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import io from 'socket.io-client';
-
-const SOCKET_URL = 'http://localhost:3000';
+import { SOCKET_URL } from '../services/api';
 
 export default {
   name: 'ChallengeBattleOnline',

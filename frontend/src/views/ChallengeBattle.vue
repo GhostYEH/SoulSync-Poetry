@@ -365,8 +365,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import io from 'socket.io-client';
-
-const SOCKET_URL = 'http://localhost:3000';
+import api, { SOCKET_URL } from '../services/api';
 
 export default {
   name: 'ChallengeBattle',
@@ -513,6 +512,20 @@ export default {
           isCorrect: data.isCorrect,
           correctAnswer: data.correctAnswer
         };
+
+        if (!data.isCorrect && currentQuestion.value) {
+          const q = currentQuestion.value;
+          api.wrongQuestions.add({
+            question: q.question || q.question_content || '',
+            answer: data.correctAnswer || q.answer || '',
+            user_answer: userAnswer.value || '',
+            level: q.level || 1,
+            full_poem: q.full_poem || '',
+            author: q.author || '',
+            title: q.title || ''
+          }).catch(err => console.error('[ChallengeBattle] 同步错题失败:', err.message));
+        }
+
         setTimeout(() => {
           answerFeedback.value = null;
           userAnswer.value = '';
@@ -587,6 +600,19 @@ export default {
           currentQuestionIndex: data.currentQuestionIndex,
           nextTurn: data.nextTurn
         };
+
+        if (!data.isCorrect && dualQuestion.value) {
+          const q = dualQuestion.value;
+          api.wrongQuestions.add({
+            question: q.question || q.question_content || '',
+            answer: data.correctAnswer || q.answer || '',
+            user_answer: dualAnswer.value || '',
+            level: q.level || 1,
+            full_poem: q.full_poem || '',
+            author: q.author || '',
+            title: q.title || ''
+          }).catch(err => console.error('[ChallengeBattle] 同步错题失败:', err.message));
+        }
 
         // 更新玩家分数
         if (data.players) {

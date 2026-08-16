@@ -51,6 +51,7 @@ logs/
 # Backup files
 *.backup
 *.bak
+backup_*_before_migration.json
 
 # Electron build files
 electron/dist/

@@ -330,7 +330,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import questionsData from '@/data/poetryQuestions.json';
-import api from '../services/api';
+import api, { API_BASE_URL } from '../services/api';
 
 const FPS = 60;
 const PLAYER_ACCEL = 0.32;
@@ -1272,7 +1272,7 @@ export default {
           return;
         }
 
-        const apiBaseUrl = 'http://localhost:3000/api';
+        const apiBaseUrl = API_BASE_URL;
 
         for (const wq of wrongQuestions.value) {
           const questionContent = `${wq.beforeBlank}【】${wq.afterBlank}`;
@@ -1285,12 +1285,11 @@ export default {
                 'Authorization': `Bearer ${token}`
               },
               body: JSON.stringify({
-                question_id: wq.originalQuestion?.id || 0,
                 question: questionContent,
                 answer: wq.correctChar,
                 user_answer: wq.wrongChar,
                 level: 1,
-                full_poem: wq.originalQuestion?.answer || '',
+                full_poem: '',
                 author: wq.originalQuestion?.author || '',
                 title: wq.originalQuestion?.poem || wq.originalQuestion?.title || ''
               })

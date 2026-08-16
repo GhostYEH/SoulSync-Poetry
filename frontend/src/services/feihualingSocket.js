@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client';
+import { SOCKET_URL } from './api';
 
 class FeihualingSocket {
   constructor() {
@@ -12,7 +13,7 @@ class FeihualingSocket {
       return this.socket;
     }
 
-    this.socket = io('http://localhost:3000', {
+    this.socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 5,
@@ -33,8 +34,8 @@ class FeihualingSocket {
       this.trigger('disconnected');
     });
 
-    // 初始化成功（后端发送 init 事件）
-    this.socket.on('init', (data) => {
+    // 认证成功（后端发送 authenticated 事件）
+    this.socket.on('authenticated', (data) => {
       console.log('用户认证成功:', data);
       this.trigger('authenticated', data);
     });

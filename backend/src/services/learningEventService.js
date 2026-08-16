@@ -119,6 +119,8 @@ async function recordEvent(event) {
     EVENT_TYPES.RECITATION_ERROR,
     EVENT_TYPES.COMPLETE_GAME,
     EVENT_TYPES.REVIEW_POEM,
+    EVENT_TYPES.PLAY_FEIHUALING,
+    EVENT_TYPES.PLAY_CHAIN_GAME,
   ];
 
   if (EVIDENCE_EVENTS.includes(eventType) && kpIds.length > 0 && correct !== undefined) {

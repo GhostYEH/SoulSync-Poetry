@@ -3,16 +3,18 @@ const router = express.Router();
 const db = require('../utils/db');
 const aiService = require('../services/aiService');
 const challengeService = require('../services/challengeService');
+const authenticateToken = require('../middleware/auth');
+const learningEventService = require('../services/learningEventService');
 
 
 
-router.post('/save', async (req, res) => {
+router.post('/save', authenticateToken, async (req, res) => {
   try {
-    const { userId, score, wrongCount, correctCount, missedCount, duration, difficultyLevel, errors } = req.body;
+    const { score, wrongCount, correctCount, missedCount, duration, difficultyLevel, errors } = req.body;
     if (typeof score !== 'number') {
       return res.status(400).json({ success: false, message: '参数错误' });
     }
-    const finalUserId = userId || 1;
+    const finalUserId = req.user.userId;
     const finalWrong = wrongCount || 0;
     const finalCorrect = correctCount || 0;
     const finalMissed = missedCount || 0;
@@ -36,6 +38,19 @@ router.post('/save', async (req, res) => {
       }
     }
 
+    learningEventService.recordEvent({
+      userId: finalUserId,
+      eventType: learningEventService.EVENT_TYPES.COMPLETE_GAME,
+      gameId: 'card-catch',
+      knowledgePoints: ['memorization'],
+      correct: finalCorrect > 0,
+      score,
+      difficulty: finalDifficulty,
+      duration: finalDuration,
+      metadata: { correctCount: finalCorrect, wrongCount: finalWrong, missedCount: finalMissed },
+      eventKey: `card-catch:${finalUserId}:${recordId}`,
+    }).catch(err => console.error('[learningEvent] 卡片游戏事件失败:', err.message));
+
     res.json({ success: true, recordId, message: '游戏记录已保存' });
   } catch (err) {
     console.error('保存游戏记录失败:', err);
@@ -43,9 +58,9 @@ router.post('/save', async (req, res) => {
   }
 });
 
-router.get('/history', async (req, res) => {
+router.get('/history', authenticateToken, async (req, res) => {
   try {
-    const userId = parseInt(req.query.userId) || 1;
+    const userId = req.user.userId;
     const limit = parseInt(req.query.limit) || 10;
 
     const rows = await db.all(
@@ -59,7 +74,7 @@ router.get('/history', async (req, res) => {
   }
 });
 
-router.get('/record/:id', async (req, res) => {
+router.get('/record/:id', authenticateToken, async (req, res) => {
   try {
     const recordId = parseInt(req.params.id);
     const record = await db.get(
@@ -98,7 +113,7 @@ router.get('/ranking', async (req, res) => {
   }
 });
 
-router.post('/ai-explain', async (req, res) => {
+router.post('/ai-explain', authenticateToken, async (req, res) => {
   const { questionText, wrongAnswer, correctAnswer } = req.body;
   if (!questionText || !wrongAnswer || !correctAnswer) {
     return res.status(400).json({ success: false, message: '缺少必要参数' });
@@ -147,10 +162,10 @@ router.post('/ai-explain', async (req, res) => {
   }
 });
 
-router.post('/add-to-review', async (req, res) => {
+router.post('/add-to-review', authenticateToken, async (req, res) => {
   try {
-    const { userId, questionText, correctAnswer, userAnswer, recordId, errorId } = req.body;
-    const uid = userId || 1;
+    const { questionText, correctAnswer, userAnswer, recordId, errorId, level, full_poem, author, title, question_id } = req.body;
+    const uid = req.user.userId;
 
     if (!questionText || !correctAnswer) {
       return res.status(400).json({ success: false, message: '缺少必要参数' });
@@ -158,25 +173,48 @@ router.post('/add-to-review', async (req, res) => {
 
     const now = new Date().toISOString();
 
-    const result = await db.run(
-      `INSERT INTO wrong_questions (user_id, question, answer, user_answer, wrong_count, last_wrong_time)
-       VALUES ($1, $2, $3, $4, 1, $5) RETURNING id`,
-      [String(uid), questionText, correctAnswer, userAnswer || '', now]
+    const existing = await db.get(
+      `SELECT id FROM wrong_questions WHERE user_id = $1 AND question = $2`,
+      [String(uid), questionText]
     );
+
+    let wrongId;
+    if (existing) {
+      await db.run(
+        `UPDATE wrong_questions
+         SET user_answer = $1, answer = $2, wrong_count = wrong_count + 1,
+             last_wrong_time = CURRENT_TIMESTAMP, mastered = 0, correct_streak = 0,
+             full_poem = COALESCE($3, full_poem), author = COALESCE($4, author), title = COALESCE($5, title)
+         WHERE id = $6`,
+        [userAnswer || '', correctAnswer, full_poem || null, author || null, title || null, existing.id]
+      );
+      wrongId = existing.id;
+    } else {
+      const result = await db.run(
+        `INSERT INTO wrong_questions
+         (user_id, question_id, question, answer, user_answer, level, wrong_count,
+          last_wrong_time, correct_streak, mastered, full_poem, author, title, added_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 1, CURRENT_TIMESTAMP, 0, 0, $7, $8, $9, CURRENT_TIMESTAMP)
+         RETURNING id`,
+        [String(uid), question_id || null, questionText, correctAnswer, userAnswer || '',
+         level || null, full_poem || null, author || null, title || null]
+      );
+      wrongId = result.rows[0].id;
+    }
 
     if (errorId) {
       await db.run(`UPDATE card_game_errors SET added_to_review = 1 WHERE id = $1`, [errorId]);
     }
-    res.json({ success: true, message: '已添加到错题本', id: result.rows[0].id });
+    res.json({ success: true, message: '已添加到错题本', id: wrongId });
   } catch (err) {
     console.error('添加错题失败:', err);
     res.status(500).json({ success: false, message: '添加失败' });
   }
 });
 
-router.get('/review-questions', async (req, res) => {
+router.get('/review-questions', authenticateToken, async (req, res) => {
   try {
-    const userId = parseInt(req.query.userId) || 1;
+    const userId = req.user.userId;
     const rows = await db.all(
       `SELECT * FROM card_game_review WHERE user_id = $1 ORDER BY reviewed_at DESC LIMIT 20`,
       [userId]
@@ -187,7 +225,7 @@ router.get('/review-questions', async (req, res) => {
   }
 });
 
-router.post('/review-answer', async (req, res) => {
+router.post('/review-answer', authenticateToken, async (req, res) => {
   try {
     const { reviewId, userAnswer, isCorrect } = req.body;
     await db.run(

@@ -145,24 +145,6 @@ async function seed() {
     }
     console.log('✓ 学生数据已填充');
 
-    // 3.5 插入学生演示账号 Studentdemo（前端"测试账号一键登录"使用）
-    await client.query(
-      `INSERT INTO users (username, email, password_hash, class_id, created_at, updated_at)
-       VALUES ('Studentdemo', $1, $2, 1, $3, $3)
-       ON CONFLICT (username) DO UPDATE SET email = EXCLUDED.email, password_hash = EXCLUDED.password_hash`,
-      ['s@s.com', passwordHash, now]
-    );
-    console.log('✓ 演示学生账号 Studentdemo / 123456 已就绪');
-
-    // 3.6 插入教师测试账号 jiaoshi（教师端"测试账号一键登录"使用）
-    await client.query(
-      `INSERT INTO teachers (username, password)
-       VALUES ('jiaoshi', $1)
-       ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password`,
-      [passwordHash]
-    );
-    console.log('✓ 教师测试账号 jiaoshi / 123456 已就绪');
-
     // 4. 获取诗词 ID 列表
     const poemRows = (await client.query('SELECT id FROM poems')).rows;
     const poemIds = poemRows.map(r => r.id);

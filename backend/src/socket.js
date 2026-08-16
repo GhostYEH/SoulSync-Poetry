@@ -245,20 +245,6 @@ function setupSocket(io) {
       }
     });
 
-    socket.on('throw-question', (data) => {
-      const { roomId } = data;
-      const result = feihualingService.throwQuestion(roomId, currentUserId);
-      if (!result.success) { socket.emit('error', { error: result.error }); return; }
-      const { room, remainingThrows } = result;
-      room.players.forEach(player => {
-        if (player.socketId) io.to(player.socketId).emit('question-thrown', {
-          thrownBy: currentUserId, thrownByName: room.players.find(p => p.id === currentUserId)?.username,
-          throwCount: room.players.find(p => p.id === currentUserId)?.throwCount,
-          remainingThrows, currentTurn: result.currentTurn, players: result.players, nextPlayer: result.nextPlayer
-        });
-      });
-      startTurnTimer(roomId, io);
-    });
 
     socket.on('game-over', (data) => {
       const { roomId, winnerId, loserId, reason } = data;

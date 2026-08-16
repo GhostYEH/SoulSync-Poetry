@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authenticateToken = require('../middleware/auth');
 const wrongQuestionService = require('../services/wrongQuestionService');
+const learningEventService = require('../services/learningEventService');
 
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
@@ -31,6 +32,18 @@ router.post('/add', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const questionData = req.body;
     const result = await wrongQuestionService.addWrongQuestion(userId, questionData);
+
+    learningEventService.recordEvent({
+      userId,
+      eventType: learningEventService.EVENT_TYPES.WRONG_ANSWER,
+      questionId: result.id ? String(result.id) : null,
+      questionText: questionData.question || '',
+      correct: false,
+      difficulty: questionData.level || 3,
+      eventKey: `wrong-add:${userId}:${result.id}`,
+      metadata: { source: 'wrong-questions-add', userAnswer: questionData.user_answer, correctAnswer: questionData.answer },
+    }).catch(err => console.error('[learningEvent] 错题添加事件失败:', err.message));
+
     res.json(result);
   } catch (error) {
     console.error('添加错题失败:', error);

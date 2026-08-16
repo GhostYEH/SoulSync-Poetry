@@ -12,7 +12,10 @@ const getApiBaseUrl = async () => {
 };
 
 // 同步获取 API 基础 URL（用于不需要等待的场景）
-const API_BASE_URL = 'http://localhost:3000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+
+// Socket 连接 URL
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
 
 // 存储动态获取的 API URL
 let dynamicApiBaseUrl = null;
@@ -520,4 +523,5 @@ export const api = {
   }
 };
 
+export { API_BASE_URL, SOCKET_URL };
 export default api;

@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../config/config');
 const db = require('../utils/db');
 const feihuaRankingService = require('../services/feihuaRankingService');
+const learningEventService = require('../services/learningEventService');
 
 const onlineUsers = new Map();
 
@@ -124,7 +125,23 @@ async function saveBattleRecord(room, winnerId, loserId, isRankingMatch = false)
   );
   
   await updateHighRecords(room, winnerId, loserId);
-  
+
+  for (const pid of [winnerId, loserId]) {
+    const isWinner = String(pid) === String(winnerId);
+    learningEventService.recordEvent({
+      userId: pid,
+      eventType: learningEventService.EVENT_TYPES.PLAY_FEIHUALING,
+      gameId: 'feihua-battle',
+      knowledgePoints: ['memorization'],
+      correct: isWinner,
+      score: isWinner ? room.currentQuestionIndex + 1 : 0,
+      difficulty: 3,
+      duration: (room.currentQuestionIndex + 1) * 10,
+      metadata: { keyword: room.keyword, isWinner, totalRounds: room.currentQuestionIndex + 1 },
+      eventKey: `feihua-battle:${pid}:${room.id || (room.startTime + '')}`,
+    }).catch(err => console.error('[learningEvent] 飞花令对战事件失败:', err.message));
+  }
+
   if (isRankingMatch && room.isRanking) {
     try {
       await feihuaRankingService.updateRankingAfterBattle(winnerId, loserId);
@@ -300,6 +317,7 @@ function setupSocket(io) {
       const questions = generateQuestions(30);
 
       gameRooms.set(roomId, {
+        id: roomId,
         players: [
           {
             userId: actualInviterId,

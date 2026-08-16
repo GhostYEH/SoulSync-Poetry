@@ -480,8 +480,9 @@
 import { ref, onMounted, onUnmounted, onActivated, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import questionsData from '@/data/poetryQuestions.json';
+import { API_BASE_URL } from '../services/api';
 
-const API_BASE = 'http://localhost:3000/api/card-game';
+const API_BASE = `${API_BASE_URL}/card-game`;
 
 // ==================== 常量 ====================
 const CANVAS_W = 1400;
@@ -519,6 +520,13 @@ const getUserId = () => {
     }
   }
   return 1;
+};
+
+const authFetch = (url, options = {}) => {
+  const token = localStorage.getItem('token');
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch(url, { ...options, headers });
 };
 
 export default {
@@ -1440,9 +1448,8 @@ export default {
       // 调用 AI 讲解
       for (let i = 0; i < errList.length; i++) {
         try {
-          const resp = await fetch(`${API_BASE}/ai-explain`, {
+          const resp = await authFetch(`${API_BASE}/ai-explain`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               questionText: errList[i].questionText,
               wrongAnswer: errList[i].userAnswer,
@@ -1464,21 +1471,19 @@ export default {
     const addSingleToErrorBook = async (err) => {
       try {
         const userId = getUserId();
-        const resp = await fetch(`${API_BASE}/add-to-review`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: userId,
-            questionText: err.questionText,
-            correctAnswer: err.correctAnswer,
-            userAnswer: err.userAnswer
-          })
-        });
-        const json = await resp.json();
-        if (json.success) {
-          err.addedToReview = true;
-          reviewErrors.value = [...reviewErrors.value];
-          showToast('已加入错题本', 'success');
+          const resp = await authFetch(`${API_BASE}/add-to-review`, {
+            method: 'POST',
+            body: JSON.stringify({
+              questionText: err.questionText,
+              correctAnswer: err.correctAnswer,
+              userAnswer: err.userAnswer
+            })
+          });
+          const json = await resp.json();
+          if (json.success) {
+            err.addedToReview = true;
+            reviewErrors.value = [...reviewErrors.value];
+            showToast('已加入错题本', 'success');
         } else {
           showToast(json.message || '添加失败', 'error');
         }
@@ -1497,11 +1502,9 @@ export default {
       for (const err of notAdded) {
         try {
           const userId = getUserId();
-          const resp = await fetch(`${API_BASE}/add-to-review`, {
+          const resp = await authFetch(`${API_BASE}/add-to-review`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              userId: userId,
               questionText: err.questionText,
               correctAnswer: err.correctAnswer,
               userAnswer: err.userAnswer
@@ -1535,11 +1538,9 @@ export default {
       for (const err of wrongCaughtLog) {
         try {
           const userId = getUserId();
-          const resp = await fetch(`${API_BASE}/add-to-review`, {
+          const resp = await authFetch(`${API_BASE}/add-to-review`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              userId: userId,
               questionText: err.questionText,
               correctAnswer: err.correctAnswer,
               userAnswer: err.userAnswer
@@ -1570,9 +1571,8 @@ export default {
       }));
 
       try {
-        await fetch(`${API_BASE}/save`, {
+        await authFetch(`${API_BASE}/save`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             score: score.value,
             wrongCount: wrongCount.value,
