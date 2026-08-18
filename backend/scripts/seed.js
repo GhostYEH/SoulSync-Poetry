@@ -99,6 +99,8 @@ async function seed() {
     console.log('✅ 基础数据初始化完成！');
     if (process.argv.includes('--dev')) {
       console.log('开始填充开发环境模拟数据...');
+      const poemIdsRes = await client.query('SELECT id FROM poems');
+      const poemIds = poemIdsRes.rows.map(r => r.id);
       await seedDevData(client, poemIds);
       console.log('✅ 开发环境模拟数据填充完成！');
     }
