@@ -1,84 +1,29 @@
 // API服务层，统一处理API请求和认证
 
-// 动态获取 API 基础 URL（支持 Electron 环境）
-const getApiBaseUrl = async () => {
-  // 检测是否在 Electron 环境中
-  if (window.electronAPI) {
-    const port = await window.electronAPI.getBackendPort();
-    return `http://localhost:${port}/api`;
-  }
-  // 浏览器环境使用默认端口
-  return 'http://localhost:3000/api';
-};
-
 // 同步获取 API 基础 URL（用于不需要等待的场景）
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 // Socket 连接 URL
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
-
-// 存储动态获取的 API URL
-let dynamicApiBaseUrl = null;
-let apiUrlPromise = null; // 防止重复请求
-
-// 带超时的获取 API URL
-const getApiUrlWithTimeout = async () => {
-  if (dynamicApiBaseUrl) return dynamicApiBaseUrl;
-  if (apiUrlPromise) return apiUrlPromise;
-
-  apiUrlPromise = new Promise((resolve) => {
-    // 超时兜底：3秒后使用默认URL
-    const timeout = setTimeout(() => {
-      if (!dynamicApiBaseUrl) {
-        dynamicApiBaseUrl = API_BASE_URL;
-        console.warn('[api] 获取动态API地址超时，使用默认:', dynamicApiBaseUrl);
-      }
-      resolve(dynamicApiBaseUrl);
-      apiUrlPromise = null;
-    }, 3000);
-
-    // 异步获取
-    getApiBaseUrl().then((url) => {
-      clearTimeout(timeout);
-      dynamicApiBaseUrl = url;
-      resolve(url);
-      apiUrlPromise = null;
-    }).catch(() => {
-      clearTimeout(timeout);
-      dynamicApiBaseUrl = API_BASE_URL;
-      resolve(API_BASE_URL);
-      apiUrlPromise = null;
-    });
-  });
-
-  return apiUrlPromise;
-};
-
-// 初始化动态 API URL
-const initApiUrl = async () => {
-  return getApiUrlWithTimeout();
-};
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || window.location.origin;
 
 // 公共 fetch 辅助函数（用于不需要认证的请求）
 const publicFetch = async (url) => {
-  const baseUrl = await initApiUrl();
-  const response = await fetchWithTimeout(`${baseUrl}${url}`, {}, 10000);
-  return response.json();
+  return request(url, { includeAuth: false });
 };
 
 // 获取token
-const getToken = () => {
-  return localStorage.getItem('token');
+export const getToken = (isTeacher = false) => {
+  return localStorage.getItem(isTeacher ? 'teacherToken' : 'token');
 };
 
 // 构建请求头
-const getHeaders = (includeAuth = true) => {
+const getHeaders = (includeAuth = true, isTeacher = false) => {
   const headers = {
     'Content-Type': 'application/json'
   };
   
   if (includeAuth) {
-    const token = getToken();
+    const token = getToken(isTeacher);
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
@@ -87,51 +32,62 @@ const getHeaders = (includeAuth = true) => {
   return headers;
 };
 
-// 带超时的fetch包装
-const fetchWithTimeout = (url, options = {}, timeout = 10000) => {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`请求超时: ${url}`));
-    }, timeout);
+let isRedirecting = false;
 
-    fetch(url, options)
-      .then((response) => {
-        clearTimeout(timer);
-        resolve(response);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
+// Timeout分级配置
+export const TIMEOUTS = {
+  SHORT: 15000,
+  MEDIUM: 75000,
+  LONG: 120000
 };
 
 // 通用请求方法
-const request = async (url, options = {}) => {
+export const request = async (url, options = {}) => {
+  const timeout = options.timeout || TIMEOUTS.SHORT;
+  const isTeacher = url.startsWith('/teacher') || options.isTeacher;
+  const skipAuthRedirect = options.skipAuthRedirect || false;
+  
   try {
-    // 使用动态 API URL
-    const baseUrl = await initApiUrl();
-    const response = await fetchWithTimeout(`${baseUrl}${url}`, {
+    const baseUrl = API_BASE_URL;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    const response = await fetch(`${baseUrl}${url}`, {
       ...options,
       headers: {
-        ...getHeaders(options.includeAuth !== false),
+        ...getHeaders(options.includeAuth !== false, isTeacher),
         ...options.headers
-      }
-    }, options.timeout || 10000);
+      },
+      signal: controller.signal
+    });
     
-    const data = await response.json();
+    clearTimeout(timer);
+
+    const data = await response.json().catch(() => ({}));
     
     if (!response.ok) {
       // 处理认证错误
-      if (response.status === 401) {
-        // 清除无效的token
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        // 跳转到登录页面
-        window.location.href = '/login';
+      if (response.status === 401 && !skipAuthRedirect) {
+        if (isTeacher) {
+          localStorage.removeItem('teacherToken');
+          localStorage.removeItem('teacher');
+          localStorage.removeItem('teacherInfo');
+          if (!isRedirecting && window.location.pathname !== '/teacher/login') {
+            isRedirecting = true;
+            window.location.href = '/teacher/login';
+          }
+        } else {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          if (!isRedirecting && window.location.pathname !== '/login') {
+            isRedirecting = true;
+            window.location.href = '/login';
+          }
+        }
         throw new Error('认证令牌已过期，请重新登录');
       }
-      const err = new Error(data.message || '请求失败');
+      
+      const err = new Error(data.message || data.error || '请求失败');
       if (data.code) err.code = data.code;
       err.status = response.status;
       throw err;
@@ -139,6 +95,9 @@ const request = async (url, options = {}) => {
     
     return data;
   } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`请求超时: ${url}`);
+    }
     console.error('API请求失败:', error);
     throw error;
   }
@@ -151,12 +110,14 @@ export const api = {
     login: (credentials) => request('/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
-      includeAuth: false
+      includeAuth: false,
+      skipAuthRedirect: true
     }),
     register: (userData) => request('/auth/register', {
       method: 'POST',
       body: JSON.stringify(userData),
-      includeAuth: false
+      includeAuth: false,
+      skipAuthRedirect: true
     }),
     verify: () => request('/auth/verify')
   },
@@ -225,20 +186,34 @@ export const api = {
       body: JSON.stringify(data)
     }),
     tts: async (text) => {
-      const baseUrl = await initApiUrl();
-      const response = await fetchWithTimeout(`${baseUrl}/ai/tts`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ text })
-      }, 30000);
+      const baseUrl = API_BASE_URL;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUTS.MEDIUM);
       
-      if (!response.ok) {
-        throw new Error('语音合成失败');
+      try {
+        const response = await fetch(`${baseUrl}/ai/tts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ text }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timer);
+        
+        if (!response.ok) {
+          throw new Error('语音合成失败');
+        }
+        
+        return response.blob();
+      } catch (error) {
+        clearTimeout(timer);
+        if (error.name === 'AbortError') {
+          throw new Error('语音合成超时');
+        }
+        throw error;
       }
-      
-      return response.blob();
     }
   },
   

@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "chinese-poetry-backend",
   "version": "1.0.0",
   "description": "Backend for Chinese Poetry Learning System with AI",
@@ -6,6 +6,16 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "test": "node tests/run-all-tests.js",
+    "test:unit": "node tests/abilityAggregation.test.js && node tests/ragTutor.test.js && node tests/learningCore.test.js",
+    "test:integration": "node tests/integration.test.js && node tests/api.test.js && node tests/concurrency.test.js",
+    "test:integration:required": "node tests/integration.test.js --require-db && node tests/api.test.js --require-db && node tests/concurrency.test.js --require-db",
+    "test:smoke": "node tests/apiSmokeTest.js",
+    "test:sqlite": "node tests/sqliteCompatibility.test.js",
+    "test:security": "node tests/securityTest.js",
+    "test:transaction": "node tests/transactionTest.js",
+    "test:cheat": "node tests/antiCheatTest.js",
+    "test:all": "node tests/apiSmokeTest.js && node tests/securityTest.js && node tests/transactionTest.js && node tests/antiCheatTest.js && node tests/dbModeTest.js",
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js"
   },
@@ -15,6 +25,8 @@
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
     "express": "^4.18.2",
+    "express-rate-limit": "^8.6.2",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "node-fetch": "^2.7.0",
     "opencc-js": "^1.0.5",
@@ -30,5 +42,8 @@
     "learning-system"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

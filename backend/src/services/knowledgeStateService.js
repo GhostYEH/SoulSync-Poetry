@@ -74,12 +74,19 @@ async function getClassKnowledgeOverview(classId = null) {
   const pointToRoot = await buildRootMap();
   const studentIds = students.map(s => s.id);
 
-  const states = await db.all(
-    `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.confidence, s.attempt_count
-     FROM student_knowledge_states s
-     WHERE s.user_id = ANY($1::int[])`,
-    [studentIds]
-  );
+  const states = db.isPostgres()
+    ? await db.all(
+        `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.confidence, s.attempt_count
+         FROM student_knowledge_states s
+         WHERE s.user_id = ANY($1::int[])`,
+        [studentIds]
+      )
+    : await db.all(
+        `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.confidence, s.attempt_count
+         FROM student_knowledge_states s
+         WHERE s.user_id IN (${studentIds.map(() => '?').join(',')})`,
+        studentIds
+      );
 
   const dimAgg = {};
   KNOWLEDGE_DIMENSIONS.forEach(d => {
@@ -116,12 +123,19 @@ async function getClassKnowledgeHeatmap(classId = null, limit = 50) {
   const pointToRoot = await buildRootMap();
   const studentIds = students.map(s => s.id);
 
-  const states = await db.all(
-    `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.attempt_count
-     FROM student_knowledge_states s
-     WHERE s.user_id = ANY($1::int[])`,
-    [studentIds]
-  );
+  const states = db.isPostgres()
+    ? await db.all(
+        `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.attempt_count
+         FROM student_knowledge_states s
+         WHERE s.user_id = ANY($1::int[])`,
+        [studentIds]
+      )
+    : await db.all(
+        `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.attempt_count
+         FROM student_knowledge_states s
+         WHERE s.user_id IN (${studentIds.map(() => '?').join(',')})`,
+        studentIds
+      );
 
   const byUser = {};
   states.forEach(st => {
@@ -162,19 +176,33 @@ async function getWeakPoints(classId = null, topN = 10) {
   const pointToRoot = await buildRootMap();
   const studentIds = students.map(s => s.id);
 
-  const weakStates = await db.all(
-    `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.confidence,
-            s.attempt_count, s.error_count, s.correct_count,
-            kp.code, kp.name, kp.category, kp.parent_id, kp.difficulty
-     FROM student_knowledge_states s
-     JOIN knowledge_points kp ON s.knowledge_point_id = kp.id
-     WHERE s.user_id = ANY($1::int[])
-       AND s.mastery < 0.5
-       AND s.attempt_count >= 2
-     ORDER BY s.mastery ASC
-     LIMIT $2`,
-    [studentIds, topN * 4]
-  );
+  const weakStates = db.isPostgres()
+    ? await db.all(
+        `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.confidence,
+                s.attempt_count, s.error_count, s.correct_count,
+                kp.code, kp.name, kp.category, kp.parent_id, kp.difficulty
+         FROM student_knowledge_states s
+         JOIN knowledge_points kp ON s.knowledge_point_id = kp.id
+         WHERE s.user_id = ANY($1::int[])
+           AND s.mastery < 0.5
+           AND s.attempt_count >= 2
+         ORDER BY s.mastery ASC
+         LIMIT $2`,
+        [studentIds, topN * 4]
+      )
+    : await db.all(
+        `SELECT s.user_id, s.knowledge_point_id, s.mastery, s.confidence,
+                s.attempt_count, s.error_count, s.correct_count,
+                kp.code, kp.name, kp.category, kp.parent_id, kp.difficulty
+         FROM student_knowledge_states s
+         JOIN knowledge_points kp ON s.knowledge_point_id = kp.id
+         WHERE s.user_id IN (${studentIds.map(() => '?').join(',')})
+           AND s.mastery < 0.5
+           AND s.attempt_count >= 2
+         ORDER BY s.mastery ASC
+         LIMIT ?`,
+        [...studentIds, topN * 4]
+      );
 
   const byDimension = {};
   KNOWLEDGE_DIMENSIONS.forEach(d => { byDimension[d.key] = []; });

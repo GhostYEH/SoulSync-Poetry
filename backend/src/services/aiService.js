@@ -2,255 +2,97 @@
 const { spawn } = require('child_process');
 const config = require('../config/config');
 const { getCacheFilePath, readCache, writeCache } = require('../utils/cache');
+const crypto = require('crypto');
 const fetch = require('node-fetch');
+const { AIClient, AIError, AI_ERRORS, robustJSONParse } = require('../utils/aiClient');
 
-// 从文本中提取JSON
+const PROMPT_VERSION = 'v1.0';
+const CACHE_VERSION = 'v1.0';
+
+// 创建统一的 AI Client 实例
+const defaultAIClient = new AIClient({
+  apiKey: config.ai.apiKey,
+  apiUrl: config.ai.apiUrl,
+  model: config.ai.model,
+  timeout: 30000,
+  name: 'DefaultAI'
+});
+
+const zhipuAIClient = new AIClient({
+  apiKey: config.zhipu.apiKey,
+  apiUrl: config.zhipu.apiUrl,
+  model: config.zhipu.model,
+  timeout: 30000,
+  name: 'ZhipuAI'
+});
+
+// 生成统一的缓存 Key
+function generateAdvancedCacheKey(poemId, content, taskType, model, promptVersion = PROMPT_VERSION) {
+  const hash = crypto.createHash('md5').update(content || '').digest('hex');
+  return `ai_${CACHE_VERSION}_${taskType}_${poemId || 'none'}_${hash}_${model}_${promptVersion}`;
+}
+
+// 统一 JSON 提取逻辑
 function extractJSON(text) {
-  if (!text) return null;
-  let s = text.trim();
-  
-  const codeBlockMatch = s.match(/```(?:json)?\s*\n?([\s\S]+?)\n?```/);
-  if (codeBlockMatch) s = codeBlockMatch[1].trim();
-  
-  try { return JSON.parse(s); } catch (_) {}
-  
-  const jsonPatterns = [
-    /\{[\s\S]*?"keywords"[\s\S]*?\}/,
-    /\{[\s\S]*?"poem"[\s\S]*?\}/,
-    /\{[\s\S]*?"strength"[\s\S]*?\}/,
-    /\{[\s\S]*?"suggestions"[\s\S]*?\}/,
-    /\{[\s\S]*?"aiLine"[\s\S]*?\}/,
-    /\{[\s\S]*?"relatedWords"[\s\S]*?\}/,
-    /\{[\s\S]*?"total"[\s\S]*?\}/,
-    /\{[\s\S]*?"name"[\s\S]*?\}/,
-    /\{[\s\S]+\}/
-  ];
-  
-  for (const pattern of jsonPatterns) {
-    const match = s.match(pattern);
-    if (match) {
-      try { 
-        const parsed = JSON.parse(match[0]);
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-          return parsed;
-        }
-      } catch (_) {}
-    }
-  }
-  
-  const objMatch = s.match(/\{[\s\S]+\}/);
-  if (objMatch) {
-    try { return JSON.parse(objMatch[0]); } catch (_) {}
-  }
-  const arrMatch = s.match(/\[[\s\S]+\]/);
-  if (arrMatch) {
-    try { return JSON.parse(arrMatch[0]); } catch (_) {}
-  }
-  return null;
+  return robustJSONParse(text);
 }
 
 // 调用AI生成JSON
 async function callAIGenerateJSON(prompt, systemContent, options = {}) {
-  const MAX_RETRIES = 2;
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const apiKey = config.ai.apiKey;
-      if (!apiKey) {
-        console.log('[aiService] 缺少API密钥，返回null');
-        return null;
-      }
-
-      const temperatures = [0.7, 0.2, 0.05];
-      const defaultConfig = {
-        temperature: config.ai.defaultTemperature || 0.7,
-        max_tokens: config.ai.defaultMaxTokens || 500,
-        top_p: config.ai.defaultTopP || 0.7,
-        stream: false,
-        timeout: 60000
-      };
-      const finalConfig = { ...defaultConfig, ...options };
-      if (options.maxTokens != null) finalConfig.max_tokens = options.maxTokens;
-      if (attempt > 0) {
-        finalConfig.temperature = temperatures[Math.min(attempt, temperatures.length - 1)];
-        console.log(`[aiService] 重试第${attempt + 1}次，temperature=${finalConfig.temperature}`);
-      }
-
-      const requestData = {
-        model: config.ai.model,
-        messages: [
-          { role: "system", content: systemContent },
-          { role: "user", content: prompt }
-        ],
-        temperature: finalConfig.temperature,
-        max_tokens: finalConfig.max_tokens,
-        top_p: finalConfig.top_p,
-        stream: finalConfig.stream,
-        response_format: { type: "json_object" }
-      };
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), config.ai.timeout || 60000);
-
-      const response = await fetch(config.ai.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(requestData),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        console.error('[aiService] API请求失败:', response.status, errText);
-        if (attempt === MAX_RETRIES) return null;
-        continue;
-      }
-
-      const responseData = await response.json();
-      const msg = responseData.choices?.[0]?.message || {};
-      const rawContent = (msg.content || msg.reasoning_content || '').trim();
-
-      // 增强调试信息
-      console.log('[aiService] AI返回原始内容长度:', rawContent.length);
-      console.log('[aiService] AI返回原始内容前200字符:', rawContent.substring(0, 200));
-
-      const result = extractJSON(rawContent);
-      if (result) {
-        console.log('[aiService] JSON解析成功，字段:', Object.keys(result).join(', '));
-        return result;
-      }
-
-      console.warn('[aiService] JSON解析失败，原始内容:', rawContent.substring(0, 300));
-
-      if (attempt === MAX_RETRIES) {
-        console.error('[aiService] JSON解析重试全部失败');
-        return null;
-      }
-
-      console.warn(`[aiService] JSON解析失败，将重试`);
-
-    } catch (error) {
-      console.error(`[aiService] 调用AI失败:`, error.message);
-      if (error.name === 'AbortError') {
-        console.warn('[aiService] 请求超时被中止');
-      }
-      if (attempt === MAX_RETRIES) return null;
-    }
+  if (!config.ai.apiKey) {
+    console.log('[aiService] 缺少API密钥，返回null');
+    return null;
   }
-  return null;
+
+  const payload = {
+    model: config.ai.model,
+    messages: [
+      { role: "system", content: systemContent },
+      { role: "user", content: prompt }
+    ],
+    temperature: options.temperature || config.ai.defaultTemperature || 0.7,
+    max_tokens: options.maxTokens || options.max_tokens || config.ai.defaultMaxTokens || 500,
+    top_p: options.top_p || config.ai.defaultTopP || 0.7,
+    stream: options.stream || false,
+    response_format: { type: "json_object" }
+  };
+
+  return await defaultAIClient.request(payload, {
+      timeout: options.timeout || 35000,
+      maxRetries: 2,
+      taskName: 'callAIGenerateJSON',
+      isJsonResponse: true
+    });
 }
 
 module.exports.callAIGenerateJSON = callAIGenerateJSON;
 
 // 调用硅基流动生成JSON（诗词创作模块专用，使用Qwen/Qwen2.5-7B-Instruct）
 async function callZhipuGenerateJSON(prompt, systemContent, options = {}) {
-  const MAX_RETRIES = 2;
-
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const apiKey = config.zhipu.apiKey;
-      if (!apiKey) {
-        console.log('[aiService] 缺少硅基流动API密钥，返回null');
-        return null;
-      }
-
-      const temperatures = [0.7, 0.2, 0.05];
-      const defaultConfig = {
-        temperature: options.temperature || 0.7,
-        max_tokens: options.maxTokens || 500,
-        top_p: 0.7,
-        stream: false,
-        timeout: 60000
-      };
-      const finalConfig = { ...defaultConfig, ...options };
-      if (options.maxTokens != null) finalConfig.max_tokens = options.maxTokens;
-      if (attempt > 0) {
-        finalConfig.temperature = temperatures[Math.min(attempt, temperatures.length - 1)];
-        const delay = attempt === 1 ? 2000 : 4000;
-        console.log(`[aiService] 硅基流动重试第${attempt + 1}次，等待${delay}ms后重试，temperature=${finalConfig.temperature}`);
-        await sleep(delay);
-      }
-
-      const requestData = {
-        model: config.zhipu.model,
-        messages: [
-          { role: "system", content: systemContent },
-          { role: "user", content: prompt }
-        ],
-        temperature: finalConfig.temperature,
-        max_tokens: finalConfig.max_tokens,
-        top_p: finalConfig.top_p,
-        stream: finalConfig.stream,
-        response_format: { type: "json_object" }
-      };
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), config.zhipu.timeout || 60000);
-
-      const response = await fetch(config.zhipu.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(requestData),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errText = await response.text().catch(() => '');
-        console.error('[aiService] 硅基流动API请求失败:', response.status, errText);
-        
-        if (response.status === 429) {
-          const retryDelay = 5000;
-          console.log(`[aiService] 遇到速率限制，等待${retryDelay}ms后重试`);
-          await sleep(retryDelay);
-        }
-        
-        if (attempt === MAX_RETRIES) return null;
-        continue;
-      }
-
-      const responseData = await response.json();
-      const msg = responseData.choices?.[0]?.message || {};
-      const rawContent = (msg.content || msg.reasoning_content || '').trim();
-
-      console.log('[aiService] 硅基流动AI返回原始内容长度:', rawContent.length);
-      console.log('[aiService] 硅基流动AI返回原始内容:', rawContent);
-
-      const result = extractJSON(rawContent);
-      if (result) {
-        console.log('[aiService] 硅基流动JSON解析成功，字段:', Object.keys(result).join(', '));
-        return result;
-      }
-
-      console.warn('[aiService] 硅基流动JSON解析失败，原始内容:', rawContent.substring(0, 300));
-
-      if (attempt === MAX_RETRIES) {
-        console.error('[aiService] 硅基流动JSON解析重试全部失败');
-        return null;
-      }
-
-      console.warn(`[aiService] 硅基流动JSON解析失败，将重试`);
-
-    } catch (error) {
-      console.error(`[aiService] 调用硅基流动AI失败:`, error.message);
-      if (error.name === 'AbortError') {
-        console.warn('[aiService] 硅基流动请求超时被中止');
-      }
-      if (attempt === MAX_RETRIES) return null;
-    }
+  if (!config.zhipu.apiKey) {
+    console.log('[aiService] 缺少硅基流动API密钥，返回null');
+    return null;
   }
-  return null;
+
+  const payload = {
+    model: config.zhipu.model,
+    messages: [
+      { role: "system", content: systemContent },
+      { role: "user", content: prompt }
+    ],
+    temperature: options.temperature || 0.7,
+    max_tokens: options.maxTokens || options.max_tokens || 500,
+    top_p: options.top_p || 0.7,
+    stream: options.stream || false,
+    response_format: { type: "json_object" }
+  };
+
+  return await zhipuAIClient.request(payload, {
+      timeout: options.timeout || 35000,
+      maxRetries: 2,
+      taskName: 'callZhipuGenerateJSON',
+      isJsonResponse: true
+    });
 }
 
 module.exports.callZhipuGenerateJSON = callZhipuGenerateJSON;
@@ -432,88 +274,13 @@ async function getAIRecitationCheck(original, input, poemTitle, poemAuthor, lear
   }
 }
 
-// 模拟背诵检测
-function getMockRecitationCheck(original, input, learningRecord) {
-  const isRequestForFullScore = input.includes('请你给我满分') || input.includes('给我满分') || input.includes('满分');
-  const hasCreativeModification = false;
-  
-  let programResult = checkRecitation(original, input);
-  
-  let advice = '';
-  let score = programResult.score;
-  
-  if (isRequestForFullScore) {
-    advice = '哈哈，亲爱的同学，我理解你想要满分的心情！不过你知道吗？背诵的真正目的不是为了分数，而是为了真正感受诗词的魅力，理解其中的意境和情感。';
-    if (score >= 90) {
-      advice += ' 不过话说回来，你的背诵已经非常出色了，得分' + score + '分，几乎接近满分了！你看，你已经做得很棒了！';
-    } else if (score >= 70) {
-      advice += ' 你的背诵还不错哦，得分' + score + '分！虽然还有一些小地方可以改进，但整体已经很好了。';
-    } else {
-      advice += ' 你的背诵还有较大的提升空间，得分' + score + '分。不过没关系，学习是一个过程，慢慢来，老师相信你一定可以的！';
-    }
-    advice += ' 继续努力，当你真正理解并爱上这首诗词时，满分自然就会到来！建议你可以先尝试理解诗词的意思，想象诗词描绘的场景，然后分段练习，重点关注容易出错的部分。';
-  } 
-  else if (hasCreativeModification) {
-    score = Math.min(95, score + 10);
-    advice = '哇，亲爱的同学，你真是太有创意了！你对诗词的修改非常恰当，展现了你的独特见解和对诗词的深入理解，这种创新精神值得大大的鼓励！得分' + score + '分，真的很棒！';
-    if (learningRecord && learningRecord.recite_attempts > 1) {
-      advice += '而且相比之前的尝试，你的进步非常明显，老师都看在眼里，为你感到骄傲！';
-    }
-    advice += '你的修改让老师眼前一亮，说明你不仅在背诵，还在思考，在理解，这才是学习诗词的正确方式。';
-  }
-  else {
-    if (score >= 90) {
-      advice = '太棒了，亲爱的同学！你背诵得非常准确，得分' + score + '分，简直太棒了！';
-      if (learningRecord && learningRecord.recite_attempts > 1) {
-        advice += '而且相比之前的尝试，你的进步非常明显，老师都看在眼里，为你感到骄傲！';
-      }
-      advice += '你已经掌握了这首诗词的精髓，继续保持这种专注的学习态度！';
-    } else if (score >= 70) {
-      advice = '不错哦，亲爱的同学！你已经掌握了大部分内容，得分' + score + '分，整体表现很好！';
-      if (programResult.wrongChars.length > 0) {
-        advice += '不过有几个小错误需要注意一下，比如：' + programResult.wrongChars.map(item => item.input + '应该是' + item.original).join('，') + '。';
-      }
-      if (programResult.missing.length > 0) {
-        advice += '还有一些内容不小心漏掉了，比如：' + programResult.missing.map(item => item.char).join('、') + '。';
-      }
-      if (programResult.extra.length > 0) {
-        advice += '另外，有一些多余的内容可以去掉，比如：' + programResult.extra.map(item => item.char).join('、') + '。';
-      }
-      if (learningRecord && learningRecord.recite_attempts > 2) {
-        advice += '建议你分析一下每次错误的模式，重点关注重复出错的部分。';
-      } else {
-        advice += '建议你尝试分段背诵，把诗词分成几个小部分，每部分熟练后再连起来背诵。';
-      }
-      advice += '继续加油，老师相信你！';
-    } else {
-      advice = '亲爱的同学，你的背诵还有较大的提升空间，得分' + score + '分。不过没关系，学习是一个过程，慢慢来，老师相信你一定可以的！';
-      if (programResult.wrongChars.length > 0) {
-        advice += '有一些错别字需要注意，比如：' + programResult.wrongChars.map(item => item.input + '应该是' + item.original).join('，') + '。';
-      }
-      if (programResult.missing.length > 0) {
-        advice += '还有一些内容需要补充，比如：' + programResult.missing.map(item => item.char).join('、') + '。';
-      }
-      if (programResult.extra.length > 0) {
-        advice += '另外，有一些多余的内容可以去掉，比如：' + programResult.extra.map(item => item.char).join('、') + '。';
-      }
-      advice += '建议你先理解诗词的意思，想象诗词描绘的场景，然后分段背诵。加油！';
-    }
-  }
-  
-  return {
-    score: score,
-    wrongChars: programResult.wrongChars,
-    missing: programResult.missing,
-    extra: programResult.extra,
-    aiAdvice: advice
-  };
-}
 
 // 获取AI讲解（使用硅基流动 Qwen/Qwen2.5-7B-Instruct）
 async function getAIExplanation(poem, title, author, explanationType) {
   try {
+    const cacheKey = generateAdvancedCacheKey(null, poem, `explanation_${explanationType || 'full'}`, config.zhipu.model);
     // 先检查缓存
-    const cachedData = readCache(title, author, explanationType);
+    const cachedData = readCache(title, author, cacheKey);
     if (cachedData) {
       console.log(`[aiService] 命中缓存: ${title} - ${explanationType || 'full'}`);
       cachedData.from_cache = true;
@@ -522,8 +289,7 @@ async function getAIExplanation(poem, title, author, explanationType) {
     
     const apiKey = config.zhipu.apiKey;
     if (!apiKey) {
-      console.error('[aiService] 缺少硅基流动API密钥');
-      return getMockExplanation(title, author, explanationType);
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
     
     console.log('[aiService] 发送AI讲解请求（硅基流动）:', {
@@ -537,12 +303,13 @@ async function getAIExplanation(poem, title, author, explanationType) {
 
     const result = await callZhipuGenerateJSON(userPrompt, systemContent, { 
       temperature: 0.3, 
-      maxTokens: 500 
+      maxTokens: 500,
+      timeout: 25000 // 简单评分和分析 25s 左右
     });
 
     if (!result) {
       console.error('[aiService] 硅基流动AI讲解返回null');
-      return getMockExplanation(title, author, explanationType);
+      return { degraded: true, error: 'AI服务暂时不可用' };
     }
 
     let finalResponseData = {};
@@ -558,43 +325,15 @@ async function getAIExplanation(poem, title, author, explanationType) {
       finalResponseData = result;
     }
     
-    writeCache(title, author, explanationType, finalResponseData);
+    writeCache(title, author, cacheKey, finalResponseData);
     
     return finalResponseData;
   } catch (error) {
-    console.error('获取AI讲解失败:', error);
-    console.error('[aiService] 错误详情:', {
-      message: error.message,
-      type: error.type,
-      code: error.code,
-      errno: error.errno
-    });
-    return getMockExplanation(title, author, explanationType);
+    console.error('获取AI讲解失败:', error.message);
+    throw error;
   }
 }
 
-// 模拟讲解数据
-function getMockExplanation(title, author, explanationType) {
-  const mockExplanation = {
-    daily_life_explanation: `这首诗《${title || '未知'}》由${author || '未知作者'}所作，通过简洁的语言表达了深刻的情感。诗句结构紧凑，意境深远，展现了诗人对生活的独特感悟。`,
-    keyword_analysis: `诗中运用了多种修辞手法，如比喻、拟人等，使诗歌更加生动有趣。核心意象鲜明，表达了诗人的情感和思想。`,
-    artistic_conception: `诗中描绘的场景生动形象，仿佛将读者带入了一个宁静而美好的世界。诗人通过细腻的观察和丰富的想象，创造出了独特的艺术意境，给人以美的享受。`,
-    thinking_questions: ['请思考这首诗表达了怎样的情感？', '诗中的哪些意象给你留下了深刻印象？', '你认为这首诗在艺术上有什么特色？'],
-    is_mock: true
-  };
-  
-  if (explanationType === 'daily_life_explanation') {
-    return { daily_life_explanation: mockExplanation.daily_life_explanation, is_mock: true };
-  } else if (explanationType === 'keyword_analysis') {
-    return { keyword_analysis: mockExplanation.keyword_analysis, is_mock: true };
-  } else if (explanationType === 'artistic_conception') {
-    return { artistic_conception: mockExplanation.artistic_conception, is_mock: true };
-  } else if (explanationType === 'thinking_questions') {
-    return { thinking_questions: mockExplanation.thinking_questions, is_mock: true };
-  } else {
-    return mockExplanation;
-  }
-}
 
 // 背诵检测
 function checkRecitation(original, input) {
@@ -697,6 +436,15 @@ async function handleAIExplanation(req, res, explanationType) {
     console.log('缺少诗词内容');
     return res.status(400).json({ message: '缺少诗词内容' });
   }
+
+  const apiKey = config.ai.apiKey;
+  if (!apiKey) {
+    return res.status(503).json({
+      success: false,
+      code: 'AI_UNAVAILABLE',
+      message: 'AI讲解服务暂不可用'
+    });
+  }
   
   console.log('开始处理AI讲解请求:', {
     title: title || '无标题',
@@ -778,7 +526,8 @@ async function getAIResponse(poem, title, author, question, history = []) {
       };
     }
     
-    const tutorCacheKey = `tutor_${question.substring(0, 30)}`;
+    // 这里增加 promptVersion 和 model 信息避免污染
+    const tutorCacheKey = generateAdvancedCacheKey(null, poem + '|' + question, 'tutor', config.zhipu.model);
     
     const cachedData = readCache(title, author, tutorCacheKey);
     if (cachedData) {
@@ -787,74 +536,34 @@ async function getAIResponse(poem, title, author, question, history = []) {
     }
     console.log('[aiService] 未命中缓存，调用API');
     
-    const requestData = {
-      model: 'Qwen/Qwen2.5-7B-Instruct',
-      messages: [
-        {
-          role: "system",
-          content: "你是一位中学语文老师，专门讲解中国古典诗词。你的职责是：1. 只讨论当前指定的古诗词；2. 以教学风格回答，简洁明了，不超过100字；3. 引用具体诗句支持回答；4. 保持上下文连贯，记住之前的对话；5. 不回答与当前诗词无关的问题；6. 用解释语气，有结构，不学术论文口吻，不闲聊口吻。"
-        },
-        {
-          role: "user",
-          content: buildTutorPrompt(poem, title, author, question, history)
-        }
-      ],
+    const systemContent = "你是一位中学语文老师，专门讲解中国古典诗词。你的职责是：1. 只讨论当前指定的古诗词；2. 以教学风格回答，简洁明了，不超过100字；3. 引用具体诗句支持回答；4. 保持上下文连贯，记住之前的对话；5. 不回答与当前诗词无关的问题；6. 用解释语气，有结构，不学术论文口吻，不闲聊口吻。";
+    const userPrompt = buildTutorPrompt(poem, title, author, question, history);
+
+    const result = await callZhipuGenerateJSON(userPrompt, systemContent, {
       temperature: 0.1,
-      max_tokens: 150,
+      maxTokens: 150,
       top_p: 0.5,
-      stream: false
-    };
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), config.zhipu.timeout || 30000);
-    
-    try {
-      console.log('[aiService] 发送AI助教请求...');
-      const response = await fetch(config.zhipu.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(requestData),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('[aiService] AI助教API请求失败:', response.status, errorData);
-        throw new Error(`API请求失败: ${response.status}`);
-      }
-      
-      const responseData = await response.json();
-      
-      if (!responseData.choices || !responseData.choices[0] || !responseData.choices[0].message) {
-        throw new Error('API返回格式错误');
-      }
-      
-      let answer = responseData.choices[0].message.content.trim();
-      console.log('[aiService] AI助教回答长度:', answer.length);
-      
+      timeout: 25000
+    });
+
+    if (result && (result.answer || result.explanation || result.message)) {
+      let answer = result.answer || result.explanation || result.message;
       if (answer.length > 120) {
         answer = answer.substring(0, 117) + '...';
       }
-      
-      const result = { answer };
-      
-      writeCache(title, author, tutorCacheKey, result);
-      console.log('[aiService] AI助教回答成功');
-      
-      return result;
-    } finally {
-      clearTimeout(timeoutId);
+      const finalRes = { answer };
+      writeCache(title, author, tutorCacheKey, finalRes);
+      return finalRes;
     }
+
+    // fallback to generic message if parsing failed completely
+    return {
+      degraded: true,
+      answer: `AI服务暂时不可用，请参考数据库基础信息或稍后重试。`
+    };
   } catch (error) {
     console.error('[aiService] 获取AI助教回答失败:', error.message);
-    return {
-      answer: `针对你关于这首诗的问题，我需要更多信息来为你解答。请具体说明你想了解的方面，比如诗句含义、作者背景、艺术特色等，我会为你详细分析。`
-    };
+    throw error;
   }
 }
 
@@ -957,11 +666,14 @@ function buildSimplifiedExplanationPrompt(poem, title, author, originalExplanati
 // 改写诗意
 async function getAIrewritePoem(poem, title, author) {
   try {
+
+
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
       console.error('[aiService] 缺少API密钥');
       return {
-        rewrite: `这首诗《${title || '未知'}》由${author || '未知作者'}所作，通过简洁的语言表达了深刻的情感。`
+        degraded: true,
+        rewrite: `AI服务暂时不可用，暂无现代白话文改写。`
       };
     }
     
@@ -994,7 +706,7 @@ async function getAIrewritePoem(poem, title, author) {
     });
     
     if (!response.ok) {
-      throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+      throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
     }
     
     const responseData = await response.json();
@@ -1004,10 +716,8 @@ async function getAIrewritePoem(poem, title, author) {
       rewrite: rewrite.trim()
     };
   } catch (error) {
-    console.error('获取AI改写诗意失败:', error);
-    return {
-      rewrite: `这首诗《${title || '未知'}》由${author || '未知作者'}所作，通过简洁的语言表达了深刻的情感。`
-    };
+    console.error('获取AI改写诗意失败:', error.message);
+    throw error;
   }
 }
 
@@ -1018,7 +728,8 @@ async function getDimensionExplanation(poem, title, author, dimension) {
     if (!apiKey) {
       console.error('[aiService] 缺少API密钥');
       return {
-        explanation: `从${dimension}角度分析，这首诗《${title || '未知'}》由${author || '未知作者'}所作，具有独特的艺术价值。`
+        degraded: true,
+        explanation: `AI服务暂时不可用，暂无从${dimension}维度的深入分析。`
       };
     }
     
@@ -1051,7 +762,7 @@ async function getDimensionExplanation(poem, title, author, dimension) {
     });
     
     if (!response.ok) {
-      throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+      throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
     }
     
     const responseData = await response.json();
@@ -1065,10 +776,8 @@ async function getDimensionExplanation(poem, title, author, dimension) {
       explanation: explanation.trim()
     };
   } catch (error) {
-    console.error('获取按维度解释失败:', error);
-    return {
-      explanation: `从${dimension}角度分析，这首诗《${title || '未知'}》由${author || '未知作者'}所作，具有独特的艺术价值。`
-    };
+    console.error('获取按维度解释失败:', error.message);
+    throw error;
   }
 }
 
@@ -1079,7 +788,8 @@ async function getLearningAdvice(poem, title, author) {
     if (!apiKey) {
       console.error('[aiService] 缺少API密钥');
       return {
-        advice: `学习《${title || '未知'}》时，建议重点理解诗的意境和情感，多读多背。`
+        degraded: true,
+        advice: `AI服务暂时不可用，建议您重点理解诗的意境和情感，多读多背。`
       };
     }
     
@@ -1112,7 +822,7 @@ async function getLearningAdvice(poem, title, author) {
     });
     
     if (!response.ok) {
-      throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+      throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
     }
     
     const responseData = await response.json();
@@ -1126,10 +836,8 @@ async function getLearningAdvice(poem, title, author) {
       advice: advice.trim()
     };
   } catch (error) {
-    console.error('获取学习建议失败:', error);
-    return {
-      advice: `学习《${title || '未知'}》时，建议重点理解诗的意境和情感，多读多背。`
-    };
+    console.error('获取学习建议失败:', error.message);
+    throw error;
   }
 }
 
@@ -1140,7 +848,8 @@ async function getSimplifiedExplanation(poem, title, author, originalExplanation
     if (!apiKey) {
       console.error('[aiService] 缺少API密钥');
       return {
-        simplified: `《${title || '未知'}》是一首表达情感的诗，通过描写具体场景，让读者感受到诗人的内心世界。`
+        degraded: true,
+        simplified: `AI服务暂时不可用，暂无简白讲解。`
       };
     }
     
@@ -1173,7 +882,7 @@ async function getSimplifiedExplanation(poem, title, author, originalExplanation
     });
     
     if (!response.ok) {
-      throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+      throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
     }
     
     const responseData = await response.json();
@@ -1187,10 +896,8 @@ async function getSimplifiedExplanation(poem, title, author, originalExplanation
       simplified: simplified.trim()
     };
   } catch (error) {
-    console.error('获取简化解释失败:', error);
-    return {
-      simplified: `《${title || '未知'}》是一首表达情感的诗，通过描写具体场景，让读者感受到诗人的内心世界。`
-    };
+    console.error('获取简化解释失败:', error.message);
+    throw error;
   }
 }
 
@@ -1199,8 +906,7 @@ async function getCharInfo(prompt) {
   try {
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
-      console.error('[aiService] 缺少API密钥');
-      return JSON.stringify({ phonetic: '未知', meaning: '暂无注释' });
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
     
     const requestData = {
@@ -1255,7 +961,7 @@ async function getCharInfo(prompt) {
     }
     
     if (!response || !response.ok) {
-      throw new Error(`API请求失败: ${response?.status || '未知错误'}`);
+      throw new AIError(response?.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response?.status || '未知错误'}`);
     }
     
     const responseData = await response.json();
@@ -1263,8 +969,8 @@ async function getCharInfo(prompt) {
     
     return content.trim();
   } catch (error) {
-    console.error('获取字符信息失败:', error);
-    return JSON.stringify({ phonetic: '未知', meaning: '暂无注释' });
+    console.error('获取字符信息失败:', error.message);
+    throw error;
   }
 }
 
@@ -1273,8 +979,7 @@ async function generateChallengeQuestion(level, difficulty, questionType, userId
   try {
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
-      console.log('[aiService] 缺少API密钥，返回null');
-      return null;
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
 
     const prompt = `
@@ -1303,8 +1008,8 @@ async function generateChallengeQuestion(level, difficulty, questionType, userId
     const result = await callAIGenerateJSON(prompt, systemContent, { temperature: 0.7, max_tokens: 1000 });
     return result;
   } catch (error) {
-    console.error('[aiService] 生成闯关题目失败:', error);
-    return null;
+    console.error('[aiService] 生成闯关题目失败:', error.message);
+    throw error;
   }
 }
 
@@ -1313,8 +1018,7 @@ async function verifyChallengeAnswer(question, userAnswer, correctAnswer, diffic
   try {
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
-      console.log('[aiService] 缺少API密钥，返回null');
-      return null;
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
 
     const prompt = `
@@ -1342,8 +1046,8 @@ async function verifyChallengeAnswer(question, userAnswer, correctAnswer, diffic
     const result = await callAIGenerateJSON(prompt, systemContent, { temperature: 0.3, max_tokens: 500 });
     return result;
   } catch (error) {
-    console.error('[aiService] 验证闯关答案失败:', error);
-    return null;
+    console.error('[aiService] 验证闯关答案失败:', error.message);
+    throw error;
   }
 }
 
@@ -1352,8 +1056,7 @@ async function generateAIHelp(question, difficulty) {
   try {
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
-      console.log('[aiService] 缺少API密钥，返回null');
-      return null;
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
 
     const prompt = `
@@ -1378,8 +1081,8 @@ async function generateAIHelp(question, difficulty) {
     const result = await callAIGenerateJSON(prompt, systemContent, { temperature: 0.5, max_tokens: 500 });
     return result;
   } catch (error) {
-    console.error('[aiService] 生成AI帮助提示失败:', error);
-    return null;
+    console.error('[aiService] 生成AI帮助提示失败:', error.message);
+    throw error;
   }
 }
 
@@ -1387,8 +1090,7 @@ async function getAIGeneratedQuestions(prompt) {
   try {
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
-      console.log('[aiService] 缺少API密钥，返回null');
-      return null;
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
 
     const systemContent = "你是一个古诗词教育专家。";
@@ -1414,8 +1116,8 @@ async function getAIGeneratedQuestions(prompt) {
 
     return null;
   } catch (error) {
-    console.error('[aiService] 生成题目失败:', error);
-    return null;
+    console.error('[aiService] 生成题目失败:', error.message);
+    throw error;
   }
 }
 
@@ -1478,8 +1180,7 @@ async function evaluateFeihuaPoem(poem, keyword, difficulty = 'medium', usedPoem
   try {
     const apiKey = config.zhipu.apiKey;
     if (!apiKey) {
-      console.error('[aiService] 缺少硅基流动API密钥');
-      return getMockFeihuaEvaluation(poem, keyword);
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
 
     // 简洁的提示词，确保速度和严格性
@@ -1502,7 +1203,12 @@ async function evaluateFeihuaPoem(poem, keyword, difficulty = 'medium', usedPoem
 
     if (!result || typeof result.isValid !== 'boolean') {
       console.error('[aiService] 飞花令评判AI返回格式错误');
-      return getMockFeihuaEvaluation(poem, keyword);
+      return {
+        isValid: false,
+        score: 0,
+        reason: 'AI服务暂时不可用或返回格式错误',
+        poemInfo: { title: null, author: null }
+      };
     }
 
     console.log('[aiService] 飞花令AI评判:', result);
@@ -1514,46 +1220,57 @@ async function evaluateFeihuaPoem(poem, keyword, difficulty = 'medium', usedPoem
       poemInfo: { title: null, author: null }
     };
   } catch (error) {
-    console.error('[aiService] 飞花令评判失败:', error);
-    return getMockFeihuaEvaluation(poem, keyword);
+    console.error('[aiService] 飞花令评判失败:', error.message);
+    throw error;
   }
 }
 
-// 模拟飞花令评判
-function getMockFeihuaEvaluation(poem, keyword) {
-  const normalizedPoem = poem.replace(/[，。！？、；：""''（）【】《》\s]/g, '');
-  const hasKeyword = normalizedPoem.includes(keyword);
 
-  if (!hasKeyword) {
-    return {
-      isValid: false,
-      score: 0,
-      reason: `诗句中未包含令字「${keyword}」`,
-      poemInfo: { title: null, author: null }
-    };
-  }
-
-  return {
-    isValid: true,
-    score: 75,
-    reason: '诗句有效，符合飞花令规则',
-    poemInfo: { title: null, author: null }
-  };
-}
 
 // 验证飞花令诗句
-async function validateFeihuaPoem(poem, keyword) {
+async function evaluateFeihua(poem, keyword) {
   try {
+    const db = require('../utils/db');
+    // Normalize input
+    const normalizedInput = poem.replace(/[，。！？、；：""''（）【】《》\s]/g, '');
+    if (!normalizedInput.includes(keyword)) {
+      return {
+        valid: false,
+        message: `输入诗句未包含令字「${keyword}」`,
+        verificationStatus: 'rejected_by_rule',
+        poem: null,
+        analysis: `输入未包含令字`
+      };
+    }
+
+    // Attempt DB match first
+    try {
+      const dbMatches = await db.query(
+        "SELECT * FROM poems WHERE REPLACE(content, '，', '') LIKE $1 OR REPLACE(content, '。', '') LIKE $1 LIMIT 1",
+        [`%${normalizedInput}%`]
+      );
+      if (dbMatches.rows && dbMatches.rows.length > 0) {
+        const poemData = dbMatches.rows[0];
+        return {
+          valid: true,
+          message: '匹配到题库真实诗句',
+          verificationStatus: 'verified_by_db',
+          poem: {
+            title: poemData.title,
+            author: poemData.author,
+            content: poemData.content,
+            dynasty: poemData.dynasty
+          },
+          analysis: `出自${poemData.author}的《${poemData.title}》`
+        };
+      }
+    } catch (dbErr) {
+      console.error('[aiService] DB 查询匹配失败:', dbErr.message);
+    }
+
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
-      console.error('[aiService] 缺少API密钥');
-      const mock = getMockFeihuaEvaluation(poem, keyword);
-      return {
-        valid: mock.isValid,
-        message: mock.reason,
-        poem: mock.isValid ? { poem, keyword } : null,
-        analysis: mock.reason
-      };
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
 
     const prompt = `你是一位飞花令诗句验证专家。请严格验证以下诗句。
@@ -1616,14 +1333,14 @@ async function validateFeihuaPoem(poem, keyword) {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`API请求失败: ${response.status}`);
+        throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
       }
 
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content;
 
       if (!content) {
-        throw new Error('API返回内容为空');
+        throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'API返回内容为空');
       }
 
       const result = JSON.parse(content);
@@ -1640,23 +1357,16 @@ async function validateFeihuaPoem(poem, keyword) {
       } else {
         console.error('[aiService] AI验证请求失败:', fetchError.message);
       }
-      const mock = getMockFeihuaEvaluation(poem, keyword);
       return {
-        valid: mock.isValid,
-        message: mock.reason,
-        poem: mock.isValid ? { poem, keyword } : null,
-        analysis: mock.reason
+        valid: null,
+        message: 'AI服务暂时不可用，无法验证',
+        poem: null,
+        analysis: '服务异常，请稍后再试'
       };
     }
   } catch (error) {
     console.error('[aiService] validateFeihuaPoem 错误:', error.message);
-    const mock = getMockFeihuaEvaluation(poem, keyword);
-    return {
-      valid: mock.isValid,
-      message: mock.reason,
-      poem: mock.isValid ? { poem, keyword } : null,
-      analysis: mock.reason
-    };
+    throw error;
   }
 }
 
@@ -1746,7 +1456,7 @@ async function generateDuelQuestions(count = 1, excludeTitles = [], attempt = 0)
   try {
     const apiKey = config.ai.apiKey;
     if (!apiKey) {
-      return pickValidDuelQuestionsFromPool(count, excludeTitles);
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
 
     const excludeText = excludeTitles.length > 0
@@ -1818,7 +1528,7 @@ async function generateDuelQuestions(count = 1, excludeTitles = [], attempt = 0)
         if (attempt + 1 < MAX_API_ATTEMPTS) {
           return generateDuelQuestions(count, excludeTitles, attempt + 1);
         }
-        return pickValidDuelQuestionsFromPool(count, excludeTitles);
+        throw new AIError(AI_ERRORS.UNAVAILABLE, '生成对战题目失败');
       }
 
       const responseData = await response.json();
@@ -1833,14 +1543,14 @@ async function generateDuelQuestions(count = 1, excludeTitles = [], attempt = 0)
         if (attempt + 1 < MAX_API_ATTEMPTS) {
           return generateDuelQuestions(count, excludeTitles, attempt + 1);
         }
-        return pickValidDuelQuestionsFromPool(count, excludeTitles);
+        throw new AIError(AI_ERRORS.INVALID_RESPONSE, '解析对战题目失败');
       }
 
       if (!aiResult.questions || !Array.isArray(aiResult.questions)) {
         if (attempt + 1 < MAX_API_ATTEMPTS) {
           return generateDuelQuestions(count, excludeTitles, attempt + 1);
         }
-        return pickValidDuelQuestionsFromPool(count, excludeTitles);
+        throw new AIError(AI_ERRORS.INVALID_RESPONSE, '生成的题目格式不正确');
       }
 
       const excludeSet = new Set(excludeTitles || []);
@@ -1856,60 +1566,19 @@ async function generateDuelQuestions(count = 1, excludeTitles = [], attempt = 0)
         console.warn('[aiService] 对战有效题不足，重试出题:', { need: count, got: repaired.length, attempt });
         return generateDuelQuestions(count, excludeTitles, attempt + 1);
       }
-      const merged = [...repaired, ...pickValidDuelQuestionsFromPool(count - repaired.length, [...excludeTitles, ...repaired.map((r) => r.title)]).questions];
-      return { questions: merged.slice(0, count) };
+      return { questions: repaired };
     } finally {
       clearTimeout(timeoutId);
     }
   } catch (error) {
-    console.error('[aiService] 闯关对战出题失败:', error);
+    console.error('[aiService] 闯关对战出题失败:', error.message);
     if (attempt + 1 < MAX_API_ATTEMPTS) {
       return generateDuelQuestions(count, excludeTitles, attempt + 1);
     }
-    return pickValidDuelQuestionsFromPool(count, excludeTitles);
+    throw error;
   }
 }
 
-// 从池中取题
-function pickValidDuelQuestionsFromPool(count, excludeTitles = []) {
-  const excludeSet = new Set(excludeTitles || []);
-  const out = [];
-  let round = 0;
-  while (out.length < count && round < 20) {
-    round++;
-    const batch = getMockDuelQuestions(Math.max(count * 2, 8), excludeTitles);
-    for (const q of batch.questions || []) {
-      const fixed = repairDuelQuestionFromFullPoem(q);
-      if (fixed && !excludeSet.has(fixed.title)) {
-        excludeSet.add(fixed.title);
-        out.push(fixed);
-        if (out.length >= count) break;
-      }
-    }
-  }
-  return { questions: out.slice(0, count) };
-}
-
-function getMockDuelQuestions(count, excludeTitles = []) {
-  const excludeSet = new Set(excludeTitles || []);
-  const pool = [
-    { question: "床前明月光，____。", answer: "疑是地上霜", full_poem: "床前明月光，疑是地上霜。举头望明月，低头思故乡。", title: "静夜思", author: "李白", type: "上句填下句", analysis: "此句出自李白《静夜思》，描写诗人客居他乡、望月思亲的情景" },
-    { question: "____，疑是地上霜。", answer: "床前明月光", full_poem: "床前明月光，疑是地上霜。举头望明月，低头思故乡。", title: "静夜思", author: "李白", type: "下句填上句", analysis: "此句出自李白《静夜思》，以月光起兴，引发思乡之情" },
-    { question: "春眠不觉晓，____。", answer: "处处闻啼鸟", full_poem: "春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。", title: "春晓", author: "孟浩然", type: "上句填下句", analysis: "此句出自孟浩然《春晓》，描绘春日清晨的盎然生机" },
-    { question: "____，处处闻啼鸟。", answer: "春眠不觉晓", full_poem: "春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。", title: "春晓", author: "孟浩然", type: "下句填上句", analysis: "此句出自孟浩然《春晓》，以声写春，表达诗人对春天的喜爱" },
-    { question: "白日依山尽，____。", answer: "黄河入海流", full_poem: "白日依山尽，黄河入海流。欲穷千里目，更上一层楼。", title: "登鹳雀楼", author: "王之涣", type: "上句填下句", analysis: "此句出自王之涣《登鹳雀楼》，写黄河奔腾入海的壮阔景象" },
-    { question: "____，黄河入海流。", answer: "白日依山尽", full_poem: "白日依山尽，黄河入海流。欲穷千里目，更上一层楼。", title: "登鹳雀楼", author: "王之涣", type: "下句填上句", analysis: "此句出自王之涣《登鹳雀楼》，写景抒怀，意境开阔" },
-    { question: "千山鸟飞绝，____。", answer: "万径人踪灭", full_poem: "千山鸟飞绝，万径人踪灭。孤舟蓑笠翁，独钓寒江雪。", title: "江雪", author: "柳宗元", type: "上句填下句", analysis: "此句出自柳宗元《江雪》，以极端的寂静衬托渔翁的孤高" },
-    { question: "____，万径人踪灭。", answer: "千山鸟飞绝", full_poem: "千山鸟飞绝，万径人踪灭。孤舟蓑笠翁，独钓寒江雪。", title: "江雪", author: "柳宗元", type: "下句填上句", analysis: "此句出自柳宗元《江雪》，以鸟尽人灭写雪景之严寒" },
-    { question: "红豆生南国，____。", answer: "春来发几枝", full_poem: "红豆生南国，春来发几枝。愿君多采撷，此物最相思。", title: "相思", author: "王维", type: "上句填下句", analysis: "此句出自王维《相思》，以红豆寄托相思之情" },
-    { question: "____，春来发几枝。", answer: "红豆生南国", full_poem: "红豆生南国，春来发几枝。愿君多采撷，此物最相思。", title: "相思", author: "王维", type: "下句填上句", analysis: "此句出自王维《相思》，以红豆起兴，语浅情深" }
-  ];
-
-  let available = pool.filter(q => !excludeSet.has(q.title));
-  if (available.length === 0) available = [...pool];
-  const shuffled = [...available].sort(() => Math.random() - 0.5);
-  return { questions: shuffled.slice(0, count) };
-}
 
 // 情感/题材映射
 const EMOTION_THEME_MAP = {
@@ -2064,7 +1733,8 @@ async function aiPoemSearch(query, limit = 50) {
     }
   }
 
-  return { ...fallbackSearch(query, poems, limit), intent: emotionResult.intent, emotion: emotionResult.emotion };
+  const fbResult = fallbackSearch(query, poems, limit);
+  return { ...fbResult, intent: emotionResult.intent, emotion: emotionResult.emotion, degraded: true };
 }
 
 // AI排序
@@ -2124,12 +1794,12 @@ ${JSON.stringify(poemSamples, null, 2)}
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       console.error('[aiService] rankPoemsWithAI失败:', response.status, errText);
-      throw new Error('AI排序请求失败');
+      throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, 'AI排序请求失败');
     }
 
     const data = await response.json();
     const raw = data.choices?.[0]?.message?.content?.trim() || '';
-    if (!raw) throw new Error('AI返回内容为空');
+    if (!raw) throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'AI返回内容为空');
 
     let jsonStr = raw;
     const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -2385,9 +2055,8 @@ function generateFallbackAnalysis(query, poems, emotionResult) {
 async function getPoemBackground(title, author, dynasty, content) {
   const apiKey = config.ai.apiKey;
   if (!apiKey) {
-    console.error('[aiService] 缺少API密钥');
-    return null;
-  }
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
+    }
 
   const prompt = `为《${title || '未知'}》写150字创作背景，包含：创作场景、缘由、核心情感。文风优美亲切。`;
 
@@ -2433,7 +2102,7 @@ async function getPoemBackground(title, author, dynasty, content) {
   } catch (error) {
     clearTimeout(timeoutId);
     console.error('[aiService] getPoemBackground 异常:', error.message);
-    return null;
+    throw error;
   }
 }
 
@@ -2441,8 +2110,8 @@ async function getPoemBackground(title, author, dynasty, content) {
 async function getPoemStory(title, author, content) {
   const apiKey = config.zhipu.apiKey;
   if (!apiKey) {
-    return null;
-  }
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
+    }
 
   const prompt = `用100字讲一个关于《${title || '未知'}》的趣味故事，可以是诗人趣事或诗词典故。`;
 
@@ -2482,7 +2151,7 @@ async function getPoemStory(title, author, content) {
   } catch (error) {
     clearTimeout(timeoutId);
     console.error('[aiService] getPoemStory 异常:', error.message);
-    return null;
+    throw error;
   }
 }
 
@@ -2490,8 +2159,8 @@ async function getPoemStory(title, author, content) {
 async function getRecitationGuide(title, author, content, dynasty) {
   const apiKey = config.ai.apiKey;
   if (!apiKey) {
-    return getBuiltinRecitationGuide(title, content);
-  }
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
+    }
 
   const lines = content.split('\n').filter(l => l.trim());
   const isSevenChar = lines[0] && lines[0].replace(/[，。！？；：、""''（）【】]/g, '').length === 7;
@@ -2564,7 +2233,7 @@ async function getRecitationGuide(title, author, content, dynasty) {
   } catch (error) {
     clearTimeout(timeoutId);
     console.error('[aiService] getRecitationGuide 异常:', error.message);
-    return getBuiltinRecitationGuide(title, content);
+    throw error;
   }
 }
 
@@ -2588,7 +2257,6 @@ function getBuiltinRecitationGuide(title, content) {
 
 module.exports = {
   getAIExplanation,
-  getMockExplanation,
   checkRecitation,
   handleAIExplanation,
   getAIResponse,
@@ -2597,7 +2265,6 @@ module.exports = {
   getLearningAdvice,
   getSimplifiedExplanation,
   getAIRecitationCheck,
-  getMockRecitationCheck,
   getCharInfo,
   callAIGenerateJSON,
   callZhipuGenerateJSON,
@@ -2607,7 +2274,6 @@ module.exports = {
   getAIGeneratedQuestions,
   generatePoemImage,
   evaluateFeihuaPoem,
-  validateFeihuaPoem,
   generateDuelQuestions,
   repairDuelQuestionFromFullPoem,
   generatePoemSceneImage,
@@ -2628,7 +2294,7 @@ async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumbe
     const apiKey = process.env.ALIYUN_BAILIAN_API_KEY;
     if (!apiKey) {
       console.error('[aiService] 缺少API密钥');
-      return getMockSceneImage(poemLine);
+      throw new AIError(AI_ERRORS.AUTH_FAILED, 'AI生图服务未配置API密钥');
     }
 
     const lineHint =
@@ -2675,7 +2341,7 @@ async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumbe
       if (!createResponse.ok) {
         const errorData = await createResponse.json().catch(() => ({}));
         console.error('[aiService] 创建任务失败:', createResponse.status, errorData);
-        return getMockSceneImage(poemLine);
+        return { success: false, url: null, message: '创建任务失败' };
       }
 
       const createData = await createResponse.json();
@@ -2683,7 +2349,7 @@ async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumbe
 
       if (!taskId) {
         console.error('[aiService] 未获取到任务ID:', createData);
-        return getMockSceneImage(poemLine);
+        return { success: false, url: null, message: '未获取到任务ID' };
       }
 
       console.log('[aiService] 任务已创建，task_id:', taskId);
@@ -2728,10 +2394,10 @@ async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumbe
             }
           } else if (taskStatus === 'FAILED') {
             console.error('[aiService] 任务执行失败:', pollData);
-            return getMockSceneImage(poemLine);
+            return { success: false, url: null, message: '任务执行失败' };
           } else if (taskStatus === 'CANCELED') {
             console.error('[aiService] 任务被取消');
-            return getMockSceneImage(poemLine);
+            return { success: false, url: null, message: '任务被取消' };
           }
         } catch (pollError) {
           clearTimeout(pollTimeoutId);
@@ -2740,24 +2406,17 @@ async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumbe
       }
 
       console.error('[aiService] 任务超时');
-      return getMockSceneImage(poemLine);
+      return { success: false, url: null, message: '生成超时' };
     } finally {
       clearTimeout(timeoutId);
     }
   } catch (error) {
     console.error('[aiService] 文生图失败:', error);
-    return getMockSceneImage(poemLine);
+    return { success: false, url: null, message: '文生图请求失败' };
   }
 }
 
-function getMockSceneImage(poemLine) {
-  const encoded = encodeURIComponent(poemLine);
-  return {
-    success: false,
-    url: null,
-    message: `暂时无法生成"${poemLine}"的意境图，请稍后再试`
-  };
-}
+
 
 async function generateAuthorAvatar(author) {
   try {
@@ -2880,7 +2539,7 @@ async function generateTTS(text) {
   
   if (!apiKey) {
     console.error('[aiService] 阿里云百炼API密钥未配置');
-    throw new Error('API密钥未配置');
+    throw new AIError(AI_ERRORS.AUTH_FAILED, 'AI语音合成未配置API密钥');
   }
 
   const url = 'https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer';
@@ -2908,7 +2567,7 @@ async function generateTTS(text) {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       console.error('[aiService] 语音合成失败:', response.status, errorData);
-      throw new Error(`语音合成API请求失败: ${response.status} - ${JSON.stringify(errorData)}`);
+      throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `语音合成API请求失败: ${response.status} - ${JSON.stringify(errorData)}`);
     }
 
     const contentType = response.headers.get('content-type');
@@ -2928,12 +2587,12 @@ async function generateTTS(text) {
           console.log('[aiService] 获得音频URL:', audioInfo.url);
           const audioResponse = await fetch(audioInfo.url);
           if (!audioResponse.ok) {
-            throw new Error('下载音频失败');
+            throw new AIError(AI_ERRORS.UNAVAILABLE, '下载音频失败');
           }
           const audioData = await audioResponse.arrayBuffer();
           return Buffer.from(audioData);
         } else {
-          throw new Error('API返回的音频数据为空');
+          throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'API返回的音频数据为空');
         }
       } else if (data.output && data.output.audio_url) {
         const audioUrl = data.output.audio_url;
@@ -2941,13 +2600,13 @@ async function generateTTS(text) {
         
         const audioResponse = await fetch(audioUrl);
         if (!audioResponse.ok) {
-          throw new Error('下载音频失败');
+          throw new AIError(AI_ERRORS.UNAVAILABLE, '下载音频失败');
         }
         const audioData = await audioResponse.arrayBuffer();
         return Buffer.from(audioData);
       } else {
         console.error('[aiService] API返回格式错误:', data);
-        throw new Error('API返回格式错误，未找到音频数据');
+        throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'API返回格式错误，未找到音频数据');
       }
     } else {
       console.log('[aiService] 语音合成API直接返回音频数据');
@@ -2955,7 +2614,19 @@ async function generateTTS(text) {
       return Buffer.from(audioData);
     }
   } catch (error) {
-    console.error('[aiService] 语音合成失败:', error);
+    console.error('[aiService] 语音合成错误:', error);
     throw error;
   }
 }
+
+module.exports = {
+  callZhipuGenerateJSON,
+  callAIGenerateJSON,
+  checkRecitation,
+  handleAIExplanation,
+  generateDuelQuestions,
+  aiPoemSearch,
+  generatePoemImage,
+  generateAuthorAvatar,
+  generateTTS
+};

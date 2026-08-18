@@ -3,17 +3,26 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const db = require('../utils/db');
 const config = require('../config/config');
-const knowledgeDiagnosis = require('../services/knowledgeDiagnosisService');
+
 const knowledgeStateService = require('../services/knowledgeStateService');
+const teacherAuthz = require('../services/teacherAuthorizationService');
+const { parsePagination } = require('../utils/validation');
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
   const { username, password } = req.body;
 
   try {
+    if (!username || !password) {
+      return res.status(400).json({ error: '缺少用户名或密码' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: '密码长度至少6位' });
+    }
+
     const row = await db.get('SELECT * FROM teachers WHERE username = $1', [username]);
     if (row) {
-      return res.status(400).json({ error: '用户名已存在' });
+      return res.status(409).json({ error: '用户名已存在' });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -69,7 +78,10 @@ const authenticateTeacher = (req, res, next) => {
 };
 
 function feihuaEndedAtUnixExpr(columnRef) {
-  return `(CASE WHEN POSITION('-' IN ${columnRef})>0 OR POSITION('T' IN ${columnRef})>0 THEN EXTRACT(EPOCH FROM ${columnRef}::timestamp)::INTEGER ELSE CAST(${columnRef} AS INTEGER) / 1000 END)`;
+  if (db.isPostgres()) {
+    return `(CASE WHEN POSITION('-' IN ${columnRef})>0 OR POSITION('T' IN ${columnRef})>0 THEN EXTRACT(EPOCH FROM ${columnRef}::timestamp)::INTEGER ELSE CAST(${columnRef} AS INTEGER) / 1000 END)`;
+  }
+  return `(CASE WHEN INSTR(${columnRef},'-')>0 OR INSTR(${columnRef},'T')>0 THEN CAST(strftime('%s', ${columnRef}) AS INTEGER) ELSE CAST(${columnRef} AS INTEGER) / 1000 END)`;
 }
 
 function normalizeFeihuaEndedAtForClient(raw) {
@@ -85,7 +97,19 @@ function normalizeFeihuaEndedAtForClient(raw) {
 
 router.get('/dashboard', authenticateTeacher, async (req, res) => {
   try {
-    const rows = await db.all('SELECT * FROM v_student_learning_stats ORDER BY poem_count DESC');
+    const teacherId = req.teacher.id;
+    const classIds = await teacherAuthz.getTeacherClassIds(teacherId);
+    if (classIds.length === 0) {
+      return res.json([]);
+    }
+    const placeholders = classIds.map((_, i) => `$${i + 1}`).join(',');
+    const rows = await db.all(
+      `SELECT s.* FROM v_student_learning_stats s
+       JOIN users u ON s.user_id = u.id
+       WHERE u.class_id IN (${placeholders})
+       ORDER BY s.poem_count DESC`,
+      classIds
+    );
     res.json(rows);
   } catch (err) {
     return res.status(500).json({ error: '数据库错误' });
@@ -94,8 +118,10 @@ router.get('/dashboard', authenticateTeacher, async (req, res) => {
 
 router.get('/student/:id/detail', authenticateTeacher, async (req, res) => {
   const { id } = req.params;
+  const teacherId = req.teacher.id;
 
   try {
+    await teacherAuthz.assertTeacherCanAccessStudent(teacherId, parseInt(id));
     const rows = await db.all(`
       SELECT
         lr.*,
@@ -111,16 +137,18 @@ router.get('/student/:id/detail', authenticateTeacher, async (req, res) => {
     `, [id]);
     res.json(rows);
   } catch (err) {
+    if (err.status === 403) return res.status(403).json({ error: err.message, code: err.code });
     return res.status(500).json({ error: '数据库错误' });
   }
 });
 
 const axios = require('axios');
 
+const _sfApiKey = process.env.SILICONFLOW_API_KEY || '';
 const siliconFlowApi = axios.create({
   baseURL: 'https://api.siliconflow.cn/v1',
   headers: {
-    'Authorization': `Bearer ${process.env.SILICONFLOW_API_KEY || 'your-api-key'}`,
+    'Authorization': `Bearer ${_sfApiKey}`,
     'Content-Type': 'application/json'
   },
   timeout: 30000
@@ -141,9 +169,10 @@ siliconFlowApi.interceptors.response.use(
 );
 
 const initTeacherTables = async () => {
+  const pk = db.serialPrimaryKey();
   await db.run(`
     CREATE TABLE IF NOT EXISTS teacher_notes (
-      id SERIAL PRIMARY KEY,
+      id ${pk},
       teacher_id INTEGER,
       student_id INTEGER,
       content TEXT,
@@ -156,7 +185,7 @@ const initTeacherTables = async () => {
 
   await db.run(`
     CREATE TABLE IF NOT EXISTS student_tags (
-      id SERIAL PRIMARY KEY,
+      id ${pk},
       student_id INTEGER,
       tag_name TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -179,59 +208,10 @@ router.get('/dashboard/aggregate', authenticateTeacher, async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error('获取聚合数据失败:', error);
-    res.json({
-      todayActiveStudents: 45,
-      yesterdayActiveStudents: 40,
-      newPoemsStudied: 120,
-      hotDynasty: '宋',
-      averageCompletionRate: 85,
-      targetCompletionRate: 90,
-      learningTrend: [
-        { date: '2024-01-01', duration: 1200, poemCount: 20, activeStudents: 30 },
-        { date: '2024-01-02', duration: 1350, poemCount: 25, activeStudents: 35 },
-        { date: '2024-01-03', duration: 1100, poemCount: 18, activeStudents: 28 },
-        { date: '2024-01-04', duration: 1400, poemCount: 30, activeStudents: 40 },
-        { date: '2024-01-05', duration: 1500, poemCount: 32, activeStudents: 42 },
-        { date: '2024-01-06', duration: 1250, poemCount: 22, activeStudents: 32 },
-        { date: '2024-01-07', duration: 1300, poemCount: 24, activeStudents: 36 }
-      ],
-      dynastyDistribution: [
-        { name: '唐', value: 35 },
-        { name: '宋', value: 45 },
-        { name: '元', value: 8 },
-        { name: '明', value: 5 },
-        { name: '清', value: 4 },
-        { name: '其他', value: 3 }
-      ],
-      themeDistribution: [
-        { name: '咏物', value: 20 },
-        { name: '边塞', value: 10 },
-        { name: '山水', value: 30 },
-        { name: '抒情', value: 25 },
-        { name: '送别', value: 10 },
-        { name: '其他', value: 5 }
-      ],
-      studyTimeDistribution: [
-        { date: '2024-01-01', '0-10': 10, '10-30': 15, '30+': 5 },
-        { date: '2024-01-02', '0-10': 8, '10-30': 18, '30+': 9 },
-        { date: '2024-01-03', '0-10': 12, '10-30': 14, '30+': 2 },
-        { date: '2024-01-04', '0-10': 9, '10-30': 17, '30+': 14 },
-        { date: '2024-01-05', '0-10': 7, '10-30': 19, '30+': 16 },
-        { date: '2024-01-06', '0-10': 11, '10-30': 16, '30+': 5 },
-        { date: '2024-01-07', '0-10': 10, '10-30': 17, '30+': 9 }
-      ],
-      hotPoems: [
-        { rank: 1, title: '静夜思', author: '李白', studyCount: 120, averageTime: 15 },
-        { rank: 2, title: '望庐山瀑布', author: '李白', studyCount: 110, averageTime: 12 },
-        { rank: 3, title: '春晓', author: '孟浩然', studyCount: 105, averageTime: 10 },
-        { rank: 4, title: '绝句', author: '杜甫', studyCount: 95, averageTime: 13 },
-        { rank: 5, title: '登鹳雀楼', author: '王之涣', studyCount: 90, averageTime: 8 },
-        { rank: 6, title: '枫桥夜泊', author: '张继', studyCount: 85, averageTime: 11 },
-        { rank: 7, title: '望岳', author: '杜甫', studyCount: 80, averageTime: 14 },
-        { rank: 8, title: '赠汪伦', author: '李白', studyCount: 75, averageTime: 9 },
-        { rank: 9, title: '清明', author: '杜牧', studyCount: 70, averageTime: 10 },
-        { rank: 10, title: '山行', author: '杜牧', studyCount: 65, averageTime: 12 }
-      ]
+    res.status(503).json({
+      success: false,
+      message: '聚合数据服务暂不可用',
+      degraded: true
     });
   }
 });
@@ -242,11 +222,11 @@ router.get('/students/at-risk', authenticateTeacher, async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error('获取待关注学生失败:', error);
-    res.json([
-      { id: 1, name: '学生1', riskTag: '连续7天未学习', lastStudyTime: '2024-01-01' },
-      { id: 2, name: '学生2', riskTag: '学习时长周环比下降30%以上', lastStudyTime: '2024-01-05' },
-      { id: 3, name: '学生3', riskTag: '单首诗词学习完成率低于50%', lastStudyTime: '2024-01-06' }
-    ]);
+    res.status(503).json({
+      success: false,
+      message: '待关注学生数据服务暂不可用',
+      degraded: true
+    });
   }
 });
 
@@ -376,6 +356,7 @@ router.post('/export', authenticateTeacher, async (req, res) => {
 router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
+    await teacherAuthz.assertTeacherCanAccessStudent(req.teacher.id, parseInt(id));
 
     const result = {
       avatar: '',
@@ -434,12 +415,12 @@ router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
     }
 
     const trendRows = await db.all(
-      `SELECT (answered_at)::date as date,
+      `SELECT ${db.dateOnly('answered_at')} as date,
               COUNT(*) as count,
               SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct
        FROM user_challenge_records
-       WHERE user_id = $1 AND (answered_at)::date >= $2
-       GROUP BY (answered_at)::date
+       WHERE user_id = $1 AND ${db.dateOnly('answered_at')} >= $2
+       GROUP BY ${db.dateOnly('answered_at')}
        ORDER BY date`,
       [id, days[0]]
     );
@@ -471,10 +452,10 @@ router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
     }));
 
     const hourRows = await db.all(
-      `SELECT EXTRACT(HOUR FROM answered_at)::INTEGER as hour, COUNT(*) as count
+      `SELECT ${db.extractHour('answered_at')} as hour, COUNT(*) as count
        FROM user_challenge_records
        WHERE user_id = $1
-       GROUP BY EXTRACT(HOUR FROM answered_at)
+       GROUP BY ${db.extractHour('answered_at')}
        ORDER BY count DESC`,
       [id]
     );
@@ -506,7 +487,7 @@ router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
     for (let day = 1; day <= 7; day++) {
       memoryCurve.push({
         day,
-        retention: Math.max(35, 100 - (day - 1) * 12 - Math.floor(Math.random() * 8))
+        retention: Math.max(35, 100 - (day - 1) * 12) // 移除 Math.random
       });
     }
     result.memoryCurve = memoryCurve;
@@ -524,10 +505,8 @@ router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    result.reviewSuggestions = (wrongRows.length > 0 ? wrongRows : [
-      { id: 1, title: '静夜思', author: '李白' },
-      { id: 2, title: '春晓', author: '孟浩然' }
-    ]).map((r, i) => {
+    // 完全不使用 fallback 默认数据，如果没有真实错题记录则直接返回空数组
+    result.reviewSuggestions = wrongRows.map((r, i) => {
       const reviewDate = new Date(tomorrow);
       reviewDate.setDate(tomorrow.getDate() + i);
       return {
@@ -541,7 +520,7 @@ router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
     const abilityRow = await db.get(
       `SELECT
         AVG(CASE WHEN is_correct = 1 THEN 100 ELSE 0 END) as correct_rate,
-        COUNT(DISTINCT (answered_at)::date) as study_days,
+        COUNT(DISTINCT ${db.dateOnly('answered_at')}) as study_days,
         COUNT(*) as total_answers
        FROM user_challenge_records
        WHERE user_id = $1`,
@@ -552,11 +531,12 @@ router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
     const studyDays = abilityRow?.study_days || 0;
     const totalAnswers = abilityRow?.total_answers || 0;
 
+    // 根据真实业务数据换算
     result.abilityAnalysis = {
-      memoryEfficiency: Math.min(100, Math.round(correctRate * 0.8 + Math.random() * 20)),
+      memoryEfficiency: Math.min(100, Math.round(correctRate * 0.8)),
       understandingDepth: Math.min(100, Math.round(correctRate * 0.7 + studyDays * 2)),
-      reviewFrequency: Math.min(100, Math.round(studyDays * 10 + Math.random() * 20)),
-      expansionInterest: Math.min(100, Math.round(totalAnswers * 0.5 + Math.random() * 30)),
+      reviewFrequency: Math.min(100, Math.round(studyDays * 10)),
+      expansionInterest: Math.min(100, Math.round(totalAnswers * 0.5)),
       comment: generateAbilityComment(correctRate, studyDays, totalAnswers)
     };
 
@@ -568,22 +548,18 @@ router.get('/student/:id/analysis', authenticateTeacher, async (req, res) => {
       [id]
     );
 
-    result.recommendedPoems = (poemRows.length > 0 ? poemRows : [
-      { id: 1, title: '望天门山', author: '李白' },
-      { id: 2, title: '黄鹤楼送孟浩然之广陵', author: '李白' },
-      { id: 3, title: '山居秋暝', author: '王维' },
-      { id: 4, title: '登高', author: '杜甫' },
-      { id: 5, title: '钱塘湖春行', author: '白居易' }
-    ]).map(p => ({
+    // 完全不使用 fallback 默认数据，如果没有真实诗词库记录则直接返回空数组
+    result.recommendedPoems = poemRows.map(p => ({
       id: p.id,
       title: p.title,
       author: p.author,
       reason: '适合您当前学习阶段',
-      matchScore: 75 + Math.floor(Math.random() * 25)
+      matchScore: 75 // 移除了 Math.random() 随机打分
     }));
 
     res.json(result);
   } catch (error) {
+    if (error.status === 403) return res.status(403).json({ error: error.message, code: error.code });
     console.error('获取学生分析失败:', error);
     res.status(500).json({ error: '获取学生分析失败' });
   }
@@ -624,9 +600,11 @@ router.get('/notes/:studentId', authenticateTeacher, async (req, res) => {
   const teacherId = req.teacher.id;
 
   try {
+    await teacherAuthz.assertTeacherCanAccessStudent(teacherId, parseInt(studentId));
     const rows = await db.all('SELECT * FROM teacher_notes WHERE teacher_id = $1 AND student_id = $2 ORDER BY created_at DESC', [teacherId, studentId]);
     res.json(rows);
   } catch (err) {
+    if (err.status === 403) return res.status(403).json({ error: err.message, code: err.code });
     return res.status(500).json({ error: '数据库错误' });
   }
 });
@@ -636,9 +614,11 @@ router.post('/notes', authenticateTeacher, async (req, res) => {
   const teacherId = req.teacher.id;
 
   try {
+    await teacherAuthz.assertTeacherCanAccessStudent(teacherId, parseInt(studentId));
     await db.run('INSERT INTO teacher_notes (teacher_id, student_id, content) VALUES ($1, $2, $3)', [teacherId, studentId, content]);
     res.status(201).json({ message: '备注添加成功' });
   } catch (err) {
+    if (err.status === 403) return res.status(403).json({ error: err.message, code: err.code });
     return res.status(500).json({ error: '添加备注失败' });
   }
 });
@@ -679,26 +659,22 @@ router.get('/poem/:id/detail', authenticateTeacher, async (req, res) => {
     res.json(response.data);
   } catch (error) {
     console.error('获取诗词详情失败:', error);
-    res.json({
-      id: id,
-      title: '静夜思',
-      author: '李白',
-      dynasty: '唐',
-      studyCount: 120,
-      averageStudyTime: 15,
-      completionRateDistribution: [
-        { range: '0-20%', count: 5 },
-        { range: '20-40%', count: 10 },
-        { range: '40-60%', count: 15 },
-        { range: '60-80%', count: 30 },
-        { range: '80-100%', count: 60 }
-      ]
+    res.status(503).json({
+      success: false,
+      message: '诗词分析服务暂不可用',
+      degraded: true
     });
   }
 });
 
 router.get('/classes', authenticateTeacher, async (req, res) => {
   try {
+    const teacherId = req.teacher.id;
+    const classIds = await teacherAuthz.getTeacherClassIds(teacherId);
+    if (classIds.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+    const placeholders = classIds.map((_, i) => `$${i + 1}`).join(',');
     const classes = await db.all(
       `SELECT
         u.class_id,
@@ -707,9 +683,10 @@ router.get('/classes', authenticateTeacher, async (req, res) => {
         AVG(lr.study_time) as avg_study_time
        FROM users u
        LEFT JOIN learning_records lr ON u.id = lr.user_id
-       WHERE u.class_id IS NOT NULL
+       WHERE u.class_id IN (${placeholders})
        GROUP BY u.class_id
-       ORDER BY u.class_id`
+       ORDER BY u.class_id`,
+      classIds
     );
 
     res.json({
@@ -789,6 +766,8 @@ router.put('/students/:id/password', authenticateTeacher, async (req, res) => {
       return res.status(400).json({ message: '密码长度不能少于6位' });
     }
 
+    await teacherAuthz.assertTeacherCanAccessStudent(req.teacher.id, parseInt(id));
+
     const bcrypt = require('bcrypt');
     const passwordHash = bcrypt.hashSync(newPassword, 10);
 
@@ -806,6 +785,7 @@ router.put('/students/:id/password', authenticateTeacher, async (req, res) => {
       message: '密码修改成功'
     });
   } catch (error) {
+    if (error.status === 403) return res.status(403).json({ message: error.message, code: error.code });
     console.error('修改密码失败:', error);
     res.status(500).json({ message: '修改密码失败' });
   }
@@ -868,8 +848,7 @@ router.get('/classes/:classId/students', authenticateTeacher, async (req, res) =
 
 router.get('/rankings/overall', authenticateTeacher, async (req, res) => {
   try {
-    const { page = 1, limit = 50 } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { page, pageSize: limit, offset } = parsePagination(req, 50);
 
     const countRow = await db.get(
       `SELECT COUNT(DISTINCT u.id) as total
@@ -959,8 +938,8 @@ router.get('/classes/comparison', authenticateTeacher, async (req, res) => {
 
 router.get('/challenge/rankings', authenticateTeacher, async (req, res) => {
   try {
-    const { classId, page = 1, limit = 20 } = req.query;
-    const offset = (page - 1) * limit;
+    const classId = req.query.classId;
+    const { page, pageSize: limit, offset } = parsePagination(req, 20);
 
     let query = `
       SELECT u.id, u.username, u.email, u.class_id,
@@ -1028,6 +1007,7 @@ router.get('/challenge/rankings', authenticateTeacher, async (req, res) => {
 router.get('/challenge/student/:id', authenticateTeacher, async (req, res) => {
   try {
     const { id } = req.params;
+    await teacherAuthz.assertTeacherCanAccessStudent(req.teacher.id, parseInt(id));
 
     const studentInfo = await db.get(
       `SELECT u.id, u.username, u.email, u.class_id,
@@ -1066,6 +1046,7 @@ router.get('/challenge/student/:id', authenticateTeacher, async (req, res) => {
       }
     });
   } catch (error) {
+    if (error.status === 403) return res.status(403).json({ message: error.message, code: error.code });
     console.error('获取学生闯关详情失败:', error);
     res.status(500).json({ message: '获取学生闯关详情失败' });
   }
@@ -1126,7 +1107,7 @@ router.get('/overview', authenticateTeacher, async (req, res) => {
     const activeRow = await db.get(
       `SELECT COUNT(DISTINCT user_id) as active
        FROM learning_records
-       WHERE (last_view_time)::date = $1`,
+       WHERE ${db.dateOnly('last_view_time')} = $1`,
       [today]
     );
     const todayActive = activeRow.active || 0;
@@ -1134,7 +1115,7 @@ router.get('/overview', authenticateTeacher, async (req, res) => {
     const weekRow = await db.get(
       `SELECT COUNT(DISTINCT user_id) as active
        FROM learning_records
-       WHERE (last_view_time)::date >= CURRENT_DATE - INTERVAL '6 days'`
+       WHERE ${db.dateOnly('last_view_time')} >= ${db.dateDaysAgo(6)}`
     );
 
     const allRow = await db.get(
@@ -1189,26 +1170,26 @@ router.get('/trend', authenticateTeacher, async (req, res) => {
 
     const [learnRows, challengeRows, activeRows] = await Promise.all([
       db.all(
-        `SELECT (last_view_time)::date as date, COUNT(*) as count
+        `SELECT ${db.dateOnly('last_view_time')} as date, COUNT(*) as count
          FROM learning_records
-         WHERE (last_view_time)::date >= $1
-         GROUP BY (last_view_time)::date
+         WHERE ${db.dateOnly('last_view_time')} >= $1
+         GROUP BY ${db.dateOnly('last_view_time')}
          ORDER BY date`,
         [days[0]]
       ),
       db.all(
-        `SELECT (answered_at)::date as date, COUNT(*) as count
+        `SELECT ${db.dateOnly('answered_at')} as date, COUNT(*) as count
          FROM user_challenge_records
-         WHERE (answered_at)::date >= $1
-         GROUP BY (answered_at)::date
+         WHERE ${db.dateOnly('answered_at')} >= $1
+         GROUP BY ${db.dateOnly('answered_at')}
          ORDER BY date`,
         [days[0]]
       ),
       db.all(
-        `SELECT (last_view_time)::date as date, COUNT(DISTINCT user_id) as count
+        `SELECT ${db.dateOnly('last_view_time')} as date, COUNT(DISTINCT user_id) as count
          FROM learning_records
-         WHERE (last_view_time)::date >= $1
-         GROUP BY (last_view_time)::date
+         WHERE ${db.dateOnly('last_view_time')} >= $1
+         GROUP BY ${db.dateOnly('last_view_time')}
          ORDER BY date`,
         [days[0]]
       )
@@ -1364,7 +1345,9 @@ router.get('/game-data', authenticateTeacher, async (req, res) => {
     }
 
     const endedUnix = feihuaEndedAtUnixExpr('fb.ended_at');
-    const dateFilterExpr = `CURRENT_DATE - INTERVAL '${daysBack - 1} days'`;
+    const dateFilterExpr = db.dateDaysAgo(daysBack - 1);
+    const toDateExpr = db.toTimestampDate(endedUnix);
+    const epochExpr = db.extractEpoch(dateFilterExpr);
 
     const [totalGamesRow, activePlayersRow, avgDurationRow, mostWinsRow] = await Promise.all([
       db.get(`SELECT COUNT(*) as count FROM feihua_battles WHERE ended_at IS NOT NULL`),
@@ -1391,29 +1374,29 @@ router.get('/game-data', authenticateTeacher, async (req, res) => {
 
     const [gameCountRows, avgRoundsRows, playerCountRows] = await Promise.all([
       db.all(`
-        SELECT TO_TIMESTAMP(${endedUnix})::date as date, COUNT(*) as count
+        SELECT ${toDateExpr} as date, COUNT(*) as count
         FROM feihua_battles fb
         WHERE fb.ended_at IS NOT NULL
-          AND ${endedUnix} >= EXTRACT(EPOCH FROM ${dateFilterExpr})::INTEGER
-        GROUP BY TO_TIMESTAMP(${endedUnix})::date
+          AND ${endedUnix} >= ${epochExpr}
+        GROUP BY ${toDateExpr}
         ORDER BY date
       `),
       db.all(`
-        SELECT TO_TIMESTAMP(${endedUnix})::date as date,
+        SELECT ${toDateExpr} as date,
                ROUND(AVG(total_rounds), 1) as avg_rounds
         FROM feihua_battles fb
         WHERE fb.ended_at IS NOT NULL
-          AND ${endedUnix} >= EXTRACT(EPOCH FROM ${dateFilterExpr})::INTEGER
-        GROUP BY TO_TIMESTAMP(${endedUnix})::date
+          AND ${endedUnix} >= ${epochExpr}
+        GROUP BY ${toDateExpr}
         ORDER BY date
       `),
       db.all(`
-        SELECT TO_TIMESTAMP(${endedUnix})::date as date,
+        SELECT ${toDateExpr} as date,
                COUNT(DISTINCT player1_id) + COUNT(DISTINCT player2_id) as player_count
         FROM feihua_battles fb
         WHERE fb.ended_at IS NOT NULL
-          AND ${endedUnix} >= EXTRACT(EPOCH FROM ${dateFilterExpr})::INTEGER
-        GROUP BY TO_TIMESTAMP(${endedUnix})::date
+          AND ${endedUnix} >= ${epochExpr}
+        GROUP BY ${toDateExpr}
         ORDER BY date
       `)
     ]);
@@ -1521,10 +1504,10 @@ router.get('/dashboard-more', authenticateTeacher, async (req, res) => {
 
     const [learningRows, classRows, hourRows, aiRow, creationRows] = await Promise.all([
       db.all(
-        `SELECT (last_view_time)::date as date, COUNT(*) as count
+        `SELECT ${db.dateOnly('last_view_time')} as date, COUNT(*) as count
          FROM learning_records
-         WHERE (last_view_time)::date >= CURRENT_DATE - INTERVAL '13 days'
-         GROUP BY (last_view_time)::date
+         WHERE ${db.dateOnly('last_view_time')} >= ${db.dateDaysAgo(13)}
+         GROUP BY ${db.dateOnly('last_view_time')}
          ORDER BY date`
       ),
       db.all(
@@ -1536,9 +1519,9 @@ router.get('/dashboard-more', authenticateTeacher, async (req, res) => {
          ORDER BY count DESC`
       ),
       db.all(
-        `SELECT EXTRACT(HOUR FROM answered_at)::INTEGER as hour, COUNT(*) as count
+        `SELECT ${db.extractHour('answered_at')} as hour, COUNT(*) as count
          FROM user_challenge_records
-         GROUP BY EXTRACT(HOUR FROM answered_at)
+         GROUP BY ${db.extractHour('answered_at')}
          ORDER BY hour`
       ),
       db.get(
@@ -1578,272 +1561,10 @@ router.get('/dashboard-more', authenticateTeacher, async (req, res) => {
   }
 });
 
-router.get('/poems', authenticateTeacher, async (req, res) => {
-  try {
-    const { page = 1, limit = 50, keyword = '', dynasty = '', author = '' } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+router.use('/poems', require('./teacher/poems'));
 
-    const conditions = [];
-    const params = [];
-    let paramIdx = 0;
-
-    if (keyword) {
-      paramIdx++;
-      const kwIdx = paramIdx;
-      conditions.push(`(title ILIKE $${kwIdx} OR author ILIKE $${kwIdx} OR content ILIKE $${kwIdx})`);
-      params.push(`%${keyword}%`);
-    }
-    if (dynasty) {
-      paramIdx++;
-      conditions.push(`dynasty = $${paramIdx}`);
-      params.push(dynasty);
-    }
-    if (author) {
-      paramIdx++;
-      conditions.push(`author = $${paramIdx}`);
-      params.push(author);
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    const countRow = await db.get(`SELECT COUNT(*) as total FROM poems ${whereClause}`, params);
-
-    paramIdx++;
-    const limitIdx = paramIdx;
-    paramIdx++;
-    const offsetIdx = paramIdx;
-
-    const poems = await db.all(
-      `SELECT * FROM poems ${whereClause} ORDER BY created_at DESC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-      [...params, parseInt(limit), offset]
-    );
-
-    res.json({
-      success: true,
-      data: poems || [],
-      total: countRow?.total || 0,
-      page: parseInt(page),
-      limit: parseInt(limit)
-    });
-  } catch (error) {
-    console.error('获取诗词列表失败:', error);
-    res.status(500).json({ error: '获取诗词列表失败' });
-  }
-});
-
-router.get('/poems/dynasties', authenticateTeacher, async (req, res) => {
-  try {
-    const rows = await db.all('SELECT DISTINCT dynasty FROM poems WHERE dynasty IS NOT NULL ORDER BY dynasty');
-    res.json(rows.map(r => r.dynasty));
-  } catch (error) {
-    res.status(500).json({ error: '获取朝代列表失败' });
-  }
-});
-
-router.get('/poems/:id', authenticateTeacher, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const poem = await db.get('SELECT * FROM poems WHERE id = $1', [id]);
-    if (!poem) {
-      return res.status(404).json({ error: '诗词不存在' });
-    }
-    res.json({ success: true, data: poem });
-  } catch (error) {
-    res.status(500).json({ error: '获取诗词详情失败' });
-  }
-});
-
-router.post('/poems', authenticateTeacher, async (req, res) => {
-  try {
-    const { title, author, dynasty, content, tags } = req.body;
-
-    if (!title || !author || !dynasty || !content) {
-      return res.status(400).json({ error: '标题、作者、朝代、内容不能为空' });
-    }
-
-    const result = await db.run(
-      'INSERT INTO poems (title, author, dynasty, content, tags) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [title.trim(), author.trim(), dynasty.trim(), content.trim(), tags || '']
-    );
-    res.status(201).json({ success: true, message: '诗词添加成功', id: result.rows[0].id });
-  } catch (error) {
-    console.error('添加诗词失败:', error);
-    res.status(500).json({ error: '添加诗词失败' });
-  }
-});
-
-router.put('/poems/:id', authenticateTeacher, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { title, author, dynasty, content, tags } = req.body;
-
-    if (!title || !author || !dynasty || !content) {
-      return res.status(400).json({ error: '标题、作者、朝代、内容不能为空' });
-    }
-
-    const result = await db.run(
-      'UPDATE poems SET title = $1, author = $2, dynasty = $3, content = $4, tags = $5 WHERE id = $6',
-      [title.trim(), author.trim(), dynasty.trim(), content.trim(), tags || '', id]
-    );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: '诗词不存在' });
-    }
-    res.json({ success: true, message: '诗词更新成功' });
-  } catch (error) {
-    console.error('更新诗词失败:', error);
-    res.status(500).json({ error: '更新诗词失败' });
-  }
-});
-
-router.delete('/poems/:id', authenticateTeacher, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await db.run('DELETE FROM poems WHERE id = $1', [id]);
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: '诗词不存在' });
-    }
-    res.json({ success: true, message: '诗词删除成功' });
-  } catch (error) {
-    console.error('删除诗词失败:', error);
-    res.status(500).json({ error: '删除诗词失败' });
-  }
-});
-
-router.post('/poems/batch', authenticateTeacher, async (req, res) => {
-  try {
-    const { poems: poemsList } = req.body;
-
-    if (!Array.isArray(poemsList) || poemsList.length === 0) {
-      return res.status(400).json({ error: '请提供有效的诗词数组' });
-    }
-
-    const validPoems = poemsList.filter(p => p.title && p.author && p.dynasty && p.content);
-    if (validPoems.length === 0) {
-      return res.status(400).json({ error: '没有有效的诗词数据' });
-    }
-
-    let imported = 0;
-    let errors = 0;
-
-    for (const poem of validPoems) {
-      try {
-        await db.run(
-          'INSERT INTO poems (title, author, dynasty, content, tags) VALUES ($1, $2, $3, $4, $5)',
-          [poem.title.trim(), poem.author.trim(), poem.dynasty.trim(), poem.content.trim(), poem.tags || '']
-        );
-        imported++;
-      } catch (err) {
-        errors++;
-      }
-    }
-
-    res.status(201).json({
-      success: true,
-      message: `成功导入 ${imported} 首诗词${errors > 0 ? `，失败 ${errors} 首` : ''}`,
-      imported,
-      errors
-    });
-  } catch (error) {
-    console.error('批量导入诗词失败:', error);
-    res.status(500).json({ error: '批量导入诗词失败' });
-  }
-});
-
-// ===== 知识诊断 API =====
-// 知识维度定义（统一从 knowledgeStateService 读取，不再依赖 knowledgeDiagnosisService）
-router.get('/knowledge/dimensions', authenticateTeacher, async (req, res) => {
-  try {
-    res.json({ data: knowledgeStateService.KNOWLEDGE_DIMENSIONS });
-  } catch (err) {
-    res.status(500).json({ error: '获取知识维度失败' });
-  }
-});
-
-// 班级知识掌握概览 — Source of Truth: student_knowledge_states
-router.get('/knowledge/overview', authenticateTeacher, async (req, res) => {
-  try {
-    const classId = req.query.classId ? parseInt(req.query.classId) : null;
-    const data = await knowledgeStateService.getClassKnowledgeOverview(classId);
-    res.json({ data, source: 'student_knowledge_states' });
-  } catch (err) {
-    console.error('班级知识概览失败:', err);
-    res.status(500).json({ error: '获取班级知识概览失败' });
-  }
-});
-
-// 班级学生×知识维度热力图 — Source of Truth: student_knowledge_states
-router.get('/knowledge/heatmap', authenticateTeacher, async (req, res) => {
-  try {
-    const classId = req.query.classId ? parseInt(req.query.classId) : null;
-    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
-    const data = await knowledgeStateService.getClassKnowledgeHeatmap(classId, limit);
-    res.json({ data, source: 'student_knowledge_states' });
-  } catch (err) {
-    console.error('知识热力图失败:', err);
-    res.status(500).json({ error: '获取知识热力图失败' });
-  }
-});
-
-// 高频薄弱知识点 — Source of Truth: student_knowledge_states
-router.get('/knowledge/weak-points', authenticateTeacher, async (req, res) => {
-  try {
-    const classId = req.query.classId ? parseInt(req.query.classId) : null;
-    const topN = req.query.topN ? parseInt(req.query.topN) : 10;
-    const data = await knowledgeStateService.getWeakPoints(classId, topN);
-    const suggestion = knowledgeStateService.generateTeachingSuggestion(data.dimensionSummary);
-    res.json({ data, suggestion, source: 'student_knowledge_states' });
-  } catch (err) {
-    console.error('薄弱知识点失败:', err);
-    res.status(500).json({ error: '获取薄弱知识点失败' });
-  }
-});
-
-// 学生知识画像（可解释）— Source of Truth: student_knowledge_states
-router.get('/knowledge/student/:id/profile', authenticateTeacher, async (req, res) => {
-  try {
-    const userId = parseInt(req.params.id);
-    const cognitiveDiagnosis = require('../services/cognitiveDiagnosisService');
-    const masteryEngine = require('../services/masteryUpdateEngine');
-
-    const states = await masteryEngine.getAllStates(userId);
-    const diag = await cognitiveDiagnosis.diagnoseStudent(userId);
-    const dimMap = {};
-    diag.points.forEach(p => { dimMap[p.code] = p; });
-
-    const dimensions = diag.dimensionSummary.map(d => ({
-      key: d.code,
-      label: d.name,
-      icon: '',
-      mastery: d.avgMastery,
-      confidence: d.avgConfidence,
-      count: d.coveredPoints,
-      evidenceCount: d.coveredPoints,
-      level: (dimMap[d.code] || {}).level,
-    }));
-
-    res.json({
-      data: {
-        userId,
-        dimensions,
-        weakDimensions: diag.highConfidenceWeak.map(w => ({
-          key: w.code, label: w.name, mastery: w.mastery, confidence: w.confidence,
-          evidenceCount: w.attemptCount, errorCount: w.errorCount,
-        })),
-        lowEvidence: diag.lowEvidence,
-        stats: {
-          learnedPoems: 0,
-          totalWrongQuestions: diag.points.reduce((a, p) => a + p.errorCount, 0),
-          totalPoints: diag.totalPoints,
-        },
-        source: 'student_knowledge_states',
-        algorithmVersion: masteryEngine.MASTERY_ALGORITHM_VERSION,
-        hasData: states.length > 0,
-      },
-    });
-  } catch (err) {
-    console.error('学生知识画像失败:', err);
-    res.status(500).json({ error: '获取学生知识画像失败' });
-  }
-});
+// ===== 知识诊断 API — 已拆分到 teacher/knowledge.js =====
+router.use('/knowledge', require('./teacher/knowledge'));
 
 module.exports = router;
+module.exports.initTeacherTables = initTeacherTables;

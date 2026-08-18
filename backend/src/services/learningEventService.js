@@ -43,14 +43,17 @@ const EVENT_TYPES = {
  * 优先级：manual > rule > ai > legacy
  */
 async function persistRuleMappings(questionId, kpIds) {
-  for (const kpId of kpIds) {
-    await db.run(
-      `INSERT INTO question_knowledge_mappings (question_id, knowledge_point_id, weight, source, confidence)
-       VALUES ($1, $2, 1.0, 'rule', 0.8)
-       ON CONFLICT (question_id, knowledge_point_id) DO NOTHING`,
-      [String(questionId), kpId]
-    );
-  }
+  if (kpIds.length === 0) return;
+  const placeholders = kpIds.map((_, i) =>
+    `($${i * 2 + 1}, $${i * 2 + 2}, 1.0, 'rule', 0.8)`
+  ).join(', ');
+  const params = kpIds.flatMap(kpId => [String(questionId), kpId]);
+  await db.run(
+    `INSERT INTO question_knowledge_mappings (question_id, knowledge_point_id, weight, source, confidence)
+     VALUES ${placeholders}
+     ON CONFLICT (question_id, knowledge_point_id) DO NOTHING`,
+    params
+  );
 }
 
 /**
@@ -90,51 +93,60 @@ async function recordEvent(event) {
     await persistRuleMappings(event.questionId, kpIds).catch(() => {});
   }
 
-  // 插入 learning_events（幂等：如果 eventKey 已存在则跳过）
-  const result = await db.run(
-    `INSERT INTO learning_events
-     (user_id, event_type, poem_id, question_id, game_id, knowledge_points,
-      score, correct, difficulty, duration, attempt_count, hint_count, metadata, event_key)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-     ON CONFLICT (event_key) DO NOTHING
-     RETURNING id`,
-    [userId, eventType, poemId || null, questionId || null, gameId || null,
-     JSON.stringify(kpCodes), score || 0, correct === undefined ? null : (correct ? 1 : 0),
-     difficulty || 3, duration || 0, attemptCount || 1, hintCount || 0,
-     JSON.stringify(metadata || {}), eventKey || null]
-  );
+  // 使用数据库事务保证 LearningEvent 插入和 StudentKnowledgeState 更新的原子性
+  return db.transaction(async (tx) => {
+    // 检查是否存在 (幂等兜底)
+    const exists = await tx.get('SELECT id FROM learning_events WHERE event_key = $1', [eventKey]);
+    if (exists) {
+      return { eventId: null, knowledgePointIds: kpIds, knowledgePointCodes: kpCodes, duplicated: true };
+    }
 
-  // 幂等：如果因 eventKey 冲突未插入，跳过掌握度更新
-  if (!result.rows || result.rows.length === 0) {
-    return { eventId: null, knowledgePointIds: kpIds, knowledgePointCodes: kpCodes, duplicated: true };
-  }
-  const eventId = result.rows[0].id;
+    // 插入 learning_events（幂等：如果 eventKey 已存在则跳过）
+    const result = await tx.run(
+      `INSERT INTO learning_events
+       (user_id, event_type, poem_id, question_id, game_id, knowledge_points,
+        score, correct, difficulty, duration, attempt_count, hint_count, metadata, event_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       ON CONFLICT (event_key) DO NOTHING
+       RETURNING id`,
+      [userId, eventType, poemId || null, questionId || null, gameId || null,
+       JSON.stringify(kpCodes), score || 0, correct === undefined ? null : (correct ? 1 : 0),
+       difficulty || 3, duration || 0, attemptCount || 1, hintCount || 0,
+       JSON.stringify(metadata || {}), eventKey || null]
+    );
 
-  // 驱动知识状态更新（仅对产生证据的事件）
-  const EVIDENCE_EVENTS = [
-    EVENT_TYPES.ANSWER_QUESTION,
-    EVENT_TYPES.CORRECT_ANSWER,
-    EVENT_TYPES.WRONG_ANSWER,
-    EVENT_TYPES.RECITE_POEM,
-    EVENT_TYPES.RECITATION_ERROR,
-    EVENT_TYPES.COMPLETE_GAME,
-    EVENT_TYPES.REVIEW_POEM,
-    EVENT_TYPES.PLAY_FEIHUALING,
-    EVENT_TYPES.PLAY_CHAIN_GAME,
-  ];
+    // 幂等：如果因 eventKey 冲突未插入，说明是重复请求，直接跳过后续处理
+    if (!result.rows || result.rows.length === 0) {
+      return { eventId: null, knowledgePointIds: kpIds, knowledgePointCodes: kpCodes, duplicated: true };
+    }
+    const eventId = result.rows[0].id;
 
-  if (EVIDENCE_EVENTS.includes(eventType) && kpIds.length > 0 && correct !== undefined) {
-    await masteryEngine.updateFromEvent({
-      userId,
-      knowledgePointIds: kpIds,
-      correct,
-      difficulty: difficulty || 3,
-      hintCount: hintCount || 0,
-      createdAt: new Date(),
-    });
-  }
+    // 驱动知识状态更新（仅对产生证据的事件）
+    const EVIDENCE_EVENTS = [
+      EVENT_TYPES.ANSWER_QUESTION,
+      EVENT_TYPES.CORRECT_ANSWER,
+      EVENT_TYPES.WRONG_ANSWER,
+      EVENT_TYPES.RECITE_POEM,
+      EVENT_TYPES.RECITATION_ERROR,
+      EVENT_TYPES.COMPLETE_GAME,
+      EVENT_TYPES.REVIEW_POEM,
+      EVENT_TYPES.PLAY_FEIHUALING,
+      EVENT_TYPES.PLAY_CHAIN_GAME,
+    ];
 
-  return { eventId, knowledgePointIds: kpIds, knowledgePointCodes: kpCodes };
+    if (EVIDENCE_EVENTS.includes(eventType) && kpIds.length > 0 && correct !== undefined) {
+      await masteryEngine.updateFromEvent({
+        userId,
+        knowledgePointIds: kpIds,
+        correct,
+        difficulty: difficulty || 3,
+        hintCount: hintCount || 0,
+        createdAt: new Date(),
+      }, tx);
+    }
+
+    return { eventId, knowledgePointIds: kpIds, knowledgePointCodes: kpCodes };
+  });
 }
 
 /**
@@ -142,6 +154,8 @@ async function recordEvent(event) {
  */
 async function getUserEvents(userId, options = {}) {
   const { eventType, limit = 50, offset = 0, startDate, endDate } = options;
+  const cappedLimit = Math.min(Math.max(1, parseInt(limit) || 50), 200);
+  const cappedOffset = Math.max(0, parseInt(offset) || 0);
   let sql = `SELECT * FROM learning_events WHERE user_id = $1`;
   const params = [userId];
   let idx = 2;
@@ -149,7 +163,7 @@ async function getUserEvents(userId, options = {}) {
   if (startDate) { sql += ` AND created_at >= $${idx++}`; params.push(startDate); }
   if (endDate) { sql += ` AND created_at <= $${idx++}`; params.push(endDate); }
   sql += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
-  params.push(limit, offset);
+  params.push(cappedLimit, cappedOffset);
   return db.all(sql, params);
 }
 

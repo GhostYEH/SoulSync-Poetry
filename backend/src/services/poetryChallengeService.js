@@ -19,24 +19,30 @@ async function startChallenge(userId, challengeType = 'random', options = {}) {
       questions = await generateRandomQuestions(count);
   }
 
-  const result = await db.run(
-    `INSERT INTO poetry_challenges (user_id, challenge_type, total_questions, started_at)
-     VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-     RETURNING id`,
-    [userId, challengeType, questions.length]
-  );
-
-  const challengeId = result.rows[0].id;
-
-  for (let i = 0; i < questions.length; i++) {
-    await db.run(
-      `INSERT INTO challenge_questions (challenge_id, question_index, poem_id, question_type, question_text, correct_answer, options)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [challengeId, i, questions[i].poem_id, questions[i].type,
-        questions[i].question, questions[i].answer,
-        questions[i].options ? JSON.stringify(questions[i].options) : null]
+  const result = await db.transaction(async (tx) => {
+    const insResult = await tx.run(
+      `INSERT INTO poetry_challenges (user_id, challenge_type, total_questions, started_at)
+       VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+       RETURNING id`,
+      [userId, challengeType, questions.length]
     );
-  }
+
+    const challengeId = insResult.rows[0].id;
+
+    for (let i = 0; i < questions.length; i++) {
+      await tx.run(
+        `INSERT INTO challenge_questions (challenge_id, question_index, poem_id, question_type, question_text, correct_answer, options)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [challengeId, i, questions[i].poem_id, questions[i].type,
+          questions[i].question, questions[i].answer,
+          questions[i].options ? JSON.stringify(questions[i].options) : null]
+      );
+    }
+
+    return challengeId;
+  });
+
+  const challengeId = result;
 
   return {
     challengeId,

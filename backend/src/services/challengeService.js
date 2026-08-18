@@ -1356,16 +1356,22 @@ async function generateQuestions(userId, startLevel, count = 20) {
 // ============================================================
 // 提交答案（直接用静态数据校验，不依赖前端传来的答案）
 // ============================================================
-async function submitAnswer(userId, level, questionText, userAnswer, frontendCorrect, poemTitle, poemAuthor) {
+async function submitAnswer(userId, level, questionText, userAnswer, frontendCorrect, poemTitle, poemAuthor, clientCorrectAnswer) {
   const matched = findQuestionByLevelAndText(level, questionText);
   const now = new Date().toISOString();
   const block = LEVEL_QUESTIONS[level];
 
   let isCorrect;
+  let serverCorrectAnswer;
   if (matched) {
+    serverCorrectAnswer = matched.answer;
     isCorrect = checkAnswer(userAnswer, matched.answer);
+  } else if (clientCorrectAnswer) {
+    serverCorrectAnswer = clientCorrectAnswer;
+    isCorrect = checkAnswer(userAnswer, clientCorrectAnswer);
   } else {
-    isCorrect = frontendCorrect === true;
+    isCorrect = false;
+    serverCorrectAnswer = '';
   }
 
   const result = await db.run(
@@ -1373,7 +1379,7 @@ async function submitAnswer(userId, level, questionText, userAnswer, frontendCor
     (user_id, level, question_content, user_answer, correct_answer, is_correct, answered_at, poem_title, poem_author)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING id`,
-    [userId, level, questionText, userAnswer, matched?.answer || '', isCorrect ? 1 : 0, now, block?.title || poemTitle, block?.author || poemAuthor]
+    [userId, level, questionText, userAnswer, serverCorrectAnswer, isCorrect ? 1 : 0, now, block?.title || poemTitle, block?.author || poemAuthor]
   );
   const recordId = result.rows[0].id;
   if (isCorrect) {

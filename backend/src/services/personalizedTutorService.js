@@ -144,7 +144,7 @@ function buildDegradedResponse(context, weakPoints, depth) {
       detail: `掌握度${wp.mastery}%，需要加强`,
     })),
     practiceAdvice: 'AI讲解服务暂时不可用，以上为数据库基础信息。请稍后重试获取个性化讲解。',
-    _degraded: true,
+    degraded: true,
   };
 }
 
@@ -240,7 +240,7 @@ async function getPersonalizedTutoring(userId, options = {}) {
       id: p.id, title: p.title, author: p.author, dynasty: p.dynasty,
     })),
     sources: context.sources,
-    degraded: !!teaching._degraded,
+    degraded: !!teaching.degraded,
   };
 }
 

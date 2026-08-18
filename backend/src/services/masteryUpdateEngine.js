@@ -126,15 +126,23 @@ function timeDecayWeight(daysAgo) {
  * 根据学习事件更新学生知识状态
  * @param {object} event  { userId, knowledgePointIds, correct, difficulty, hintCount, createdAt }
  */
-async function updateFromEvent(event) {
+async function updateFromEvent(event, externalTx = null) {
   const { userId, knowledgePointIds, correct, difficulty, hintCount } = event;
   if (!knowledgePointIds || knowledgePointIds.length === 0) return;
 
   const evidence = computeEvidence(correct, difficulty, hintCount);
   const now = (event.createdAt || new Date()).toISOString();
 
-  for (const kpId of knowledgePointIds) {
-    await updateSingleState(userId, kpId, evidence, correct, !hintCount || hintCount === 0, now);
+  const updateLogic = async (tx) => {
+    for (const kpId of knowledgePointIds) {
+      await updateSingleState(userId, kpId, evidence, correct, !hintCount || hintCount === 0, now, tx);
+    }
+  };
+
+  if (externalTx) {
+    await updateLogic(externalTx);
+  } else {
+    await db.transaction(updateLogic);
   }
 }
 
@@ -146,13 +154,25 @@ async function updateFromEvent(event) {
  * @param {boolean} correct
  * @param {boolean} independent  无提示独立完成
  * @param {string} now  ISO timestamp
+ * @param {object} tx   数据库事务对象
  */
-async function updateSingleState(userId, kpId, evidence, correct, independent, now) {
-  const existing = await db.get(
-    `SELECT * FROM student_knowledge_states WHERE user_id = $1 AND knowledge_point_id = $2`,
-    [userId, kpId]
+async function updateSingleState(userId, kpId, evidence, correct, independent, now, tx = db) {
+  // 确保记录存在，避免并发 INSERT 时的 unique constraint violation，同时便于后续加锁
+  const insertResult = await tx.run(
+    `INSERT INTO student_knowledge_states
+     (user_id, knowledge_point_id, mastery, confidence, attempt_count, correct_count,
+      independent_correct_count, recent_performance, error_count, recent_error_types,
+      last_practiced_at, last_mastery_update_at, algorithm_version)
+     VALUES ($1,$2,$3,$4,0,0,0,'[]',0,'[]',$5,CURRENT_TIMESTAMP,$6)
+     ON CONFLICT (user_id, knowledge_point_id) DO NOTHING`,
+    [userId, kpId, PRIOR_MASTERY, 0, now, MASTERY_ALGORITHM_VERSION]
   );
 
+  let existing = await tx.get(
+    `SELECT * FROM student_knowledge_states WHERE user_id = $1 AND knowledge_point_id = $2 FOR UPDATE`,
+    [userId, kpId]
+  );
+  
   let recentPerformance = [];
   let attemptCount = 1;
   let correctCount = correct ? 1 : 0;
@@ -161,12 +181,30 @@ async function updateSingleState(userId, kpId, evidence, correct, independent, n
   let recentErrorTypes = [];
 
   if (existing) {
-    attemptCount = (existing.attempt_count || 0) + 1;
-    correctCount = (existing.correct_count || 0) + (correct ? 1 : 0);
-    independentCorrectCount = (existing.independent_correct_count || 0) + (correct && independent ? 1 : 0);
-    errorCount = (existing.error_count || 0) + (correct ? 0 : 1);
+    if (existing.attempt_count === 0 && insertResult && insertResult.rowCount > 0) {
+      attemptCount = 1;
+      correctCount = correct ? 1 : 0;
+      independentCorrectCount = (correct && independent) ? 1 : 0;
+      errorCount = correct ? 0 : 1;
+    } else if (existing.attempt_count === 0) {
+      attemptCount = 1;
+      correctCount = correct ? 1 : 0;
+      independentCorrectCount = (correct && independent) ? 1 : 0;
+      errorCount = correct ? 0 : 1;
+    } else {
+      attemptCount = (existing.attempt_count || 0) + 1;
+      correctCount = (existing.correct_count || 0) + (correct ? 1 : 0);
+      independentCorrectCount = (existing.independent_correct_count || 0) + (correct && independent ? 1 : 0);
+      errorCount = (existing.error_count || 0) + (correct ? 0 : 1);
+    }
     try { recentPerformance = JSON.parse(existing.recent_performance || '[]'); } catch {}
     try { recentErrorTypes = JSON.parse(existing.recent_error_types || '[]'); } catch {}
+  } else {
+    // 理论上由于上面我们做了 INSERT，existing 必定存在。如果没有的话作为兜底
+    attemptCount = 1;
+    correctCount = correct ? 1 : 0;
+    independentCorrectCount = (correct && independent) ? 1 : 0;
+    errorCount = correct ? 0 : 1;
   }
 
   const ev = {
@@ -189,7 +227,7 @@ async function updateSingleState(userId, kpId, evidence, correct, independent, n
   const confidence = computeConfidence(evidences);
 
   if (existing) {
-    await db.run(
+    await tx.run(
       `UPDATE student_knowledge_states
        SET mastery=$3, confidence=$4, attempt_count=$5, correct_count=$6,
            independent_correct_count=$7, recent_performance=$8, error_count=$9,
@@ -201,7 +239,7 @@ async function updateSingleState(userId, kpId, evidence, correct, independent, n
        JSON.stringify(recentErrorTypes), now, MASTERY_ALGORITHM_VERSION]
     );
   } else {
-    await db.run(
+    await tx.run(
       `INSERT INTO student_knowledge_states
        (user_id, knowledge_point_id, mastery, confidence, attempt_count, correct_count,
         independent_correct_count, recent_performance, error_count, recent_error_types,
@@ -254,31 +292,34 @@ async function rebuildStudentKnowledgeState(userId) {
     [userId]
   );
 
-  await db.run(
-    `DELETE FROM student_knowledge_states WHERE user_id = $1`,
-    [userId]
-  );
-
   const EVIDENCE_TYPES = ['ANSWER_QUESTION', 'CORRECT_ANSWER', 'WRONG_ANSWER',
     'RECITE_POEM', 'RECITATION_ERROR', 'COMPLETE_GAME', 'REVIEW_POEM'];
+
   let replayed = 0;
-  for (const ev of events) {
-    if (!EVIDENCE_TYPES.includes(ev.event_type)) continue;
-    let kpCodes = [];
-    try { kpCodes = JSON.parse(ev.knowledge_points || '[]'); } catch {}
-    if (kpCodes.length === 0) continue;
+  await db.transaction(async (tx) => {
+    await tx.run(
+      `DELETE FROM student_knowledge_states WHERE user_id = $1`,
+      [userId]
+    );
 
-    const kpIds = await knowledgeModel.getKnowledgePointIds(kpCodes);
-    if (kpIds.length === 0) continue;
+    for (const ev of events) {
+      if (!EVIDENCE_TYPES.includes(ev.event_type)) continue;
+      let kpCodes = [];
+      try { kpCodes = JSON.parse(ev.knowledge_points || '[]'); } catch {}
+      if (kpCodes.length === 0) continue;
 
-    const correct = ev.correct === 1;
-    for (const kpId of kpIds) {
-      const evidence = computeEvidence(correct, ev.difficulty || 3, ev.hint_count || 0);
-      await updateSingleState(userId, kpId, evidence, correct, !(ev.hint_count > 0),
-        (ev.created_at || new Date()).toISOString());
+      const kpIds = await knowledgeModel.getKnowledgePointIds(kpCodes);
+      if (kpIds.length === 0) continue;
+
+      const correct = ev.correct === 1;
+      for (const kpId of kpIds) {
+        const evidence = computeEvidence(correct, ev.difficulty || 3, ev.hint_count || 0);
+        await updateSingleState(userId, kpId, evidence, correct, !(ev.hint_count > 0),
+          (ev.created_at || new Date()).toISOString(), tx);
+      }
+      replayed++;
     }
-    replayed++;
-  }
+  });
 
   const states = await getAllStates(userId);
   return { userId, replayedEvents: replayed, totalStates: states.length, algorithmVersion: MASTERY_ALGORITHM_VERSION };

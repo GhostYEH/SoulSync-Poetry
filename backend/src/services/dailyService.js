@@ -66,8 +66,9 @@ async function saveDailyPoem(poemId, dateStr) {
 }
 
 async function getDailyPoemHistory(days = 7) {
+  const dateFilter = db.isPostgres() ? `CURRENT_DATE - $1::int` : `DATE('now', '-' || ? || ' days')`;
   return db.all(
-    'SELECT dp.*, p.title, p.author, p.content FROM daily_poems dp JOIN poems p ON dp.poem_id = p.id WHERE dp.date >= CURRENT_DATE - $1::int ORDER BY dp.date DESC',
+    `SELECT dp.*, p.title, p.author, p.content FROM daily_poems dp JOIN poems p ON dp.poem_id = p.id WHERE dp.date >= ${dateFilter} ORDER BY dp.date DESC`,
     [days]
   );
 }

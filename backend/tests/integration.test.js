@@ -36,12 +36,16 @@ function test(name, fn) {
 function approx(a, b, eps = 0.02) { return Math.abs(a - b) < eps; }
 
 async function run() {
-  // 检查数据库连接
+  const isDbRequired = process.argv.includes('--require-db');
   let dbAvailable = false;
   try {
     await db.query('SELECT 1');
     dbAvailable = true;
   } catch (e) {
+    if (isDbRequired) {
+       console.log(`  ❌ [ERROR] 严格模式: 未检测到 PostgreSQL，测试失败！(${e.message})`);
+       process.exit(1);
+    }
     console.log(`⚠ 数据库不可用，跳过集成测试: ${e.message}`);
     console.log(`  设置 DATABASE_URL 后可运行此测试。`);
     process.exit(0);

@@ -127,7 +127,8 @@ export default {
   methods: {
     async loadWorks() {
       try {
-        const response = await fetch(`http://localhost:3000/api/creation/works/list?page=${this.pagination.page}&pageSize=${this.pagination.pageSize}`, {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+        const response = await fetch(`${baseUrl}/creation/works/list?page=${this.pagination.page}&pageSize=${this.pagination.pageSize}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -156,7 +157,8 @@ export default {
     
     async viewWorkDetail(id) {
       try {
-        const response = await fetch(`http://localhost:3000/api/creation/works/${id}`, {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+        const response = await fetch(`${baseUrl}/creation/works/${id}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -181,7 +183,8 @@ export default {
     async deleteWork(id) {
       if (confirm('确定要删除这篇作品吗？')) {
         try {
-          const response = await fetch(`http://localhost:3000/api/creation/works/${id}`, {
+          const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+          const response = await fetch(`${baseUrl}/creation/works/${id}`, {
             method: 'DELETE',
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('token')}`

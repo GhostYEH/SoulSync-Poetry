@@ -96,228 +96,230 @@ async function seed() {
       console.log(`诗词表已有 ${poemCount.count} 条数据，跳过默认诗词插入`);
     }
 
-    // 2. 插入班级数据
-    const classes = [
-      { id: 1, name: '一年级一班' },
-      { id: 2, name: '一年级二班' },
-      { id: 3, name: '二年级一班' }
-    ];
-
-    for (const cls of classes) {
-      await client.query(
-        'INSERT INTO classes (id, class_name) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [cls.id, cls.name]
-      );
+    console.log('✅ 基础数据初始化完成！');
+    if (process.argv.includes('--dev')) {
+      console.log('开始填充开发环境模拟数据...');
+      await seedDevData(client, poemIds);
+      console.log('✅ 开发环境模拟数据填充完成！');
     }
-    console.log('✓ 班级数据已填充');
-
-    // 3. 插入学生用户
-    const passwordHash = await bcrypt.hash('123456', 10);
-    const now = new Date().toISOString();
-
-    const studentNames = [
-      '张三', '李四', '王五', '赵六', '钱七',
-      '孙八', '周九', '吴十', '郑十一', '王小明',
-      '李小红', '张小华', '刘小芳', '陈小强', '杨小丽',
-      '黄小军', '周小燕', '吴小鹏', '马小云', '朱小琳'
-    ];
-
-    const studentIds = [];
-    for (let i = 0; i < studentNames.length; i++) {
-      const name = studentNames[i];
-      const classId = classes[i % classes.length].id;
-      const email = `student${i + 1}@example.com`;
-
-      // 先尝试插入，如果冲突则查询已有记录
-      let result = await client.query(
-        'INSERT INTO users (username, email, password_hash, class_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (username) DO NOTHING RETURNING id',
-        [name, email, passwordHash, classId, now, now]
-      );
-
-      let id;
-      if (result.rows.length > 0) {
-        id = result.rows[0].id;
-      } else {
-        const row = await db.get('SELECT id FROM users WHERE username = $1', [name]);
-        id = row.id;
-      }
-      studentIds.push({ id, name, classId });
-    }
-    console.log('✓ 学生数据已填充');
-
-    // 4. 获取诗词 ID 列表
-    const poemRows = (await client.query('SELECT id FROM poems')).rows;
-    const poemIds = poemRows.map(r => r.id);
-
-    // 5. 插入学习记录
-    for (const student of studentIds) {
-      const poemCount = getRandomInt(5, 15);
-      const selectedPoems = [...poemIds].sort(() => Math.random() - 0.5).slice(0, poemCount);
-
-      for (const poemId of selectedPoems) {
-        const viewCount = getRandomInt(1, 10);
-        const studyTime = getRandomInt(60, 600);
-        const lastViewTime = getRandomDate(getRandomInt(0, 7));
-        const bestScore = getRandomInt(60, 100);
-
-        await client.query(
-          'INSERT INTO learning_records (user_id, poem_id, view_count, study_time, last_view_time, best_score, total_score) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-          [student.id, poemId, viewCount, studyTime, lastViewTime, bestScore, bestScore * viewCount]
-        );
-      }
-    }
-    console.log('✓ 学习记录数据已填充');
-
-    // 6. 插入闯关进度
-    for (const student of studentIds) {
-      const highestLevel = getRandomInt(10, 150);
-      const currentLevel = Math.min(highestLevel + 1, 200);
-
-      await client.query(
-        `INSERT INTO user_challenge_progress (user_id, highest_level, current_challenge_level, last_challenge_time, total_ai_help_used, total_errors)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (user_id) DO UPDATE SET
-           highest_level = EXCLUDED.highest_level,
-           current_challenge_level = EXCLUDED.current_challenge_level,
-           last_challenge_time = EXCLUDED.last_challenge_time,
-           total_ai_help_used = EXCLUDED.total_ai_help_used,
-           total_errors = EXCLUDED.total_errors`,
-        [student.id, highestLevel, currentLevel, getRandomDate(getRandomInt(0, 3)), getRandomInt(0, 20), getRandomInt(0, 30)]
-      );
-    }
-    console.log('✓ 闯关进度数据已填充');
-
-    // 7. 插入答题记录
-    for (const student of studentIds) {
-      const recordCount = getRandomInt(20, 100);
-
-      for (let i = 0; i < recordCount; i++) {
-        const question = getRandomElement(SAMPLE_QUESTIONS);
-        const isCorrect = Math.random() > 0.3;
-        const usedAiHelp = Math.random() > 0.7 ? 1 : 0;
-        const answeredAt = getRandomDate(getRandomInt(0, 14));
-        const level = getRandomInt(1, 150);
-
-        await client.query(
-          'INSERT INTO user_challenge_records (user_id, level, question_content, user_answer, correct_answer, is_correct, used_ai_help, answered_at, poem_title, poem_author) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-          [student.id, level, question.question, isCorrect ? question.answer : '错误答案', question.answer, isCorrect ? 1 : 0, usedAiHelp, answeredAt, question.title, question.author]
-        );
-      }
-    }
-    console.log('✓ 答题记录数据已填充');
-
-    // 8. 插入错题本
-    for (const student of studentIds) {
-      const errorCount = getRandomInt(0, 10);
-
-      for (let i = 0; i < errorCount; i++) {
-        const question = getRandomElement(SAMPLE_QUESTIONS);
-        const addedAt = getRandomDate(getRandomInt(0, 7));
-
-        await client.query(
-          'INSERT INTO wrong_questions (user_id, question, answer, user_answer, level, full_poem, author, title, wrong_count, last_wrong_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-          [student.id.toString(), question.question, question.answer, '错误答案', getRandomInt(1, 100), '完整诗句内容', question.author, question.title, getRandomInt(1, 3), addedAt]
-        );
-      }
-    }
-    console.log('✓ 错题本数据已填充');
-
-    // 9. 插入飞花令对战
-    for (const student of studentIds) {
-      const battleCount = getRandomInt(0, 20);
-
-      for (let i = 0; i < battleCount; i++) {
-        const opponent = studentIds[getRandomInt(0, studentIds.length - 1)];
-        if (opponent.id === student.id) continue;
-
-        const isWinner = Math.random() > 0.5;
-        const totalRounds = getRandomInt(3, 15);
-        const startedAt = getRandomDate(getRandomInt(0, 14));
-        const endedAt = new Date(new Date(startedAt).getTime() + getRandomInt(60000, 600000)).toISOString();
-        const keywords = ['月', '花', '春', '风', '山', '水', '云', '雨', '雪', '柳'];
-
-        await client.query(
-          'INSERT INTO feihua_battles (player1_id, player2_id, keyword, winner_id, loser_id, total_rounds, player1_throw_count, player2_throw_count, started_at, ended_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-          [student.id, opponent.id, getRandomElement(keywords), isWinner ? student.id : opponent.id, isWinner ? opponent.id : student.id, totalRounds, getRandomInt(2, totalRounds), getRandomInt(2, totalRounds), startedAt, endedAt]
-        );
-      }
-    }
-    console.log('✓ 飞花令对战数据已填充');
-
-    // 10. 插入打卡数据
-    for (const student of studentIds) {
-      const checkinDays = getRandomInt(3, 14);
-
-      for (let i = 0; i < checkinDays; i++) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const dateStr = date.toISOString().split('T')[0];
-
-        await client.query(
-          'INSERT INTO daily_checkin (user_id, date, checked_in_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-          [student.id, dateStr, date.toISOString()]
-        );
-      }
-    }
-    console.log('✓ 打卡数据已填充');
-
-    // 11. 插入活动日志
-    for (const student of studentIds) {
-      const activityCount = getRandomInt(10, 50);
-      const activityTypes = ['view', 'recite', 'challenge', 'feihua', 'ai_explain', 'checkin'];
-
-      for (let i = 0; i < activityCount; i++) {
-        const activityType = getRandomElement(activityTypes);
-        const createdAt = getRandomDate(getRandomInt(0, 14));
-        const duration = getRandomInt(30, 600);
-
-        await client.query(
-          'INSERT INTO activity_logs (user_id, activity_type, duration_seconds, created_at) VALUES ($1, $2, $3, $4)',
-          [student.id, activityType, duration, createdAt]
-        );
-      }
-    }
-    console.log('✓ 活动日志数据已填充');
-
-    // 12. 插入收藏数据
-    for (const student of studentIds) {
-      const collectionCount = getRandomInt(2, 8);
-      const selectedPoems = [...poemIds].sort(() => Math.random() - 0.5).slice(0, collectionCount);
-
-      for (const poemId of selectedPoems) {
-        await client.query(
-          'INSERT INTO collections (user_id, poem_id, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-          [student.id, poemId, getRandomDate(getRandomInt(0, 14))]
-        );
-      }
-    }
-    console.log('✓ 收藏数据已填充');
-
-    // 13. 插入创作数据
-    for (const student of studentIds) {
-      const creationCount = getRandomInt(0, 5);
-      const genres = ['五言绝句', '七言绝句', '五言律诗', '七言律诗', '词'];
-      const themes = ['山水', '田园', '送别', '思乡', '咏物', '抒情'];
-
-      for (let i = 0; i < creationCount; i++) {
-        await client.query(
-          'INSERT INTO creations (user_id, title, content, type, score, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
-          [student.id, `创作${i + 1}`, '这是一首创作的诗词内容...', getRandomElement(genres), getRandomInt(60, 95), getRandomDate(getRandomInt(0, 14))]
-        );
-      }
-    }
-    console.log('✓ 创作数据已填充');
 
     await client.query('COMMIT');
-    console.log('✅ 模拟数据填充完成！');
-
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('填充数据失败:', error);
+    console.error('数据初始化失败:', error);
     throw error;
   } finally {
     client.release();
   }
+}
+
+async function seedDevData(client, poemIds) {
+  const passwordHash = await bcrypt.hash('123456', 10);
+  const now = new Date().toISOString();
+
+  // 2. 插入班级数据
+  const classes = [
+    { id: 1, name: '一年级一班' },
+    { id: 2, name: '一年级二班' },
+    { id: 3, name: '二年级一班' }
+  ];
+
+  for (const cls of classes) {
+    await client.query(
+      'INSERT INTO classes (id, class_name) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [cls.id, cls.name]
+    );
+  }
+  console.log('✓ 开发数据: 班级数据已填充');
+
+  // 3. 插入学生用户
+  const studentNames = [
+    '张三', '李四', '王五', '赵六', '钱七',
+    '孙八', '周九', '吴十', '郑十一', '王小明',
+    '李小红', '张小华', '刘小芳', '陈小强', '杨小丽',
+    '黄小军', '周小燕', '吴小鹏', '马小云', '朱小琳'
+  ];
+
+  const studentIds = [];
+  for (let i = 0; i < studentNames.length; i++) {
+    const name = studentNames[i];
+    const classId = classes[i % classes.length].id;
+    const email = `student${i + 1}@example.com`;
+
+    let result = await client.query(
+      'INSERT INTO users (username, email, password_hash, class_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (username) DO NOTHING RETURNING id',
+      [name, email, passwordHash, classId, now, now]
+    );
+
+    let id;
+    if (result.rows.length > 0) {
+      id = result.rows[0].id;
+    } else {
+      const row = (await client.query('SELECT id FROM users WHERE username = $1', [name])).rows[0];
+      id = row.id;
+    }
+    studentIds.push({ id, name, classId });
+  }
+  console.log('✓ 开发数据: 学生数据已填充');
+
+  // 5. 插入学习记录
+  for (const student of studentIds) {
+    const poemCount = getRandomInt(5, 15);
+    const selectedPoems = [...poemIds].sort(() => Math.random() - 0.5).slice(0, poemCount);
+
+    for (const poemId of selectedPoems) {
+      const viewCount = getRandomInt(1, 10);
+      const studyTime = getRandomInt(60, 600);
+      const lastViewTime = getRandomDate(getRandomInt(0, 7));
+      const bestScore = getRandomInt(60, 100);
+
+      await client.query(
+        'INSERT INTO learning_records (user_id, poem_id, view_count, study_time, last_view_time, best_score, total_score) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [student.id, poemId, viewCount, studyTime, lastViewTime, bestScore, bestScore * viewCount]
+      );
+    }
+  }
+  console.log('✓ 开发数据: 学习记录数据已填充');
+
+  // 6. 插入闯关进度
+  for (const student of studentIds) {
+    const highestLevel = getRandomInt(10, 150);
+    const currentLevel = Math.min(highestLevel + 1, 200);
+
+    await client.query(
+      `INSERT INTO user_challenge_progress (user_id, highest_level, current_challenge_level, last_challenge_time, total_ai_help_used, total_errors)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_id) DO UPDATE SET
+         highest_level = EXCLUDED.highest_level,
+         current_challenge_level = EXCLUDED.current_challenge_level,
+         last_challenge_time = EXCLUDED.last_challenge_time,
+         total_ai_help_used = EXCLUDED.total_ai_help_used,
+         total_errors = EXCLUDED.total_errors`,
+      [student.id, highestLevel, currentLevel, getRandomDate(getRandomInt(0, 3)), getRandomInt(0, 20), getRandomInt(0, 30)]
+    );
+  }
+  console.log('✓ 开发数据: 闯关进度数据已填充');
+
+  // 7. 插入答题记录
+  for (const student of studentIds) {
+    const recordCount = getRandomInt(20, 100);
+
+    for (let i = 0; i < recordCount; i++) {
+      const question = getRandomElement(SAMPLE_QUESTIONS);
+      const isCorrect = Math.random() > 0.3;
+      const usedAiHelp = Math.random() > 0.7 ? 1 : 0;
+      const answeredAt = getRandomDate(getRandomInt(0, 14));
+      const level = getRandomInt(1, 150);
+
+      await client.query(
+        'INSERT INTO user_challenge_records (user_id, level, question_content, user_answer, correct_answer, is_correct, used_ai_help, answered_at, poem_title, poem_author) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+        [student.id, level, question.question, isCorrect ? question.answer : '错误答案', question.answer, isCorrect ? 1 : 0, usedAiHelp, answeredAt, question.title, question.author]
+      );
+    }
+  }
+  console.log('✓ 开发数据: 答题记录数据已填充');
+
+  // 8. 插入错题本
+  for (const student of studentIds) {
+    const errorCount = getRandomInt(0, 10);
+
+    for (let i = 0; i < errorCount; i++) {
+      const question = getRandomElement(SAMPLE_QUESTIONS);
+      const addedAt = getRandomDate(getRandomInt(0, 7));
+
+      await client.query(
+        'INSERT INTO wrong_questions (user_id, question, answer, user_answer, level, full_poem, author, title, wrong_count, last_wrong_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+        [student.id.toString(), question.question, question.answer, '错误答案', getRandomInt(1, 100), '完整诗句内容', question.author, question.title, getRandomInt(1, 3), addedAt]
+      );
+    }
+  }
+  console.log('✓ 开发数据: 错题本数据已填充');
+
+  // 9. 插入飞花令对战
+  for (const student of studentIds) {
+    const battleCount = getRandomInt(0, 20);
+
+    for (let i = 0; i < battleCount; i++) {
+      const opponent = studentIds[getRandomInt(0, studentIds.length - 1)];
+      if (opponent.id === student.id) continue;
+
+      const isWinner = Math.random() > 0.5;
+      const totalRounds = getRandomInt(3, 15);
+      const startedAt = getRandomDate(getRandomInt(0, 14));
+      const endedAt = new Date(new Date(startedAt).getTime() + getRandomInt(60000, 600000)).toISOString();
+      const keywords = ['月', '花', '春', '风', '山', '水', '云', '雨', '雪', '柳'];
+
+      await client.query(
+        'INSERT INTO feihua_battles (player1_id, player2_id, keyword, winner_id, loser_id, total_rounds, player1_throw_count, player2_throw_count, started_at, ended_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+        [student.id, opponent.id, getRandomElement(keywords), isWinner ? student.id : opponent.id, isWinner ? opponent.id : student.id, totalRounds, getRandomInt(2, totalRounds), getRandomInt(2, totalRounds), startedAt, endedAt]
+      );
+    }
+  }
+  console.log('✓ 开发数据: 飞花令对战数据已填充');
+
+  // 10. 插入打卡数据
+  for (const student of studentIds) {
+    const checkinDays = getRandomInt(3, 14);
+
+    for (let i = 0; i < checkinDays; i++) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+
+      await client.query(
+        'INSERT INTO daily_checkin (user_id, date, checked_in_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+        [student.id, dateStr, date.toISOString()]
+      );
+    }
+  }
+  console.log('✓ 开发数据: 打卡数据已填充');
+
+  // 11. 插入活动日志
+  for (const student of studentIds) {
+    const activityCount = getRandomInt(10, 50);
+    const activityTypes = ['view', 'recite', 'challenge', 'feihua', 'ai_explain', 'checkin'];
+
+    for (let i = 0; i < activityCount; i++) {
+      const activityType = getRandomElement(activityTypes);
+      const createdAt = getRandomDate(getRandomInt(0, 14));
+      const duration = getRandomInt(30, 600);
+
+      await client.query(
+        'INSERT INTO activity_logs (user_id, activity_type, duration_seconds, created_at) VALUES ($1, $2, $3, $4)',
+        [student.id, activityType, duration, createdAt]
+      );
+    }
+  }
+  console.log('✓ 开发数据: 活动日志数据已填充');
+
+  // 12. 插入收藏数据
+  for (const student of studentIds) {
+    const collectionCount = getRandomInt(2, 8);
+    const selectedPoems = [...poemIds].sort(() => Math.random() - 0.5).slice(0, collectionCount);
+
+    for (const poemId of selectedPoems) {
+      await client.query(
+        'INSERT INTO collections (user_id, poem_id, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+        [student.id, poemId, getRandomDate(getRandomInt(0, 14))]
+      );
+    }
+  }
+  console.log('✓ 开发数据: 收藏数据已填充');
+
+  // 13. 插入创作数据
+  for (const student of studentIds) {
+    const creationCount = getRandomInt(0, 5);
+    const genres = ['五言绝句', '七言绝句', '五言律诗', '七言律诗', '词'];
+    const themes = ['山水', '田园', '送别', '思乡', '咏物', '抒情'];
+
+    for (let i = 0; i < creationCount; i++) {
+      await client.query(
+        'INSERT INTO creations (user_id, title, content, type, score, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+        [student.id, `创作${i + 1}`, '这是一首创作的诗词内容...', getRandomElement(genres), getRandomInt(60, 95), getRandomDate(getRandomInt(0, 14))]
+      );
+    }
+  }
+  console.log('✓ 开发数据: 创作数据已填充');
 }
 
 seed()

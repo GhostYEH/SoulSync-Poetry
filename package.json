@@ -1,27 +1,21 @@
 {
   "name": "chinese-poetry-desktop",
   "version": "1.0.0",
-  "description": "诗词学习系统桌面应用 - Electron 版本",
-  "main": "electron/main.js",
+  "description": "诗词学习系统桌面应用",
   "author": "",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
+    "start": "npm run dev",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run dev",
-    "electron:dev": "electron .",
     "build:frontend": "cd frontend && npm run build",
     "build:backend": "cd backend && npm install",
-    "electron:build": "electron-builder --config electron/electron-builder.json",
-    "electron:build:win": "electron-builder --config electron/electron-builder.json --win",
-    "electron:build:mac": "electron-builder --config electron/electron-builder.json --mac",
-    "electron:build:linux": "electron-builder --config electron/electron-builder.json --linux",
-    "postinstall": "electron-builder install-app-deps"
+    "test": "cd backend && npm test",
+    "db:seed": "cd backend && node scripts/seed.js",
+    "db:seed:dev": "cd backend && node scripts/seed.js --dev"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.1"
+    "concurrently": "^8.2.2"
   }
 }

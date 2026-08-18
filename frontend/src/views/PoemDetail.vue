@@ -1072,23 +1072,13 @@ export default {
       this.tutorLoading = true
       this.tutorError = ''
       try {
-        const token = localStorage.getItem('token')
-        const response = await fetch(`${API_BASE_URL}/api/ai/personalized-tutor`, {
+        const data = await request('/ai/personalized-tutor', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify({ poemId: this.poem.id })
+          body: JSON.stringify({ poemId: this.poem.id }),
+          timeout: TIMEOUTS.LONG
         })
-        if (!response.ok) {
-          if (response.status === 401) {
-            throw new Error('请登录后使用个性化学习')
-          }
-          throw new Error('个性化教学服务请求失败')
-        }
-        const res = await response.json()
-        this.tutorData = res.data || res
+        
+        this.tutorData = data.data || data
       } catch (err) {
         console.error('[personalizedTutor] 获取失败:', err)
         this.tutorError = err.message || '个性化教学服务暂时不可用'
@@ -1103,9 +1093,18 @@ export default {
       this.bgImageLoading = false
     },
     // 初始化Socket.io连接
-    initSocket() {
+    async initSocket() {
       try {
-        this.socket = io('http://localhost:3000')
+        const { io } = await import('socket.io-client');
+        let socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+        if (window.electronAPI) {
+          const port = await window.electronAPI.getBackendPort();
+          socketUrl = `http://localhost:${port}`;
+        }
+        
+        this.socket = io(socketUrl, {
+          transports: ['websocket', 'polling']
+        });
         
         this.socket.on('connect', () => {
           console.log('Socket连接成功')
@@ -1142,32 +1141,28 @@ export default {
       }
     },
     // 预生成背景图
-    pregenerateBackground() {
+    async pregenerateBackground() {
       if (!this.poem) return
       
       console.log('开始预生成背景图')
       this.imageStatus = 'pending'
       
-      fetch(`${API_BASE_URL}/api/ai/image/pregenerate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          poemId: this.poem.id,
-          title: this.poem.title,
-          author: this.poem.author,
-          content: this.poem.content
+      try {
+        const data = await request('/ai/image/pregenerate', {
+          method: 'POST',
+          body: JSON.stringify({
+            poemId: this.poem.id,
+            title: this.poem.title,
+            author: this.poem.author,
+            content: this.poem.content
+          }),
+          timeout: TIMEOUTS.LONG
         })
-      })
-      .then(response => response.json())
-      .then(data => {
         console.log('预生成请求已发送:', data)
-      })
-      .catch(error => {
+      } catch (error) {
         console.error('预生成失败:', error)
         this.imageStatus = 'fail'
-      })
+      }
     },
     // 预加载图片
     preloadImage(url) {
@@ -1357,30 +1352,18 @@ export default {
         // 准备请求配置
         const requestConfig = {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
           body: JSON.stringify(requestData),
           signal: this.abortController.signal
         }
         
-        // 设置60秒超时（与后端超时一致）
-        const timeoutId = setTimeout(() => this.abortController.abort(), 60000);
-        
         try {
           // 使用批量API端点，只发送一个请求
-          const response = await fetch(`${API_BASE_URL}/api/ai/explainPoem/batch`, requestConfig)
-          
-          // 清除超时
-          clearTimeout(timeoutId);
-          
-          // 检查响应是否成功
-          if (!response.ok) {
-            throw new Error('获取AI讲解失败')
-          }
-          
-          // 解析响应数据
-          const batchData = await response.json()
+          const batchData = await request('/ai/explainPoem/batch', {
+            method: 'POST',
+            body: JSON.stringify(requestData),
+            timeout: TIMEOUTS.LONG,
+            signal: this.abortController.signal
+          })
           
           // 更新AI讲解数据
           this.aiExplanations.daily_life_explanation = batchData.daily_life_explanation
@@ -1437,12 +1420,8 @@ export default {
         this.reciteError = ''
         if (!this.reciteAttemptId) this.reciteAttemptId = generateAttemptId()
         
-        const response = await fetch(`${API_BASE_URL}/api/ai/recite-check`, {
+        const data = await request('/ai/recite-check', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
           body: JSON.stringify({
             original: this.poem.content,
             input: this.reciteInput,
@@ -1450,14 +1429,10 @@ export default {
             poem_title: this.poem.title,
             poem_author: this.poem.author,
             attemptId: this.reciteAttemptId
-          })
+          }),
+          timeout: TIMEOUTS.MEDIUM
         })
         
-        if (!response.ok) {
-          throw new Error('检测失败，请稍后重试')
-        }
-        
-        const data = await response.json()
         this.reciteResult = data
         
         // 记录背诵行为和得分
@@ -1509,12 +1484,8 @@ export default {
         
         // 调用AI背诵检测API
         if (!this.reciteAttemptId) this.reciteAttemptId = generateAttemptId()
-        const response = await fetch(`${API_BASE_URL}/api/ai/recite-check`, {
+        const data = await request('/ai/recite-check', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
           body: JSON.stringify({
             original: original,
             input: userInputText,
@@ -1522,14 +1493,9 @@ export default {
             poem_title: this.poem.title,
             poem_author: this.poem.author,
             attemptId: this.reciteAttemptId
-          })
+          }),
+          timeout: TIMEOUTS.MEDIUM
         })
-        
-        if (!response.ok) {
-          throw new Error('检测失败，请稍后重试')
-        }
-        
-        const data = await response.json()
         
         // 处理AI检测结果
         this.reciteResult = data
@@ -1648,22 +1614,13 @@ export default {
       this.isCollected = !this.isCollected
       
       // 调用收藏API
-      const fetchUrl = this.isCollected ? '/api/collections' : `/api/collections/${this.poem.id}`
+      const url = this.isCollected ? '/collections' : `/collections/${this.poem.id}`
       const method = this.isCollected ? 'POST' : 'DELETE'
       
-      fetch(fetchUrl, {
+      request(url, {
         method: method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: this.isCollected ? JSON.stringify({ poem_id: this.poem.id }) : undefined
-      })
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('操作失败')
-        }
-        return response.json()
+        body: this.isCollected ? JSON.stringify({ poem_id: this.poem.id }) : undefined,
+        timeout: TIMEOUTS.SHORT
       })
       .then(data => {
         console.log('收藏操作成功:', data)
@@ -1680,19 +1637,11 @@ export default {
       if (!this.poem) return
       
       // 检查是否登录
-      const token = localStorage.getItem('token')
+      const token = getToken()
       if (token) {
         // 已登录，从API获取收藏状态
-        fetch(`/api/collections/check/${this.poem.id}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        })
-        .then(response => {
-          if (response.ok) {
-            return response.json()
-          }
-          return { success: false, data: false }
+        request(`/collections/check/${this.poem.id}`, {
+          timeout: TIMEOUTS.SHORT
         })
         .then(data => {
           this.isCollected = data.success ? data.data.is_collected : false
@@ -1714,23 +1663,18 @@ export default {
       this.poemBackgroundError = ''
 
       try {
-        const token = localStorage.getItem('token')
-        const response = await fetch(`${API_BASE_URL}/api/ai/poem/background`, {
+        const data = await request('/ai/poem/background', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
           body: JSON.stringify({
             title: this.poem.title,
             author: this.poem.author,
             dynasty: this.poem.dynasty,
             content: this.poem.content
-          })
+          }),
+          timeout: TIMEOUTS.LONG
         })
 
-        if (response.ok) {
-          const data = await response.json()
+        if (data) {
           this.poemBackground = data.background || ''
           this.poemBackgroundTips = data.tips || ''
         } else {
@@ -1766,22 +1710,17 @@ export default {
       this.poemStoryError = ''
 
       try {
-        const token = localStorage.getItem('token')
-        const response = await fetch(`${API_BASE_URL}/api/ai/poem/story`, {
+        const data = await request('/ai/poem/story', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
           body: JSON.stringify({
             title: this.poem.title,
             author: this.poem.author,
             content: this.poem.content
-          })
+          }),
+          timeout: TIMEOUTS.LONG
         })
 
-        if (response.ok) {
-          const data = await response.json()
+        if (data) {
           this.poemStory = data.story || ''
         } else {
           this.poemStory = this.getBuiltinStory(this.poem.title, this.poem.author)
@@ -1811,28 +1750,19 @@ export default {
       this.recitationGuideError = ''
 
       try {
-        const token = localStorage.getItem('token')
-        const response = await fetch(`${API_BASE_URL}/api/ai/poem/recitation-guide`, {
+        const data = await request('/ai/poem/recitation-guide', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
           body: JSON.stringify({
             title: this.poem.title,
             author: this.poem.author,
             content: this.poem.content,
             dynasty: this.poem.dynasty
-          })
+          }),
+          timeout: TIMEOUTS.LONG
         })
 
-        if (response.ok) {
-          const data = await response.json()
-          if (data && data.rhythm) {
-            this.recitationGuide = data
-          } else {
-            this.recitationGuide = this.getBuiltinRecitationGuide(this.poem.title, this.poem.content)
-          }
+        if (data && data.rhythm) {
+          this.recitationGuide = data
         } else {
           this.recitationGuide = this.getBuiltinRecitationGuide(this.poem.title, this.poem.content)
         }
@@ -1870,28 +1800,18 @@ export default {
       }
       
       // 检查是否登录
-      const token = localStorage.getItem('token')
+      const token = getToken()
       if (token) {
         console.log('已登录，发送学习时长到后端:', studyTime, '分钟')
         // 已登录，发送学习时长到后端
-        fetch(`${API_BASE_URL}/api/learning/record`, {
+        request('/learning/record', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
           body: JSON.stringify({
             poem_id: this.poem.id,
             action: 'study_time',
             score: studyTime
-          })
-        })
-        .then(response => {
-          console.log('学习时长记录响应状态:', response.status)
-          if (response.ok) {
-            return response.json()
-          }
-          throw new Error('请求失败')
+          }),
+          timeout: TIMEOUTS.SHORT
         })
         .then(data => {
           console.log('学习时长记录响应数据:', data)
@@ -2154,25 +2074,18 @@ export default {
         }));
         
         // 发送请求
-        const response = await fetch(`${API_BASE_URL}/api/ai/tutor`, {
+        const data = await request('/ai/tutor', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
           body: JSON.stringify({
             poem: this.poem.content,
             title: this.poem.title,
             author: this.poem.author,
             question: question,
             history: history
-          })
+          }),
+          timeout: TIMEOUTS.LONG
         });
         
-        if (!response.ok) {
-          throw new Error('获取AI回答失败');
-        }
-        
-        const data = await response.json();
         // 添加AI回答，确保长度不超过100字
         let answer = data.data.answer;
         if (answer.length > 100) {
@@ -2234,15 +2147,11 @@ export default {
         
         this.clearOldAuthorAvatarCacheOnce(CACHE_VERSION);
         
-        const response = await fetch(`${API_BASE_URL}/api/ai/author-avatar`, {
+        const data = await request('/ai/author-avatar', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ author })
+          body: JSON.stringify({ author }),
+          timeout: TIMEOUTS.LONG
         });
-        
-        const data = await response.json();
         
         if (data.success && data.url) {
           localStorage.setItem(cacheKey, data.url);
@@ -2312,8 +2221,10 @@ export default {
       if (!this.poem) return;
       
       try {
-        const response = await fetch(`${API_BASE_URL}/api/poems`);
-        const allPoems = await response.json();
+        const allPoems = await request('/poems', {
+          includeAuth: false,
+          timeout: TIMEOUTS.SHORT
+        });
         
         // 基于风格相似性获取诗词
         this.similarPoems = allPoems
@@ -2514,19 +2425,17 @@ export default {
       this.sceneImageLoading = true;
 
       try {
-        const response = await fetch(`${API_BASE_URL}/api/ai/scene-image`, {
+        const data = await request('/ai/scene-image', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             poemLine: text,
             poemTitle: this.poem?.title || '古诗',
             poemAuthor: this.poem?.author || '佚名',
             lineNumber: this.selectionPopup.lineNumber,
             totalLines: this.selectionPopup.totalLines
-          })
+          }),
+          timeout: TIMEOUTS.LONG
         });
-
-        const data = await response.json();
 
         if (data.success && data.url) {
           this.bgImageFadingIn = false;
@@ -2573,23 +2482,18 @@ export default {
           content: msg.content
         }));
 
-        const response = await fetch(`${API_BASE_URL}/api/ai/tutor`, {
+        const data = await request('/ai/tutor', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             poem: this.poem.content,
             title: this.poem.title,
             author: this.poem.author,
             question: question,
             history: history
-          })
+          }),
+          timeout: TIMEOUTS.LONG
         });
 
-        if (!response.ok) {
-          throw new Error('获取AI回答失败');
-        }
-
-        const data = await response.json();
         let answer = data.data.answer;
         if (answer.length > 150) {
           answer = answer.substring(0, 147) + '...';

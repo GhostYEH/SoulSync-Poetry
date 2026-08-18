@@ -22,7 +22,7 @@ async function getClassAnalytics(classId) {
        AVG(lr.best_score) as avg_score
      FROM learning_records lr
      JOIN class_members cm ON lr.user_id = cm.user_id AND cm.class_id = $1
-     WHERE lr.last_view_time >= CURRENT_DATE - INTERVAL '7 days'`,
+     WHERE lr.last_view_time >= ${db.dateDaysAgo(7)}`,
     [classId]
   );
 
@@ -147,22 +147,29 @@ async function getTeacherClasses(teacherId) {
 }
 
 async function createClass(teacherId, className, description) {
-  const result = await db.run(
-    `INSERT INTO classes (teacher_id, name, description, created_at)
-     VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-     RETURNING id`,
-    [teacherId, className, description]
-  );
+  return db.transaction(async (tx) => {
+    const result = await tx.run(
+      `INSERT INTO classes (teacher_id, name, description, created_at)
+       VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+       RETURNING id`,
+      [teacherId, className, description]
+    );
 
-  const classId = result.rows[0].id;
+    const classId = result.rows[0].id;
 
-  await db.run(
-    `INSERT INTO class_members (class_id, user_id, role, joined_at)
-     VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
-    [classId, teacherId, 'teacher']
-  );
+    await tx.run(
+      `INSERT INTO class_members (class_id, user_id, role, joined_at)
+       VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
+      [classId, teacherId, 'teacher']
+    );
 
-  return { id: classId, name: className, description };
+    const upsertSql = db.isPostgres()
+      ? `INSERT INTO teacher_classes (teacher_id, class_id) VALUES ($1, $2) ON CONFLICT (teacher_id, class_id) DO NOTHING`
+      : `INSERT OR IGNORE INTO teacher_classes (teacher_id, class_id) VALUES ($1, $2)`;
+    await tx.run(upsertSql, [teacherId, classId]);
+
+    return { id: classId, name: className, description };
+  });
 }
 
 async function getOverallStats(teacherId) {
@@ -185,7 +192,7 @@ async function getOverallStats(teacherId) {
      JOIN class_members cm ON lr.user_id = cm.user_id
      JOIN classes c ON cm.class_id = c.id
      WHERE c.teacher_id = $1 AND cm.role = $2
-       AND lr.last_view_time >= CURRENT_DATE - INTERVAL '7 days'`,
+       AND lr.last_view_time >= ${db.dateDaysAgo(7)}`,
     [teacherId, 'student']
   );
 

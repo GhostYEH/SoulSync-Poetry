@@ -258,7 +258,7 @@ async function getTodayReview(userId) {
      JOIN knowledge_points kp ON s.knowledge_point_id = kp.id
      WHERE s.user_id = $1 AND s.mastery >= 0.4 AND s.mastery < 0.8
        AND s.last_practiced_at IS NOT NULL
-       AND s.last_practiced_at < CURRENT_DATE - INTERVAL '1 day'
+       AND s.last_practiced_at < ${db.dateDaysAgo(1)}
      ORDER BY s.mastery ASC LIMIT 5`,
     [userId]
   );

@@ -3,36 +3,13 @@
  * 对应后端 /api/teacher/knowledge/* 接口
  */
 
-const BASE = 'http://localhost:3000/api/teacher'
-
-function getToken() {
-  return localStorage.getItem('teacherToken')
-}
+import { request as apiRequest } from '../api'
 
 async function request(path, options = {}) {
-  const token = getToken()
-  if (!token) {
-    throw new Error('未找到教师认证令牌，请重新登录')
-  }
-  const resp = await fetch(`${BASE}${path}`, {
+  return apiRequest(`/teacher/knowledge${path}`, {
     ...options,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    isTeacher: true
   })
-  if (resp.status === 401) {
-    localStorage.removeItem('teacherToken')
-    localStorage.removeItem('teacher')
-    localStorage.removeItem('teacherInfo')
-    throw new Error('认证已过期，请重新登录')
-  }
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}))
-    throw new Error(err.error || `请求失败: ${resp.status}`)
-  }
-  return resp.json()
 }
 
 /** 知识维度定义 */

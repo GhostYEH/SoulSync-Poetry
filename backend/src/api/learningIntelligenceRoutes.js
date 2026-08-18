@@ -8,6 +8,7 @@ const authenticateToken = require('../middleware/auth');
 const knowledgeModel = require('../services/knowledgeModelService');
 const masteryEngine = require('../services/masteryUpdateEngine');
 const cognitiveDiagnosis = require('../services/cognitiveDiagnosisService');
+const { parsePagination } = require('../utils/validation');
 const learningEventService = require('../services/learningEventService');
 const learningPathService = require('../services/learningPathService');
 
@@ -54,7 +55,7 @@ router.get('/student/diagnosis', authenticateToken, async (req, res) => {
 router.get('/student/recommendation', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
-    const limit = req.query.limit ? parseInt(req.query.limit) : 5;
+    const { limit } = parsePagination(req, 5, 50);
     const data = await learningPathService.getAdaptiveRecommendation(userId, limit);
     res.json({ success: true, data });
   } catch (err) {
@@ -77,7 +78,7 @@ router.get('/student/today-review', authenticateToken, async (req, res) => {
 router.get('/student/events', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
-    const limit = req.query.limit ? parseInt(req.query.limit) : 50;
+    const { limit } = parsePagination(req, 50, 200);
     const eventType = req.query.eventType || null;
     const data = await learningEventService.getUserEvents(userId, { eventType, limit });
     res.json({ success: true, data });
@@ -86,14 +87,6 @@ router.get('/student/events', authenticateToken, async (req, res) => {
   }
 });
 
-// 初始化知识种子（幂等，开发/部署用）
-router.post('/seed', async (req, res) => {
-  try {
-    await knowledgeModel.seedKnowledgePoints();
-    res.json({ success: true, message: '知识模型种子化完成' });
-  } catch (err) {
-    res.status(500).json({ message: '种子化失败: ' + err.message });
-  }
-});
+
 
 module.exports = router;

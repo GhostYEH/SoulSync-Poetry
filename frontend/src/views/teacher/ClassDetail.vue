@@ -168,7 +168,8 @@ const loadClassData = async () => {
   loading.value = true
   try {
     // 加载班级详情
-    const classResponse = await fetch(`http://localhost:3000/api/teacher/classes/${classId.value}`, {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+    const classResponse = await fetch(`${baseUrl}/teacher/classes/${classId.value}`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -180,7 +181,7 @@ const loadClassData = async () => {
     }
 
     // 加载班级学生
-    const studentsResponse = await fetch(`http://localhost:3000/api/teacher/classes/${classId.value}/students`, {
+    const studentsResponse = await fetch(`${baseUrl}/teacher/classes/${classId.value}/students`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }

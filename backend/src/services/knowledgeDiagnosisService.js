@@ -115,7 +115,7 @@ async function computeStudentDimensionMastery(userId, dimension) {
     `SELECT question, answer, user_answer, level, wrong_count, correct_streak,
             mastered, last_wrong_time
      FROM wrong_questions
-     WHERE (user_id::text = $1 OR CAST(user_id AS TEXT) = $1)
+     WHERE (CAST(user_id AS TEXT) = $1 OR CAST(user_id AS TEXT) = $1)
      ORDER BY last_wrong_time ASC`,
     [String(userId)]
   );
@@ -211,7 +211,7 @@ async function getStudentKnowledgeProfile(userId) {
 
   const wrongCount = await db.get(
     `SELECT COUNT(*) as cnt FROM wrong_questions
-     WHERE user_id::text = $1 OR CAST(user_id AS TEXT) = $1`,
+     WHERE CAST(user_id AS TEXT) = $1 OR CAST(user_id AS TEXT) = $1`,
     [String(userId)]
   );
 

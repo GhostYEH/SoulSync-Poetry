@@ -41,9 +41,14 @@ function httpRequest(options, body) {
 }
 
 async function run() {
+  const isDbRequired = process.argv.includes('--require-db');
   // 检查数据库
   try { await db.query('SELECT 1'); }
   catch (e) {
+    if (isDbRequired) {
+       console.log(`  ❌ [ERROR] 严格模式: 未检测到 PostgreSQL，测试失败！(${e.message})`);
+       process.exit(1);
+    }
     console.log(`⚠ 数据库不可用，跳过 API 集成测试: ${e.message}`);
     process.exit(0);
   }

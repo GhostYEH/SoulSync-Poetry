@@ -500,7 +500,8 @@ const loadStudentRecords = async () => {
   }
 
   try {
-    const response = await fetch(`http://localhost:3000/api/teacher/student/${studentId.value}/detail`, {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+    const response = await fetch(`${baseUrl}/teacher/student/${studentId.value}/detail`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
@@ -533,7 +534,8 @@ const loadStudentRecords = async () => {
       studentName.value = data[0].student_name || `学生${studentId.value}`
     } else {
       try {
-        const userResponse = await fetch(`http://localhost:3000/api/teacher/rankings/overall`, {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+        const userResponse = await fetch(`${baseUrl}/teacher/rankings/overall`, {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
@@ -563,7 +565,8 @@ const loadStudentAnalysis = async () => {
 
   loading.value = true
   try {
-    const response = await fetch(`http://localhost:3000/api/teacher/student/${studentId.value}/analysis`, {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+    const response = await fetch(`${baseUrl}/teacher/student/${studentId.value}/analysis`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
@@ -637,7 +640,8 @@ const loadTeacherNotes = async () => {
   if (!token || !studentId.value) return
 
   try {
-    const response = await fetch(`http://localhost:3000/api/teacher/notes/${studentId.value}`, {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+    const response = await fetch(`${baseUrl}/teacher/notes/${studentId.value}`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -670,7 +674,8 @@ const addNote = async () => {
   if (!token || !studentId.value) return
 
   try {
-    const response = await fetch('http://localhost:3000/api/teacher/notes', {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+    const response = await fetch(`${baseUrl}/teacher/notes`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -707,7 +712,8 @@ const deleteNote = async (noteId) => {
   if (!token) return
 
   try {
-    const response = await fetch(`http://localhost:3000/api/teacher/notes/${noteId}`, {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+    const response = await fetch(`${baseUrl}/teacher/notes/${noteId}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${token}`

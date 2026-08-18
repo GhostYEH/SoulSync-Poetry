@@ -157,13 +157,15 @@ async function updateAbilityModel(userId) {
  * 能力历史（从 learning_events 按天聚合，不再依赖 ability_history 表）
  */
 async function getAbilityHistory(userId, days = 30) {
+  const dateCol = db.dateOnly('created_at');
+  const dateFilter = db.isPostgres() ? `CURRENT_DATE - $2::int` : `DATE('now', '-' || ? || ' days')`;
   return db.all(
-    `SELECT (created_at)::date as date,
+    `SELECT ${dateCol} as date,
        COUNT(*) as event_count,
-       COUNT(*) FILTER (WHERE correct = 1) as correct_count
+       SUM(CASE WHEN correct = 1 THEN 1 ELSE 0 END) as correct_count
      FROM learning_events
-     WHERE user_id = $1 AND created_at >= CURRENT_DATE - $2::int
-     GROUP BY (created_at)::date
+     WHERE user_id = $1 AND created_at >= ${dateFilter}
+     GROUP BY ${dateCol}
      ORDER BY date ASC`,
     [userId, days]
   ).catch(() => []);
@@ -180,13 +182,15 @@ async function recordAbilitySnapshot(userId) {
  * 能力趋势（从 activity_logs 按天聚合活动量）
  */
 async function getAbilityTrend(userId, days = 7) {
+  const dateCol = db.dateOnly('created_at');
+  const dateFilter = db.isPostgres() ? `CURRENT_DATE - $2::int` : `DATE('now', '-' || ? || ' days')`;
   const rows = await db.all(
     `SELECT
-      (created_at)::date as date,
+      ${dateCol} as date,
       COUNT(*) as activity_count
     FROM activity_logs
-    WHERE user_id = $1 AND created_at >= CURRENT_DATE - $2::int
-    GROUP BY (created_at)::date
+    WHERE user_id = $1 AND created_at >= ${dateFilter}
+    GROUP BY ${dateCol}
     ORDER BY date`,
     [userId, days]
   ).catch(() => []);

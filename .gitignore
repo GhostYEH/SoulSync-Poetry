@@ -106,3 +106,7 @@ backend/public/*.html
 
 # Test scripts
 test-*.js
+
+# Test temporary databases
+tmp-*-*.db
+tmp-test-*.db

@@ -203,7 +203,7 @@ router.get('/learning-stats', optionalAuthenticateToken, async (req, res) => {
         `, [userId]),
         db.get(`
           SELECT COUNT(*) AS checkins FROM daily_checkin
-          WHERE user_id = $1 AND date >= CURRENT_DATE - INTERVAL '7 days'
+           WHERE user_id = $1 AND date >= ${db.dateDaysAgo(7)}
         `, [userId])
       ]);
 

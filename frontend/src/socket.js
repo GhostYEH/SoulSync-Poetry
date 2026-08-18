@@ -1,18 +1,9 @@
 // Socket.io 客户端连接管理
 import { io } from 'socket.io-client';
 
-// 动态获取 Socket URL
-const getSocketUrl = async () => {
-  if (window.electronAPI) {
-    const port = await window.electronAPI.getBackendPort();
-    return `http://localhost:${port}`;
-  }
-  return 'http://localhost:3000';
-};
-
 // 确保 socket 实例只被创建一次
 let socket;
-let socketUrl = 'http://localhost:3000';
+let socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
 
 // 初始化 socket
 const initSocket = async () => {
@@ -22,8 +13,6 @@ const initSocket = async () => {
     return socket;
   }
 
-  // 获取动态 URL
-  socketUrl = await getSocketUrl();
   console.log('Socket URL:', socketUrl);
 
   // 创建 socket 实例
@@ -32,6 +21,8 @@ const initSocket = async () => {
     reconnection: true,
     reconnectionAttempts: 5,
     reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 20000,
     transports: ['websocket', 'polling']
   });
 
@@ -40,10 +31,8 @@ const initSocket = async () => {
   return socket;
 };
 
-// 立即初始化（用于非 Electron 环境）
-if (!window.electronAPI) {
-  initSocket();
-}
+// 立即初始化
+initSocket();
 
 // 存储 socket 事件监听器
 const eventListeners = new Map();
@@ -51,9 +40,17 @@ const eventListeners = new Map();
 // 连接状态
 let isConnected = false;
 
+import { getToken } from './services/api';
+
 // 连接并认证
 function connect() {
   console.log('开始建立 socket 连接...');
+  if (socket) {
+    const token = getToken();
+    if (token) {
+      socket.auth = { token };
+    }
+  }
   socket.connect();
   return true;
 }

@@ -1,6 +1,7 @@
 // 诗词相关的API路由
 const express = require('express');
 const router = express.Router();
+const { parsePagination } = require('../utils/validation');
 
 // 诗词数据（在主服务器文件中加载）
 let poems = [];
@@ -12,8 +13,7 @@ function setPoems(data) {
 
 // 获取诗词列表
 router.get('/poems', (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.pageSize) || 30;
+  const { page, pageSize } = parsePagination(req, 30);
   const isRandom = req.query.random === 'true';
   const dynasty = req.query.dynasty || '';
   const author = req.query.author || '';

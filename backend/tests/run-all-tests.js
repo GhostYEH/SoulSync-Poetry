@@ -19,6 +19,7 @@ const unitTests = [
 const integrationTests = [
   { name: 'integration.test.js', file: 'tests/integration.test.js', desc: 'PostgreSQL 集成测试' },
   { name: 'api.test.js', file: 'tests/api.test.js', desc: 'API 集成测试' },
+  { name: 'concurrency.test.js', file: 'tests/concurrency.test.js', desc: '并发控制与事务回滚' },
 ];
 
 let totalPassed = 0;
@@ -65,10 +66,10 @@ try {
 } catch {}
 
 if (!dbAvailable) {
-  console.log('  ⚠ PostgreSQL 不可用（本机未安装 psql 且未安装 Docker）');
-  console.log('  ⚠ 集成测试和 API 测试: NOT RUN');
+  console.log('  ⚠ PostgreSQL 不可用');
+  console.log('  ⚠ 集成测试和 API 测试: SKIPPED');
   for (const t of integrationTests) {
-    results.push({ ...t, passed: 0, failed: 0, status: 'NOT RUN' });
+    results.push({ ...t, passed: 0, failed: 0, status: 'SKIPPED' });
   }
 } else {
   for (const t of integrationTests) {

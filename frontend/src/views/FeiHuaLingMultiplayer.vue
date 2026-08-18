@@ -432,7 +432,8 @@ export default {
         return;
       }
 
-      socket.value = io('http://localhost:3000', {
+      const socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+      socket.value = io(socketUrl, {
         transports: ['websocket', 'polling']
       });
 
@@ -699,7 +700,8 @@ export default {
       historyLoading.value = true;
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch('http://localhost:3000/api/feihua/fight-history', {
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+        const response = await fetch(`${baseUrl}/feihua/fight-history`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }

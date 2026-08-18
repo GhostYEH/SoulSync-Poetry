@@ -643,9 +643,7 @@ export const getKeywordCount = (keyword) => {
 export const validatePoemByAI = async (input, keyword) => {
   try {
     const token = localStorage.getItem('token');
-    const baseUrl = window.electronAPI 
-      ? `http://localhost:${await window.electronAPI.getBackendPort()}/api`
-      : 'http://localhost:3000/api';
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
     
     const response = await fetch(`${baseUrl}/ai/feihua-validate`, {
       method: 'POST',

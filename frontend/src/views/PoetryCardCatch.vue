@@ -481,6 +481,7 @@ import { ref, onMounted, onUnmounted, onActivated, computed, nextTick } from 'vu
 import { useRouter } from 'vue-router';
 import questionsData from '@/data/poetryQuestions.json';
 import { API_BASE_URL } from '../services/api';
+import { generateAttemptId } from '../utils/attemptId';
 
 const API_BASE = `${API_BASE_URL}/card-game`;
 
@@ -539,6 +540,7 @@ export default {
 
     // ==================== 游戏状态 ====================
     const phase = ref('MENU');
+    const gameSessionId = ref(null);
     const diff = ref('medium');
     const score = ref(0);
     const wrongCount = ref(0);
@@ -1326,6 +1328,7 @@ export default {
     // ==================== 游戏控制 ====================
     const startGame = async () => {
       phase.value = 'PLAYING';
+      gameSessionId.value = generateAttemptId();
       score.value = 0;
       wrongCount.value = 0;
       correctCount.value = 0;
@@ -1580,7 +1583,8 @@ export default {
             missedCount: missedCount.value,
             duration: elapsed.value,
             difficultyLevel: gameLevel.value,
-            errors: errorsPayload
+            errors: errorsPayload,
+            gameSessionId: gameSessionId.value
           })
         });
       } catch (e) {

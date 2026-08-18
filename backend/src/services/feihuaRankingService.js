@@ -84,30 +84,32 @@ async function updateRankingAfterBattle(winnerId, loserId, isDraw = false) {
   const newWinnerStreak = winnerInfo.current_streak + 1;
   const newBestStreak = Math.max(winnerInfo.best_streak, newWinnerStreak);
 
-  await db.run(
-    `UPDATE feihua_rankings
-     SET rating = $1,
-         rank_level = $2,
-         wins = wins + 1,
-         total_battles = total_battles + 1,
-         current_streak = $3,
-         best_streak = $4,
-         last_battle_at = CURRENT_TIMESTAMP
-     WHERE user_id = $5`,
-    [newWinnerRating, newWinnerLevel.name, newWinnerStreak, newBestStreak, winnerId]
-  );
+  await db.transaction(async (tx) => {
+    await tx.run(
+      `UPDATE feihua_rankings
+       SET rating = $1,
+           rank_level = $2,
+           wins = wins + 1,
+           total_battles = total_battles + 1,
+           current_streak = $3,
+           best_streak = $4,
+           last_battle_at = CURRENT_TIMESTAMP
+       WHERE user_id = $5`,
+      [newWinnerRating, newWinnerLevel.name, newWinnerStreak, newBestStreak, winnerId]
+    );
 
-  await db.run(
-    `UPDATE feihua_rankings
-     SET rating = $1,
-         rank_level = $2,
-         losses = losses + 1,
-         total_battles = total_battles + 1,
-         current_streak = 0,
-         last_battle_at = CURRENT_TIMESTAMP
-     WHERE user_id = $3`,
-    [newLoserRating, newLoserLevel.name, loserId]
-  );
+    await tx.run(
+      `UPDATE feihua_rankings
+       SET rating = $1,
+           rank_level = $2,
+           losses = losses + 1,
+           total_battles = total_battles + 1,
+           current_streak = 0,
+           last_battle_at = CURRENT_TIMESTAMP
+       WHERE user_id = $3`,
+      [newLoserRating, newLoserLevel.name, loserId]
+    );
+  });
 
   return {
     winner: {

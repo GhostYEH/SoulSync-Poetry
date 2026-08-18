@@ -99,63 +99,68 @@ async function getReviewStats(userId) {
 }
 
 async function createReviewSession(userId, poemIds) {
-  const result = await db.run(
-    `INSERT INTO review_sessions (user_id, started_at, total_poems)
-     VALUES ($1, CURRENT_TIMESTAMP, $2)
-     RETURNING id`,
-    [userId, poemIds.length]
-  );
-
-  const sessionId = result.rows[0].id;
-
-  for (const poemId of poemIds) {
-    await db.run(
-      `INSERT INTO review_session_items (session_id, poem_id)
-       VALUES ($1, $2)`,
-      [sessionId, poemId]
+  return db.transaction(async (tx) => {
+    const result = await tx.run(
+      `INSERT INTO review_sessions (user_id, started_at, total_poems)
+       VALUES ($1, CURRENT_TIMESTAMP, $2)
+       RETURNING id`,
+      [userId, poemIds.length]
     );
-  }
 
-  return { sessionId, totalPoems: poemIds.length };
+    const sessionId = result.rows[0].id;
+
+    for (const poemId of poemIds) {
+      await tx.run(
+        `INSERT INTO review_session_items (session_id, poem_id)
+         VALUES ($1, $2)`,
+        [sessionId, poemId]
+      );
+    }
+
+    return { sessionId, totalPoems: poemIds.length };
+  });
 }
 
 async function updateReviewSession(sessionId, poemId, score) {
-  await db.run(
-    `UPDATE review_session_items
-     SET score = $1, reviewed_at = CURRENT_TIMESTAMP
-     WHERE session_id = $2 AND poem_id = $3`,
-    [score, sessionId, poemId]
-  );
+  return db.transaction(async (tx) => {
+    await tx.run(
+      `UPDATE review_session_items
+       SET score = $1, reviewed_at = CURRENT_TIMESTAMP
+       WHERE session_id = $2 AND poem_id = $3`,
+      [score, sessionId, poemId]
+    );
 
-  const row = await db.get(
-    `SELECT
-       COUNT(*) as total,
-       SUM(CASE WHEN reviewed_at IS NOT NULL THEN 1 ELSE 0 END) as reviewed
-     FROM review_session_items
-     WHERE session_id = $1`,
-    [sessionId]
-  );
-
-  if (row.reviewed >= row.total) {
-    await db.run(
-      `UPDATE review_sessions
-       SET completed_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
+    const row = await tx.get(
+      `SELECT
+         COUNT(*) as total,
+         SUM(CASE WHEN reviewed_at IS NOT NULL THEN 1 ELSE 0 END) as reviewed
+       FROM review_session_items
+       WHERE session_id = $1`,
       [sessionId]
     );
-  }
 
-  return { reviewed: row.reviewed, total: row.total, completed: row.reviewed >= row.total };
+    if (row.reviewed >= row.total) {
+      await tx.run(
+        `UPDATE review_sessions
+         SET completed_at = CURRENT_TIMESTAMP
+         WHERE id = $1`,
+        [sessionId]
+      );
+    }
+
+    return { reviewed: row.reviewed, total: row.total, completed: row.reviewed >= row.total };
+  });
 }
 
 async function getReviewHistory(userId, days = 30) {
+  const dateFilter = db.isPostgres() ? `CURRENT_DATE - $2::int` : `DATE('now', '-' || ? || ' days')`;
   return db.all(
     `SELECT rs.*,
        (SELECT COUNT(*) FROM review_session_items WHERE session_id = rs.id) as total_poems,
        (SELECT SUM(CASE WHEN reviewed_at IS NOT NULL THEN 1 ELSE 0 END) FROM review_session_items WHERE session_id = rs.id) as reviewed_poems,
        (SELECT AVG(score) FROM review_session_items WHERE session_id = rs.id AND score IS NOT NULL) as avg_score
      FROM review_sessions rs
-     WHERE rs.user_id = $1 AND rs.started_at >= CURRENT_DATE - $2::int
+     WHERE rs.user_id = $1 AND rs.started_at >= ${dateFilter}
      ORDER BY rs.started_at DESC`,
     [userId, days]
   );

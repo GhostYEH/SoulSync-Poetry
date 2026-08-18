@@ -309,36 +309,7 @@
 </template>
 
 <script>
-/**
- * 诗词搜索 API 根路径：浏览器同域用相对路径（走 Vite 代理或后端静态站）；
- * Electron file:// 打开时需指向本机后端。
- */
-function getApiOrigin() {
-  if (typeof window === 'undefined') return '';
-  if (window.location?.protocol === 'file:') return 'http://localhost:3000';
-  return '';
-}
-
-/** 带超时的 fetch 封装，超时则抛 AbortError，快速降级 */
-function fetchWithTimeout(url, options, timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    fetch(url, { signal: controller.signal, ...options })
-      .then((res) => {
-        clearTimeout(timer);
-        resolve(res);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        if (err.name === 'AbortError') {
-          reject(new Error(`请求超时 ${timeoutMs}ms`));
-        } else {
-          reject(err);
-        }
-      });
-  });
-}
+import { request, TIMEOUTS } from '@/services/api.js';
 
 export default {
   name: 'Search',
@@ -556,21 +527,11 @@ export default {
       }
 
       try {
-        const token = localStorage.getItem('token');
-        const res = await fetchWithTimeout(
-          `${getApiOrigin()}/api/ai/search`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({ query, limit: 50 }),
-          },
-          12000,
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const data = await request(`/ai/search`, {
+          method: 'POST',
+          body: JSON.stringify({ query, limit: 50 }),
+          timeout: TIMEOUTS.SHORT,
+        });
 
         // 竞态检查：搜索词已变化则丢弃结果
         if (searchId !== this._searchId) return;
@@ -621,12 +582,10 @@ export default {
         return;
       }
       try {
-        const res = await fetchWithTimeout(
-          `${getApiOrigin()}/api/poems?page=1&pageSize=2000`,
-          {},
-          15000,
-        );
-        const data = await res.json();
+        const data = await request(`/poems?page=1&pageSize=2000`, {
+          includeAuth: false,
+          timeout: TIMEOUTS.SHORT,
+        });
         const list = Array.isArray(data) ? data : [];
         this._poemCache = list;
         this.searchCache.set(cacheKey, list);
@@ -889,12 +848,10 @@ export default {
       this.searchLoading = true;
       this.hasSearched = true;
       try {
-        const res = await fetchWithTimeout(
-          `${getApiOrigin()}/api/poems?random=true&pageSize=12`,
-          {},
-          8000,
-        );
-        const data = await res.json();
+        const data = await request(`/poems?random=true&pageSize=12`, {
+          includeAuth: false,
+          timeout: TIMEOUTS.SHORT,
+        });
         this.results = Array.isArray(data) ? data : [];
         this.aiAnalysis = {
           summary: `随机为你挑选了 ${this.results.length} 首诗词，开启一场未知的诗意之旅吧！`,

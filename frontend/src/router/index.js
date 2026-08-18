@@ -425,6 +425,8 @@ function isTokenExpired(token) {
   }
 }
 
+import { API_BASE_URL } from '../services/api'
+
 async function verifyToken(token, type) {
   if (!token || isTokenExpired(token)) {
     return false
@@ -432,8 +434,8 @@ async function verifyToken(token, type) {
   
   try {
     const endpoint = type === 'teacher' 
-      ? 'http://localhost:3000/api/teacher/dashboard'
-      : 'http://localhost:3000/api/auth/verify'
+      ? `${API_BASE_URL}/teacher/dashboard`
+      : `${API_BASE_URL}/auth/verify`
     
     const response = await fetch(endpoint, {
       headers: {

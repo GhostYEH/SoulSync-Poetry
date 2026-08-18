@@ -54,19 +54,29 @@ class FeihualingService {
       return { valid: false, reason: `诗句中未包含令字「${keyword}」` };
     }
 
+    if (normalizedPoem.length < 4) {
+      return { valid: false, reason: '输入的诗句太短，请至少输入一句完整的诗词' };
+    }
+
     for (const p of poems) {
-      const content = (p.content || '').replace(/[，。！？、；：""''（）【】《》\s]/g, '');
-      if (content.includes(normalizedPoem) || normalizedPoem === content) {
-        return { 
-          valid: true, 
-          source: 'database',
-          title: p.title,
-          author: p.author
-        };
+      // 按常见标点分割为单句
+      const sentences = (p.content || '').split(/[，。！？、；：\s]/).filter(s => s.length > 0);
+      for (const sentence of sentences) {
+        const normalizedSentence = sentence.replace(/[""''（）【】《》]/g, '');
+        // 要求用户输入的诗句包含于原句中且长度相差不大，或者原句包含用户输入
+        // 为了严格起见，我们要求用户输入的诗句要么和某一句完全一致，要么是该句的绝对主体（长度差<=2）
+        if (normalizedSentence.includes(normalizedPoem) && (normalizedSentence.length - normalizedPoem.length <= 2)) {
+          return { 
+            valid: true, 
+            source: 'database',
+            title: p.title,
+            author: p.author
+          };
+        }
       }
     }
 
-    return { valid: null, reason: '数据库中未找到，需要AI验证' };
+    return { valid: null, reason: '数据库中未找到或匹配不完整，需要AI验证' };
   }
 
   addUser(userId, username, socketId) {

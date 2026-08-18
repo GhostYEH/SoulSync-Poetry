@@ -133,7 +133,7 @@ test('降级返回包含诗词事实', () => {
   );
   assert.ok(resp.explanation.includes('春晓'));
   assert.ok(resp.explanation.includes('孟浩然'));
-  assert.ok(resp._degraded === true);
+  assert.ok(resp.degraded === true);
 });
 test('降级返回包含薄弱知识点', () => {
   const resp = buildDegradedResponse(

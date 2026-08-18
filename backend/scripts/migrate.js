@@ -515,6 +515,7 @@ const tables = [
       attempt_count INTEGER DEFAULT 1,
       hint_count INTEGER DEFAULT 0,
       metadata JSONB DEFAULT '{}',
+      event_key TEXT UNIQUE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`
@@ -535,9 +536,73 @@ const tables = [
       recent_error_types JSONB DEFAULT '[]',
       last_practiced_at TIMESTAMP,
       last_mastery_update_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      algorithm_version TEXT DEFAULT 'v2',
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points(id) ON DELETE CASCADE,
       UNIQUE(user_id, knowledge_point_id)
+    )`
+  },
+  {
+    name: 'teacher_classes',
+    sql: `CREATE TABLE IF NOT EXISTS teacher_classes (
+      id SERIAL PRIMARY KEY,
+      teacher_id INTEGER NOT NULL,
+      class_id INTEGER NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(teacher_id, class_id)
+    )`
+  },
+  {
+    name: 'teacher_notes',
+    sql: `CREATE TABLE IF NOT EXISTS teacher_notes (
+      id SERIAL PRIMARY KEY,
+      teacher_id INTEGER,
+      student_id INTEGER,
+      content TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`
+  },
+  {
+    name: 'student_tags',
+    sql: `CREATE TABLE IF NOT EXISTS student_tags (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER NOT NULL,
+      tag_name TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`
+  },
+  {
+    name: 'review_sessions',
+    sql: `CREATE TABLE IF NOT EXISTS review_sessions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP,
+      total_poems INTEGER DEFAULT 0
+    )`
+  },
+  {
+    name: 'review_session_items',
+    sql: `CREATE TABLE IF NOT EXISTS review_session_items (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL,
+      poem_id INTEGER NOT NULL,
+      score INTEGER,
+      reviewed_at TIMESTAMP
+    )`
+  },
+  {
+    name: 'challenge_questions',
+    sql: `CREATE TABLE IF NOT EXISTS challenge_questions (
+      id SERIAL PRIMARY KEY,
+      challenge_id INTEGER NOT NULL,
+      question_index INTEGER NOT NULL,
+      poem_id INTEGER,
+      question_type TEXT,
+      question_text TEXT,
+      correct_answer TEXT,
+      options TEXT
     )`
   }
 ];
@@ -584,16 +649,41 @@ const indexes = [
   { name: 'idx_le_question', sql: 'CREATE INDEX IF NOT EXISTS idx_le_question ON learning_events(question_id)' },
   { name: 'idx_sks_user', sql: 'CREATE INDEX IF NOT EXISTS idx_sks_user ON student_knowledge_states(user_id)' },
   { name: 'idx_sks_kp', sql: 'CREATE INDEX IF NOT EXISTS idx_sks_kp ON student_knowledge_states(knowledge_point_id)' },
-  { name: 'idx_sks_user_kp', sql: 'CREATE INDEX IF NOT EXISTS idx_sks_user_kp ON student_knowledge_states(user_id, knowledge_point_id)' }
+  { name: 'idx_sks_user_kp', sql: 'CREATE INDEX IF NOT EXISTS idx_sks_user_kp ON student_knowledge_states(user_id, knowledge_point_id)' },
+  { name: 'idx_wrong_questions_user_question', sql: 'CREATE INDEX IF NOT EXISTS idx_wrong_questions_user_question ON wrong_questions(user_id, question)' },
+  { name: 'idx_card_game_records_user', sql: 'CREATE INDEX IF NOT EXISTS idx_card_game_records_user ON card_game_records(user_id)' },
+  { name: 'idx_card_game_records_created', sql: 'CREATE INDEX IF NOT EXISTS idx_card_game_records_created ON card_game_records(created_at)' },
+  { name: 'idx_learning_records_user', sql: 'CREATE INDEX IF NOT EXISTS idx_learning_records_user ON learning_records(user_id)' },
+  { name: 'idx_learning_records_user_poem', sql: 'CREATE INDEX IF NOT EXISTS idx_learning_records_user_poem ON learning_records(user_id, poem_id)' },
+  { name: 'idx_user_challenge_records_user', sql: 'CREATE INDEX IF NOT EXISTS idx_user_challenge_records_user ON user_challenge_records(user_id)' },
+  { name: 'idx_users_class', sql: 'CREATE INDEX IF NOT EXISTS idx_users_class ON users(class_id)' },
+  { name: 'idx_learning_events_user_created', sql: 'CREATE INDEX IF NOT EXISTS idx_learning_events_user_created ON learning_events(user_id, created_at)' },
+  { name: 'idx_teacher_classes_teacher', sql: 'CREATE INDEX IF NOT EXISTS idx_teacher_classes_teacher ON teacher_classes(teacher_id)' },
+  { name: 'idx_teacher_classes_class', sql: 'CREATE INDEX IF NOT EXISTS idx_teacher_classes_class ON teacher_classes(class_id)' }
 ];
 
 // 已有表新增字段（幂等）
 const alterColumns = [
   { name: 'sks_algorithm_version', sql: `ALTER TABLE student_knowledge_states ADD COLUMN IF NOT EXISTS algorithm_version TEXT DEFAULT 'v1'` },
   { name: 'le_event_key', sql: `ALTER TABLE learning_events ADD COLUMN IF NOT EXISTS event_key TEXT` },
-  { name: 'le_event_key_unique', sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_le_event_key_unique ON learning_events(event_key) WHERE event_key IS NOT NULL` },
+  { name: 'le_event_key_unique', sql: `
+    DO $$ 
+    BEGIN 
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'le_event_key_unique') THEN
+        ALTER TABLE learning_events ADD CONSTRAINT le_event_key_unique UNIQUE (event_key);
+      END IF; 
+    END $$;
+  ` },
   { name: 'qkm_confidence', sql: `ALTER TABLE question_knowledge_mappings ADD COLUMN IF NOT EXISTS confidence FLOAT DEFAULT 0.8` },
   { name: 'qkm_source_default', sql: `ALTER TABLE question_knowledge_mappings ALTER COLUMN source SET DEFAULT 'rule'` },
+  { name: 'sks_user_kp_unique', sql: `
+    DO $$ 
+    BEGIN 
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sks_user_kp_unique' OR conname = 'student_knowledge_states_user_id_knowledge_point_id_key') THEN
+        ALTER TABLE student_knowledge_states ADD CONSTRAINT sks_user_kp_unique UNIQUE (user_id, knowledge_point_id);
+      END IF; 
+    END $$;
+  ` },
   { name: 'wq_added_at', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
   { name: 'wq_last_reviewed_at', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS last_reviewed_at TIMESTAMP` },
 ];
@@ -627,6 +717,15 @@ async function migrate() {
       await db.run(idx.sql);
       console.log('✅');
     }
+
+    // 回填 teacher_classes 从 classes.teacher_id
+    process.stdout.write('  回填 teacher_classes ... ');
+    const backfillResult = await db.run(
+      `INSERT INTO teacher_classes (teacher_id, class_id)
+       SELECT teacher_id, id FROM classes WHERE teacher_id IS NOT NULL
+       ON CONFLICT (teacher_id, class_id) DO NOTHING`
+    );
+    console.log(`✅ (${backfillResult.rowCount} 条)`);
 
     console.log(`\n🎉 迁移完成！共创建 ${tables.length} 张表、1 个视图、${indexes.length} 个索引。`);
     await db.close();

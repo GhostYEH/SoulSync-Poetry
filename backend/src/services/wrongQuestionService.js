@@ -139,9 +139,9 @@ async function submitReviewAnswer(userId, questionId, userAnswer) {
 
     await db.run(
       `UPDATE wrong_questions
-       SET correct_streak = $1, mastered = $2, last_reviewed_at = CURRENT_TIMESTAMP
-       WHERE id = $3`,
-      [newStreak, mastered, questionId]
+       SET correct_streak = correct_streak + 1, mastered = CASE WHEN correct_streak + 1 >= 2 THEN 1 ELSE 0 END, last_reviewed_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [questionId]
     );
 
     return {
@@ -175,10 +175,10 @@ async function submitReviewAnswer(userId, questionId, userAnswer) {
  */
 async function markAsMastered(userId, questionId) {
   const result = await db.run(
-    `UPDATE wrong_questions
-     SET mastered = 1, correct_streak = GREATEST(correct_streak, 2),
-         last_reviewed_at = CURRENT_TIMESTAMP
-     WHERE id = $1 AND user_id = $2`,
+     `UPDATE wrong_questions
+      SET mastered = 1, correct_streak = ${db.greatest('correct_streak', '2')},
+          last_reviewed_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND user_id = $2`,
     [questionId, String(userId)]
   );
   return result.rowCount > 0;

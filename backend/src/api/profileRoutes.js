@@ -1,32 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const config = require('../config/config');
 const db = require('../utils/db');
 const abilityModelService = require('../services/abilityModelService');
-
-function authenticateToken(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (!token) {
-      return res.status(401).json({ success: false, message: '未登录' });
-    }
-
-    const jwt = require('jsonwebtoken');
-    const JWT_SECRET = config.jwt.secret || 'your-secret-key';
-
-    jwt.verify(token, JWT_SECRET, (err, decoded) => {
-      if (err) {
-        return res.status(401).json({ success: false, message: '令牌无效' });
-      }
-      req.user = { userId: decoded.userId, username: decoded.username };
-      next();
-    });
-  } catch (error) {
-    return res.status(401).json({ success: false, message: '认证失败' });
-  }
-}
+const authenticateToken = require('../middleware/auth');
 
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
@@ -70,10 +46,10 @@ router.get('/stats', authenticateToken, async (req, res) => {
 
     const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const activityData = await db.all(`
-      SELECT (last_view_time)::date as date, COUNT(*) as count
+      SELECT ${db.dateOnly('last_view_time')} as date, COUNT(*) as count
       FROM learning_records
       WHERE user_id = $1 AND last_view_time >= $2
-      GROUP BY (last_view_time)::date
+      GROUP BY ${db.dateOnly('last_view_time')}
       ORDER BY date ASC
     `, [userId, monthAgo]).catch(() => []);
 
@@ -122,7 +98,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
       abilityModel
     };
 
-    console.log('[profileRoutes] 获取个人中心统计 成功:', { userId });
+
     return res.json({ success: true, data: payload, message: '查询成功' });
   } catch (error) {
     console.error('[profileRoutes] 获取个人中心统计异常:', error);
@@ -136,18 +112,18 @@ router.get('/activity', authenticateToken, async (req, res) => {
     const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const learningActivity = await db.all(`
-      SELECT (last_view_time)::date as date, COUNT(*) as count
+      SELECT ${db.dateOnly('last_view_time')} as date, COUNT(*) as count
       FROM learning_records
       WHERE user_id = $1 AND last_view_time >= $2
-      GROUP BY (last_view_time)::date
+      GROUP BY ${db.dateOnly('last_view_time')}
       ORDER BY date ASC
     `, [userId, monthAgo]).catch(() => []);
 
     const challengeActivity = await db.all(`
-      SELECT (answered_at)::date as date, COUNT(*) as count, AVG(CAST(is_correct AS REAL)) as accuracy
+      SELECT ${db.dateOnly('answered_at')} as date, COUNT(*) as count, AVG(CAST(is_correct AS REAL)) as accuracy
       FROM user_challenge_records
       WHERE user_id = $1 AND answered_at >= $2
-      GROUP BY (answered_at)::date
+      GROUP BY ${db.dateOnly('answered_at')}
       ORDER BY date ASC
     `, [userId, monthAgo]).catch(() => []);
 
@@ -160,10 +136,10 @@ router.get('/activity', authenticateToken, async (req, res) => {
     `, [userId, monthAgo]).catch(() => []);
 
     const creationActivity = await db.all(`
-      SELECT (created_at)::date as date, COUNT(*) as count
+      SELECT ${db.dateOnly('created_at')} as date, COUNT(*) as count
       FROM user_creations
       WHERE user_id = $1 AND created_at >= $2
-      GROUP BY (created_at)::date
+      GROUP BY ${db.dateOnly('created_at')}
       ORDER BY date ASC
     `, [userId, monthAgo]).catch(() => []);
 
@@ -195,7 +171,7 @@ router.get('/activity', authenticateToken, async (req, res) => {
       authorDistribution
     };
 
-    console.log('[profileRoutes] 获取活动数据 成功:', { userId });
+
     return res.json({ success: true, data: payload, message: '查询成功' });
   } catch (error) {
     console.error('[profileRoutes] 获取活动数据异常:', error);
@@ -311,7 +287,7 @@ router.get('/achievements', authenticateToken, async (req, res) => {
       }
     };
 
-    console.log('[profileRoutes] 获取成就 成功:', { userId, unlockedCount });
+
     return res.json({ success: true, data: payload, message: '查询成功' });
   } catch (error) {
     console.error('[profileRoutes] 获取成就异常:', error);

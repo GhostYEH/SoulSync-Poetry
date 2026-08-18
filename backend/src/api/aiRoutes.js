@@ -4,8 +4,14 @@ const aiService = require('../services/aiService');
 const { getIO } = require('../utils/socket');
 const crypto = require('crypto');
 const axios = require('axios');
+const { aiRateLimiter } = require('../middleware/rateLimiter');
+const authenticateToken = require('../middleware/auth');
+const optionalAuthenticateToken = authenticateToken.optionalAuthenticateToken;
 
 require('dotenv').config();
+
+// 在所有的 AI 路由之前，统一尝试解析 token，以便后续限流器能获取到 req.user
+router.use(optionalAuthenticateToken);
 
 const imageCache = new Map();
 const generationTasks = new Map();
@@ -31,32 +37,52 @@ function setCache(key, value) {
 }
 
 // AI 诗词讲解接口 - 生活化诗意解释
-router.post('/explainPoem/daily_life_explanation', async function(req, res) {
-  await aiService.handleAIExplanation(req, res, 'daily_life_explanation');
+router.post('/explainPoem/daily_life_explanation', aiRateLimiter, async function(req, res, next) {
+  try {
+    await aiService.handleAIExplanation(req, res, 'daily_life_explanation');
+  } catch(e) {
+    next(e);
+  }
 });
 
 // AI 诗词讲解接口 - 关键词深度解析
-router.post('/explainPoem/keyword_analysis', async function(req, res) {
-  await aiService.handleAIExplanation(req, res, 'keyword_analysis');
+router.post('/explainPoem/keyword_analysis', aiRateLimiter, async function(req, res, next) {
+  try {
+    await aiService.handleAIExplanation(req, res, 'keyword_analysis');
+  } catch(e) {
+    next(e);
+  }
 });
 
 // AI 诗词讲解接口 - 意境赏析
-router.post('/explainPoem/artistic_conception', async function(req, res) {
-  await aiService.handleAIExplanation(req, res, 'artistic_conception');
+router.post('/explainPoem/artistic_conception', aiRateLimiter, async function(req, res, next) {
+  try {
+    await aiService.handleAIExplanation(req, res, 'artistic_conception');
+  } catch(e) {
+    next(e);
+  }
 });
 
 // AI 诗词讲解接口 - 引导性思考题
-router.post('/explainPoem/thinking_questions', async function(req, res) {
-  await aiService.handleAIExplanation(req, res, 'thinking_questions');
+router.post('/explainPoem/thinking_questions', aiRateLimiter, async function(req, res, next) {
+  try {
+    await aiService.handleAIExplanation(req, res, 'thinking_questions');
+  } catch(e) {
+    next(e);
+  }
 });
 
 // AI 诗词讲解接口 - 完整讲解
-router.post('/explainPoem', async function(req, res) {
-  await aiService.handleAIExplanation(req, res, '');
+router.post('/explainPoem', aiRateLimiter, async function(req, res, next) {
+  try {
+    await aiService.handleAIExplanation(req, res, '');
+  } catch(e) {
+    next(e);
+  }
 });
 
 // AI 诗词讲解接口 - 批量获取所有讲解类型
-router.post('/explainPoem/batch', async function(req, res) {
+router.post('/explainPoem/batch', aiRateLimiter, async function(req, res, next) {
   try {
     const poem = req.body.poem;
     const title = req.body.title;
@@ -73,26 +99,27 @@ router.post('/explainPoem/batch', async function(req, res) {
       poemLength: poem.length
     });
 
-    const dailyLifeResult = await aiService.getAIExplanation(poem, title, author, 'daily_life_explanation');
-    const keywordResult = await aiService.getAIExplanation(poem, title, author, 'keyword_analysis');
-    const artisticResult = await aiService.getAIExplanation(poem, title, author, 'artistic_conception');
-    const questionsResult = await aiService.getAIExplanation(poem, title, author, 'thinking_questions');
-
-    const batchResult = {};
-    batchResult.daily_life_explanation = dailyLifeResult.daily_life_explanation;
-    batchResult.keyword_analysis = keywordResult.keyword_analysis;
-    batchResult.artistic_conception = artisticResult.artistic_conception;
-    batchResult.thinking_questions = questionsResult.thinking_questions;
+    // 优先考虑一次 AI 请求返回结构化 4 字段 (传入 falsy 的 explanationType 会触发 full 生成)
+    const result = await aiService.getAIExplanation(poem, title, author, '');
+    
+    // 或者，如果是需要并发，可以使用 Promise.allSettled
+    // 这里使用了一次请求获取全部字段的实现，降低 AI 成本和延迟
+    
+    const batchResult = {
+      daily_life_explanation: result.daily_life_explanation || '暂无数据',
+      keyword_analysis: result.keyword_analysis || '暂无数据',
+      artistic_conception: result.artistic_conception || '暂无数据',
+      thinking_questions: result.thinking_questions || []
+    };
 
     res.json(batchResult);
   } catch (error) {
-    console.error('批量获取AI讲解失败:', error);
-    res.status(500).json({ message: '获取AI讲解失败' });
+    next(error);
   }
 });
 
 // AI 诗词创作背景
-router.post('/poem/background', async function(req, res) {
+router.post('/poem/background', aiRateLimiter, async function(req, res, next) {
   try {
     const title = req.body.title;
     const author = req.body.author;
@@ -107,13 +134,12 @@ router.post('/poem/background', async function(req, res) {
     const result = await aiService.getPoemBackground(title, author, dynasty, content);
     res.json(result);
   } catch (error) {
-    console.error('获取诗词创作背景失败:', error);
-    res.status(500).json({ message: '获取诗词创作背景失败' });
+    next(error);
   }
 });
 
 // AI 诗词趣味故事
-router.post('/poem/story', async function(req, res) {
+router.post('/poem/story', aiRateLimiter, async function(req, res, next) {
   try {
     const title = req.body.title;
     const author = req.body.author;
@@ -127,13 +153,12 @@ router.post('/poem/story', async function(req, res) {
     const result = await aiService.getPoemStory(title, author, content);
     res.json({ story: result });
   } catch (error) {
-    console.error('获取诗词趣味故事失败:', error);
-    res.status(500).json({ message: '获取诗词趣味故事失败' });
+    next(error);
   }
 });
 
 // AI 诵读技巧指南
-router.post('/poem/recitation-guide', async function(req, res) {
+router.post('/poem/recitation-guide', aiRateLimiter, async function(req, res, next) {
   try {
     const title = req.body.title;
     const author = req.body.author;
@@ -148,13 +173,12 @@ router.post('/poem/recitation-guide', async function(req, res) {
     const result = await aiService.getRecitationGuide(title, author, content, dynasty);
     res.json(result);
   } catch (error) {
-    console.error('获取诵读技巧失败:', error);
-    res.status(500).json({ message: '获取诵读技巧失败' });
+    next(error);
   }
 });
 
 // AI 智能语义搜索
-router.post('/search', async function(req, res) {
+router.post('/search', aiRateLimiter, async function(req, res, next) {
   try {
     const query = req.body.query;
     let limit = req.body.limit;
@@ -204,13 +228,12 @@ router.post('/search', async function(req, res) {
 
     res.json(response);
   } catch (error) {
-    console.error('AI搜索失败:', error);
-    res.status(500).json({ message: '搜索失败' });
+    next(error);
   }
 });
 
 // AI 搜索结果分析
-router.post('/search-analysis', async function(req, res) {
+router.post('/search-analysis', aiRateLimiter, async function(req, res, next) {
   try {
     const query = req.body.query;
     const poems = req.body.poems;
@@ -239,30 +262,33 @@ router.post('/search-analysis', async function(req, res) {
     const result = await aiService.analyzeSearchResults(query, poems, emotionResult);
     res.json(result);
   } catch (error) {
-    console.error('AI搜索分析失败:', error);
-    res.json({ summary: '', tags: [], suggestions: [] });
+    next(error);
   }
 });
 
 // AI 背诵检测接口
-const authenticateToken = require('../middleware/auth');
-const optionalAuthenticateToken = authenticateToken.optionalAuthenticateToken;
-
-router.post('/recite-check', optionalAuthenticateToken, async function(req, res) {
+router.post('/recite-check', aiRateLimiter, async function(req, res, next) {
   try {
     const original = req.body.original;
     const input = req.body.input;
     const poem_id = req.body.poem_id;
     const poem_title = req.body.poem_title;
     const poem_author = req.body.poem_author;
+    const attemptId = req.body.attemptId;
 
     console.log('接收到背诵检测请求:', {
       poem_id: poem_id,
-      poem_title: poem_title
+      poem_title: poem_title,
+      attemptId: attemptId
     });
 
     if (!original || !input) {
       res.status(400).json({ message: '缺少必要参数' });
+      return;
+    }
+
+    if (poem_id && req.user && !attemptId) {
+      res.status(400).json({ message: '缺少幂等标识 attemptId，无法保证数据一致性' });
       return;
     }
 
@@ -300,12 +326,9 @@ router.post('/recite-check', optionalAuthenticateToken, async function(req, res)
       // 不同时间重新背诵 → 不同 attemptId → 新 LearningEvent
       const learningEventService = require('../services/learningEventService');
       const reciteCorrect = result.score >= 80;
-      const attemptId = req.body.attemptId;
-      if (!attemptId) {
-        console.warn('[aiRoutes] 背诵未提供 attemptId，无法保证幂等');
-      }
-      const reciteKey = attemptId || `legacy_${poem_id}_${Date.now()}`;
-      learningEventService.recordEvent({
+      
+      // 等待数据库事务完成，不再 fire-and-forget
+      await learningEventService.recordEvent({
         userId,
         eventType: reciteCorrect ? learningEventService.EVENT_TYPES.RECITE_POEM
                                   : learningEventService.EVENT_TYPES.RECITATION_ERROR,
@@ -314,21 +337,20 @@ router.post('/recite-check', optionalAuthenticateToken, async function(req, res)
         correct: reciteCorrect,
         score: result.score,
         difficulty: 3,
-        metadata: { poem_title, poem_author, score: result.score, errors: result.errors || [], attemptId: reciteKey },
-        eventKey: `recite:${userId}:${reciteKey}`,
+        metadata: { poem_title, poem_author, score: result.score, errors: result.errors || [], attemptId },
+        eventKey: `recite:${userId}:${attemptId}`,
         questionText: `背诵《${poem_title || ''}》`,
-      }).catch(err => console.error('[learningEvent] 背诵事件失败:', err.message));
+      });
     }
 
     res.json(result);
   } catch (error) {
-    console.error('处理背诵检测请求失败:', error);
-    res.status(500).json({ message: '处理请求失败' });
+    next(error);
   }
 });
 
 // AI 对话式助教接口
-router.post('/tutor', async function(req, res) {
+router.post('/tutor', aiRateLimiter, async function(req, res, next) {
   try {
     const poem = req.body.poem;
     const title = req.body.title;
@@ -359,13 +381,12 @@ router.post('/tutor', async function(req, res) {
       data: response
     });
   } catch (error) {
-    console.error('处理AI助教请求失败:', error);
-    res.status(500).json({ message: '处理AI助教请求失败' });
+    next(error);
   }
 });
 
 // AI 按维度解释接口
-router.post('/explain/dimension', async function(req, res) {
+router.post('/explain/dimension', aiRateLimiter, async function(req, res, next) {
   try {
     const poem = req.body.poem;
     const title = req.body.title;
@@ -405,13 +426,12 @@ router.post('/explain/dimension', async function(req, res) {
       data: response
     });
   } catch (error) {
-    console.error('处理按维度解释请求失败:', error);
-    res.status(500).json({ message: '处理按维度解释请求失败' });
+    next(error);
   }
 });
 
 // AI 学习建议接口
-router.post('/advice', async function(req, res) {
+router.post('/advice', aiRateLimiter, async function(req, res, next) {
   try {
     const poem = req.body.poem;
     const title = req.body.title;
@@ -435,13 +455,12 @@ router.post('/advice', async function(req, res) {
       data: response
     });
   } catch (error) {
-    console.error('处理学习建议请求失败:', error);
-    res.status(500).json({ message: '处理学习建议请求失败' });
+    next(error);
   }
 });
 
 // AI 简化解释接口
-router.post('/simplify', async function(req, res) {
+router.post('/simplify', aiRateLimiter, async function(req, res, next) {
   try {
     const poem = req.body.poem;
     const title = req.body.title;
@@ -467,13 +486,12 @@ router.post('/simplify', async function(req, res) {
       data: response
     });
   } catch (error) {
-    console.error('处理简化解释请求失败:', error);
-    res.status(500).json({ message: '处理简化解释请求失败' });
+    next(error);
   }
 });
 
 // AI 改写诗意接口
-router.post('/rewrite', async function(req, res) {
+router.post('/rewrite', aiRateLimiter, async function(req, res, next) {
   try {
     const poem = req.body.poem;
     const title = req.body.title;
@@ -494,13 +512,12 @@ router.post('/rewrite', async function(req, res) {
 
     res.json(result);
   } catch (error) {
-    console.error('处理AI改写诗意请求失败:', error);
-    res.status(500).json({ message: '处理请求失败' });
+    next(error);
   }
 });
 
 // AI 字符信息接口
-router.post('/char-info', async function(req, res) {
+router.post('/char-info', aiRateLimiter, async function(req, res, next) {
   try {
     const prompt = req.body.prompt;
 
@@ -526,13 +543,12 @@ router.post('/char-info', async function(req, res) {
 
     res.json({ content: response });
   } catch (error) {
-    console.error('处理字符信息请求失败:', error);
-    res.status(500).json({ message: '处理请求失败' });
+    next(error);
   }
 });
 
 // AI 字符信息批量接口
-router.post('/char-info/batch', async function(req, res) {
+router.post('/char-info/batch', aiRateLimiter, async function(req, res, next) {
   try {
     const poem = req.body.poem;
     const title = req.body.title;
@@ -608,8 +624,7 @@ router.post('/char-info/batch', async function(req, res) {
 
     res.json({ results: results });
   } catch (error) {
-    console.error('处理字符信息批量请求失败:', error);
-    res.status(500).json({ message: '处理请求失败' });
+    next(error);
   }
 });
 
@@ -764,23 +779,23 @@ async function generateImage(poemId, title, author, content, socket) {
 }
 
 // 预生成图像接口
-router.post('/image/pregenerate', async function(req, res) {
+router.post('/image/pregenerate', aiRateLimiter, async function(req, res) {
   try {
     const poemId = req.body.poemId;
     const title = req.body.title;
     const author = req.body.author;
     const content = req.body.content;
-    let userId = req.body.userId;
-    if (!userId) {
-      userId = 'default';
-    }
+    let userId = req.user ? req.user.userId : null;
+    
+    // 如果没有登录，使用 IP 作为限流依据
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
 
     if (!poemId || !title || !author || !content) {
       res.status(400).json({ message: '缺少必要参数' });
       return;
     }
 
-    if (!checkRateLimit(userId)) {
+    if (!checkRateLimit(rateLimitKey)) {
       res.status(429).json({ message: '请求过于频繁，请稍后再试' });
       return;
     }
@@ -801,7 +816,7 @@ router.post('/image/pregenerate', async function(req, res) {
 });
 
 // 获取缓存图像接口
-router.post('/image/get', async function(req, res) {
+router.post('/image/get', aiRateLimiter, async function(req, res) {
   try {
     const poemId = req.body.poemId;
     const title = req.body.title;
@@ -830,23 +845,22 @@ router.post('/image/get', async function(req, res) {
 });
 
 // 轮播图生成接口
-router.post('/image/carousel', async function(req, res) {
+router.post('/image/carousel', aiRateLimiter, async function(req, res) {
   try {
     const poemId = req.body.poemId;
     const title = req.body.title;
     const author = req.body.author;
     const content = req.body.content;
-    let userId = req.body.userId;
-    if (!userId) {
-      userId = 'default';
-    }
+    let userId = req.user ? req.user.userId : null;
+    
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
 
     if (!poemId || !title || !author || !content) {
       res.status(400).json({ message: '缺少必要参数' });
       return;
     }
 
-    if (!checkRateLimit(userId)) {
+    if (!checkRateLimit(rateLimitKey)) {
       res.status(429).json({ message: '请求过于频繁，请稍后再试' });
       return;
     }
@@ -930,7 +944,7 @@ router.post('/image/carousel', async function(req, res) {
 });
 
 // 智谱AI文生图 - 为选中的诗句生成意境画面
-router.post('/scene-image', async function(req, res) {
+router.post('/scene-image', aiRateLimiter, async function(req, res) {
   try {
     const poemLine = req.body.poemLine;
     const poemTitle = req.body.poemTitle;
@@ -983,7 +997,7 @@ router.post('/scene-image', async function(req, res) {
 });
 
 // 诗人头像生成接口
-router.post('/author-avatar', async function(req, res) {
+router.post('/author-avatar', aiRateLimiter, async function(req, res) {
   try {
     const author = req.body.author;
 
@@ -1006,7 +1020,7 @@ router.post('/author-avatar', async function(req, res) {
 });
 
 // 飞花令诗句AI验证接口
-router.post('/feihua-validate', async function(req, res) {
+router.post('/feihua-validate', aiRateLimiter, async function(req, res) {
   try {
     const poem = req.body.poem;
     const keyword = req.body.keyword;
@@ -1068,7 +1082,7 @@ router.post('/feihua-validate', async function(req, res) {
 });
 
 // 语音合成
-router.post('/tts', async function(req, res) {
+router.post('/tts', aiRateLimiter, async function(req, res) {
   try {
     const { text } = req.body;
     
@@ -1088,7 +1102,7 @@ router.post('/tts', async function(req, res) {
 
 const personalizedTutorService = require('../services/personalizedTutorService');
 
-router.post('/personalized-tutor', authenticateToken, async function(req, res) {
+router.post('/personalized-tutor', authenticateToken, aiRateLimiter, async function(req, res) {
   try {
     const { poemId, focusKnowledgePoint } = req.body;
     const userId = req.user.userId;

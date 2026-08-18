@@ -348,9 +348,7 @@
 
 <script>
 import AIPersonalizedSection from '@/components/AIPersonalizedSection.vue'
-import api from '@/services/api.js'
-
-const API_BASE_URL = 'http://localhost:3000'
+import api, { request, TIMEOUTS } from '@/services/api.js'
 
 export default {
   name: 'Home',
@@ -517,12 +515,13 @@ export default {
     // 每日一诗
     async fetchDailyPoem() {
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        const response = await fetch(`${API_BASE_URL}/api/daily-poem`, { signal: controller.signal });
-        clearTimeout(timeout);
-        if (response.ok) {
-          this.dailyPoem = await response.json()
+        const response = await request('/daily-poem', {
+          includeAuth: false,
+          timeout: TIMEOUTS.SHORT
+        });
+        
+        if (response) {
+          this.dailyPoem = response
         } else {
           this.dailyPoem = {
             id: 1, title: '静夜思', author: '李白', dynasty: '唐',
@@ -680,7 +679,7 @@ export default {
       try {
         if (this.page === 1) this.loading = true
         this.error = ''
-        let url = `${API_BASE_URL}/api/poems?page=${this.page}&pageSize=${this.pageSize}&_=${Date.now()}`
+        let url = `/poems?page=${this.page}&pageSize=${this.pageSize}&_=${Date.now()}`
         if (this.dynastyFilter) {
           url += `&dynasty=${encodeURIComponent(this.dynastyFilter)}`
         }
@@ -690,12 +689,11 @@ export default {
         if (!this.dynastyFilter && !this.authorFilter) {
           url += '&random=true'
         }
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 10000)
-        const response = await fetch(url, { signal: controller.signal })
-        clearTimeout(timeout)
-        if (!response.ok) throw new Error('获取诗词列表失败')
-        const data = await response.json()
+        
+        const data = await request(url, {
+          includeAuth: false,
+          timeout: TIMEOUTS.SHORT
+        })
         
         this.hasMore = data.length === this.pageSize
         

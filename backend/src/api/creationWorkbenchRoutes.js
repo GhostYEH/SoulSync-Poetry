@@ -44,33 +44,8 @@ function checkAIRateLimit(userId) {
   return true;
 }
 
-/**
- * 可选认证中间件
- */
-function optionalAuthenticateToken(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-    if (token) {
-      const jwt = require('jsonwebtoken');
-      const JWT_SECRET = config.jwt.secret || 'your-secret-key';
-      jwt.verify(token, JWT_SECRET, (err, decoded) => {
-        if (err) {
-          req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
-        } else {
-          req.user = { userId: decoded.userId, username: decoded.username };
-        }
-        next();
-      });
-    } else {
-      req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
-      next();
-    }
-  } catch (error) {
-    req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
-    next();
-  }
-}
+const authenticateToken = require('../middleware/auth');
+const optionalAuthenticateToken = authenticateToken.optionalAuthenticateToken;
 
 /**
  * 转义用户输入
@@ -139,23 +114,6 @@ function isValidLineLength(aiLine, lineLength) {
   return normalizePoemLineChars(aiLine).length === lineLength;
 }
 
-/** AI 失败时的兜底句：按主题生成语义连贯的句子，而非随机名句 */
-function contextualChainFallback(existingLinesText, theme, lineLength) {
-  const themes = {
-    '思乡': ['秋风吹过旧亭台', '故园草木应向荣', '归心似箭越千山'],
-    '离别': ['夕阳西下人影长', '执手相看语凝噎', '此去山高水又长'],
-    '山水': ['山高林密听泉声', '云卷云舒自在行', '溪水潺潺石上鸣'],
-    '自然': ['风过荷塘叶田田', '鸟鸣山涧林更幽', '花开花落任自然'],
-    '一般': ['望远凭栏思渺然', '万籁俱寂夜阑珊']
-  };
-  const key = Object.keys(themes).find(k => theme.includes(k)) || '一般';
-  const lines = themes[key];
-  const raw = lines[Math.floor(Math.random() * lines.length)];
-  const norm = normalizePoemLineChars(raw);
-  if (norm.length === lineLength) return norm;
-  return norm.slice(0, lineLength);
-}
-
 // ==================== 灵感生成接口 ====================
 
 /**
@@ -164,10 +122,11 @@ function contextualChainFallback(existingLinesText, theme, lineLength) {
  */
 router.post('/inspiration/generate', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    let userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
     const { theme, genre } = req.body;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁，请稍后重试' });
     }
 
@@ -208,17 +167,7 @@ router.post('/inspiration/generate', optionalAuthenticateToken, async (req, res)
       return res.json({ success: true, data });
     }
 
-    return res.json({
-      success: true,
-      data: {
-        keywords: ['意象', '情感', '时空', '物象', '声息', '光影', '动静', '虚实'],
-        theme: `围绕「${escapedTheme}」展开诗意画面，先定取景与情感再下笔。`,
-        mood: '请配置 AI 后获得更贴切基调',
-        openingIdeas: ['从眼前一处小景切入', '从一声一物引出心绪', '从对比或转折起笔', '从回忆或想象入手'],
-        avoid: ['空泛口号式抒情', '意象堆砌无主线', '陈词滥调无新意'],
-        suggestions: ['后端需在环境变量 SILICONFLOW_API_KEY 中配置硅基流动 API 密钥', '配置后请重新点击「生成灵感」', '建议先确定情感基调再选择意象']
-      }
-    });
+    return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
   } catch (error) {
     console.error('[creationRoutes] 灵感生成失败:', error);
     return res.status(500).json({ success: false, message: '服务器内部错误' });
@@ -275,25 +224,7 @@ router.post('/structure/guide', optionalAuthenticateToken, async (req, res) => {
       return res.json({ success: true, data: result });
     }
 
-    // AI不可用时的fallback
-    const fallbackData = {
-      name: escapedGenre,
-      lines: baseTemplate.lines,
-      charactersPerLine: baseTemplate.charactersPerLine,
-      rhymeScheme: baseTemplate.rhymeScheme,
-      introduction: `${escapedGenre}讲究起承转合，围绕「${escapedTheme}」主题创作。`,
-      structure: [
-        { position: '第一句（起）', role: '起', description: '点明题意', themeHint: `从${escapedTheme}切入` },
-        { position: '第二句（承）', role: '承', description: '承接展开', themeHint: `深化${escapedTheme}` },
-        { position: '第三句（转）', role: '转', description: '转折变化', themeHint: `从另一角度` },
-        { position: '第四句（合）', role: '合', description: '总结升华', themeHint: `点明主旨` }
-      ],
-      tips: ['起承转合层次递进', '意象契合主题', '情感含蓄深婉', '语言精炼'],
-      rhyme: '选择与主题相符的韵部',
-      avoid: ['空泛口号式抒情', '意象堆砌无主线', '陈词滥调无新意']
-    };
-
-    return res.json({ success: true, data: fallbackData });
+    return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
   } catch (error) {
     console.error('[creationRoutes] 结构引导失败:', error);
     return res.status(500).json({ success: false, message: '服务器内部错误' });
@@ -308,10 +239,11 @@ router.post('/structure/guide', optionalAuthenticateToken, async (req, res) => {
  */
 router.post('/recommend/next-line', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    let userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
     const { currentLines, genre, theme, maxLength } = req.body;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁，请稍后重试' });
     }
 
@@ -358,20 +290,7 @@ router.post('/recommend/next-line', optionalAuthenticateToken, async (req, res) 
       });
     }
 
-    return res.json({
-      success: true,
-      data: {
-        suggestions: [
-          {
-            line: '（续写暂不可用）',
-            reason: '请在后端配置 SILICONFLOW_API_KEY 后重试',
-            mood: ''
-          }
-        ],
-        rhymeHint: '注意与上句字数、押韵一致',
-        moodHint: '承接上文意境'
-      }
-    });
+    return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
   } catch (error) {
     console.error('[creationRoutes] 续写推荐失败:', error);
     return res.status(500).json({ success: false, message: '服务器内部错误' });
@@ -384,10 +303,11 @@ router.post('/recommend/next-line', optionalAuthenticateToken, async (req, res) 
  */
 router.post('/realtime/tips', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    let userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
     const { partialLine, genre } = req.body;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁' });
     }
 
@@ -409,14 +329,7 @@ router.post('/realtime/tips', optionalAuthenticateToken, async (req, res) => {
       return res.json({ success: true, data: result });
     }
 
-    return res.json({
-      success: true,
-      data: {
-        tips: ['注意字数', '考虑押韵', '保持意境连贯'],
-        remainingChars: lineLength - escapedLine.length,
-        rhymeReminder: '参考已有诗句的韵脚'
-      }
-    });
+    return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
   } catch (error) {
     console.error('[creationRoutes] 实时提示失败:', error);
     return res.status(500).json({ success: false, message: '服务器内部错误' });
@@ -431,10 +344,11 @@ router.post('/realtime/tips', optionalAuthenticateToken, async (req, res) => {
  */
 router.post('/chain/start', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    let userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
     const { genre, theme } = req.body;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁' });
     }
 
@@ -459,9 +373,8 @@ router.post('/chain/start', optionalAuthenticateToken, async (req, res) => {
 
     let aiLine = extractChainAiLine(result);
 
-    if (!isValidLineLength(aiLine, lineLength)) {
-      const fb = contextualChainFallback('', escapedTheme, lineLength);
-      return res.json({ success: true, data: { aiLine: fb, mood: '', rhyme: '' } });
+    if (!aiLine || !isValidLineLength(aiLine, lineLength)) {
+      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用或返回格式错误' });
     }
 
     return res.json({ success: true, data: { aiLine: normalizePoemLineChars(aiLine), mood: '', rhyme: '' } });
@@ -477,10 +390,11 @@ router.post('/chain/start', optionalAuthenticateToken, async (req, res) => {
  */
 router.post('/chain/next', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
-    const { userLine, allLines, genre, theme, lineNumber } = req.body;
+    const { genre, theme, userLine, allLines, lineNumber } = req.body;
+    let userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁' });
     }
 
@@ -535,9 +449,8 @@ router.post('/chain/next', optionalAuthenticateToken, async (req, res) => {
 
     let aiLine = extractChainAiLine(result);
 
-    if (!isValidLineLength(aiLine, lineLength)) {
-      const fb = contextualChainFallback(existingLinesText, escapedTheme, lineLength);
-      return res.json({ success: true, data: { aiLine: fb, rhymeHint: '', moodHint: '' } });
+    if (!aiLine || !isValidLineLength(aiLine, lineLength)) {
+      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用或返回格式错误' });
     }
 
     return res.json({
@@ -633,10 +546,11 @@ router.post('/feihua/keyword', optionalAuthenticateToken, async (req, res) => {
  */
 router.post('/feihua/score', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
     const { poem, keyword, genre } = req.body;
+    let userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁' });
     }
 
@@ -748,10 +662,11 @@ router.post('/generate', optionalAuthenticateToken, async (req, res) => {
  */
 router.post('/polish', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
     const { poem, genre, theme, type } = req.body;
+    let userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁，请稍后重试' });
     }
 

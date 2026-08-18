@@ -83,7 +83,8 @@ const handleRegister = async () => {
   success.value = ''
   
   try {
-    const response = await fetch('http://localhost:3000/api/teacher/register', {
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
+    const response = await fetch(`${baseUrl}/teacher/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

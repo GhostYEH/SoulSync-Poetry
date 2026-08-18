@@ -36,41 +36,37 @@ function authenticateToken(req, res, next) {
 
 module.exports = authenticateToken;
 
-// 可选认证中间件：如果请求带了 token 则解析，不带也不报错
+// 可选认证中间件：如果请求带了 token 则解析并验证
 function optionalAuthenticateToken(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
+    
     if (!token) {
       req.user = null;
       return next();
     }
+    
     jwt.verify(token, config.jwt.secret, (err, decoded) => {
       if (err) {
-        req.user = null;
-      } else {
-        req.user = { userId: decoded.userId, username: decoded.username };
+        // 存在 Token 但无效（伪造、过期、格式错误等），应该拦截
+        const code = err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID';
+        return res.status(401).json({ message: '认证令牌无效或已过期', code });
       }
+      
+      req.user = { userId: decoded.userId, username: decoded.username };
       next();
     });
   } catch (error) {
-    req.user = null;
-    next();
+    return res.status(401).json({ message: '认证处理失败', code: 'AUTH_ERROR' });
   }
 }
 
 module.exports.optionalAuthenticateToken = optionalAuthenticateToken;
 
-// 获取用户ID（从token或query参数）
+// 获取用户ID（仅从JWT token获取，禁止信任客户端传入的userId）
 function getUserIdFromToken(req) {
   try {
-    // 优先从URL参数获取
-    const queryUserId = parseInt(req.query.userId);
-    if (queryUserId && !isNaN(queryUserId)) {
-      return queryUserId;
-    }
-
-    // 从Authorization header获取
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
@@ -79,12 +75,6 @@ function getUserIdFromToken(req) {
         return decoded.userId;
       }
     }
-
-    // 从请求体获取
-    if (req.body && req.body.userId) {
-      return parseInt(req.body.userId);
-    }
-
     return null;
   } catch (error) {
     return null;

@@ -109,13 +109,14 @@ test('无 token → req.user = null + next()', () => {
   assert.strictEqual(req.user, null);
 });
 
-test('无效 token → req.user = null + next()', () => {
+test('无效 token → 401 + TOKEN_INVALID', () => {
   const req = mockReq({ authorization: `Bearer ${INVALID_TOKEN}` });
   const res = mockRes();
   let nextCalled = false;
   optionalAuthenticateToken(req, res, () => { nextCalled = true; });
-  assert.strictEqual(nextCalled, true);
-  assert.strictEqual(req.user, null);
+  assert.strictEqual(nextCalled, false);
+  assert.strictEqual(res.statusCode, 401);
+  assert.strictEqual(res.body.code, 'TOKEN_INVALID');
 });
 
 test('合法 token → req.user 设置 + next()', () => {
@@ -127,13 +128,14 @@ test('合法 token → req.user 设置 + next()', () => {
   assert.strictEqual(req.user.userId, 42);
 });
 
-test('过期 token → req.user = null + next()', () => {
+test('过期 token → 401 + TOKEN_EXPIRED', () => {
   const req = mockReq({ authorization: `Bearer ${EXPIRED_TOKEN}` });
   const res = mockRes();
   let nextCalled = false;
   optionalAuthenticateToken(req, res, () => { nextCalled = true; });
-  assert.strictEqual(nextCalled, true);
-  assert.strictEqual(req.user, null);
+  assert.strictEqual(nextCalled, false);
+  assert.strictEqual(res.statusCode, 401);
+  assert.strictEqual(res.body.code, 'TOKEN_EXPIRED');
 });
 
 console.log('\n=== 安全性回归：不回退默认用户 ===');
