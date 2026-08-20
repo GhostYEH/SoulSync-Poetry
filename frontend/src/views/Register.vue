@@ -52,9 +52,6 @@
           <p class="login-link">
             已有账号？ <router-link to="/login">立即登录</router-link>
           </p>
-          <p class="teacher-link">
-            教师注册？ <router-link to="/teacher/register">切换为教师注册</router-link>
-          </p>
         </div>
       </form>
       <div v-if="error" class="error-message">
@@ -286,25 +283,9 @@ const handleRegister = async () => {
   transition: color 0.3s ease;
 }
 
-.login-link a:hover,
-.teacher-link a:hover {
+.login-link a:hover {
   color: #cd853f;
   text-decoration: underline;
-}
-
-.teacher-link {
-  margin-top: 10px;
-  text-align: center;
-  color: #666;
-  font-size: 14px;
-  font-family: 'SimSun', 'STSong', serif;
-}
-
-.teacher-link a {
-  color: #8b4513;
-  text-decoration: none;
-  font-weight: 500;
-  transition: color 0.3s ease;
 }
 
 .error-message {

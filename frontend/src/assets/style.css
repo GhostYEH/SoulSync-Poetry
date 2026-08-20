@@ -934,3 +934,1255 @@ h3 {
     border-radius: 16px;
   }
 }
+
+/* ========================================================================
+   玉青磨砂设计系统
+   首页的轻盈玉青色调被抽取为平台级令牌。各功能页仍保留自身的信息架构，
+   但由此处统一承接背景、容器、输入与反馈状态，避免模块之间视觉割裂。
+   ======================================================================== */
+:root {
+  --jade-ink: #183c37;
+  --jade-muted: #6e8882;
+  --jade-soft: #edf7f3;
+  --jade-accent: #2f9d8a;
+  --jade-accent-strong: #197666;
+  --jade-line: rgba(74, 133, 121, .22);
+  --jade-glass: rgba(255, 255, 255, .68);
+  --jade-glass-strong: rgba(255, 255, 255, .84);
+  --jade-shadow: 0 18px 48px rgba(30, 82, 73, .12);
+  --jade-radius: 20px;
+  --page-surface: rgba(255, 255, 255, .54);
+}
+
+body {
+  color: var(--jade-ink);
+  background-color: #eef6f1;
+  background-image: url('./jade-paper-ambient.png');
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+body::before {
+  background: rgba(244, 250, 247, .22);
+  animation: none;
+}
+
+#app {
+  min-height: 100dvh;
+  isolation: isolate;
+}
+
+/* 使用首页的克制式导航，而不是让每个功能页各自使用一套颜色。 */
+#app:not(.home-shell) .ios26-navbar {
+  --nav-glass-bg: rgba(255, 255, 255, .78);
+  --nav-glass-bg-hover: rgba(255, 255, 255, .9);
+  --nav-glass-border: rgba(114, 164, 153, .32);
+  --nav-glass-border-hover: rgba(47, 157, 138, .4);
+  --nav-glass-shadow: 0 10px 28px rgba(28, 89, 81, .09);
+  --nav-glass-shadow-hover: 0 14px 34px rgba(28, 89, 81, .14);
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: var(--nav-glass-bg) !important;
+  box-shadow: var(--nav-glass-shadow) !important;
+  backdrop-filter: blur(22px) saturate(135%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+}
+
+#app:not(.home-shell) .nav-liquid-border,
+#app:not(.home-shell) .nav-liquid-shine,
+#app:not(.home-shell) .ios26-navbar::before,
+#app:not(.home-shell) .ios26-navbar::after { display: none; }
+
+#app:not(.home-shell) .navbar-container { min-height: 68px; gap: 26px; }
+#app:not(.home-shell) .navbar-brand {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border: 1px solid #dce9e5 !important;
+  border-radius: 13px;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(244, 251, 248, .75) !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+#app:not(.home-shell) .navbar-brand::before,
+#app:not(.home-shell) .navbar-brand::after { display: none; }
+#app:not(.home-shell) .navbar-brand:hover {
+  border-color: #a9dacf !important;
+  background: rgba(236, 248, 243, .94) !important;
+  transform: translateY(-1px) !important;
+}
+#app:not(.home-shell) .main-title {
+  color: var(--jade-accent-strong) !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 17px;
+  letter-spacing: .02em;
+}
+#app:not(.home-shell) .sub-title {
+  max-width: 300px;
+  overflow: hidden;
+  color: #819c96 !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 9px;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#app:not(.home-shell) .navbar-menu { gap: 5px; }
+#app:not(.home-shell) .glass-nav-button {
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #66817b !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+}
+#app:not(.home-shell) .glass-nav-button:hover {
+  border-color: #dce9e5;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(243, 250, 247, .82) !important;
+  transform: translateY(-1px);
+}
+#app:not(.home-shell) .glass-nav-active {
+  border-color: #c5e5dc !important;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(234, 246, 242, .9) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* 覆盖所有路由的顶层页面容器。游戏页也保留原有画布和玩法，仅统一外围舞台。 */
+main.container {
+  width: min(100%, 1600px);
+  min-height: calc(100dvh - var(--app-sticky-nav-offset, 92px));
+  padding-top: 24px;
+  padding-bottom: 40px;
+}
+
+main.container > :is(
+  .challenge-battle, .challenge-battle-online, .challenge-rank, .collection,
+  .daily-page, .demo-mode-page, .error-book-page, .feihualing-multiplayer,
+  .feihua-online, .feihua-page, .ranking-page, .flying-tiger-container,
+  .home, .learning-dashboard, .learning-path-page, .login-page,
+  .poem-challenge, .poem-detail, .poetry-mahjong-wrapper,
+  .poetry-challenge-page, .parkour-wrapper, .profile-page,
+  .register-container, .search-page, .voice-recitation-page, .review-page,
+  .creation-records-container, .poetry-workbench
+) {
+  color: var(--jade-ink);
+  border: 1px solid rgba(255, 255, 255, .62);
+  border-radius: 28px;
+  background: var(--page-surface) !important;
+  box-shadow: var(--jade-shadow);
+  backdrop-filter: blur(18px) saturate(118%);
+  -webkit-backdrop-filter: blur(18px) saturate(118%);
+}
+
+/* 共同的内容承载器。低透明度与两层细边让玻璃有景深，也保证文字足够清晰。 */
+main.container :is(
+  .card, .glass-card, .panel, .content-card, .dashboard-card, .stat-card,
+  .feature-card, .game-card, .info-card, .section-card, .form-card,
+  .login-card, .register-form, .poem-card, .collection-card, .record-card,
+  .class-card, .student-card, .knowledge-card, .data-card, .rank-card,
+  .challenge-card, .page-header, .dashboard-header, .header-card,
+  .search-container, .result-card, .analysis-card, .recommend-card
+) {
+  border-color: var(--jade-line) !important;
+  color: var(--jade-ink);
+  background: var(--jade-glass) !important;
+  box-shadow: 0 12px 30px rgba(31, 92, 81, .08) !important;
+  backdrop-filter: blur(16px) saturate(126%);
+  -webkit-backdrop-filter: blur(16px) saturate(126%);
+}
+
+main.container :is(
+  h1, h2, h3, h4, .page-title, .section-title, .card-title,
+  .poem-title, .title, .header-title
+) { color: var(--jade-ink) !important; }
+
+main.container :is(p, .description, .subtitle, .meta, .hint, .empty-text) {
+  color: var(--jade-muted);
+}
+
+main.container :is(input, textarea, select, .form-control, .search-input) {
+  border-color: rgba(90, 144, 133, .3) !important;
+  color: var(--jade-ink) !important;
+  background: rgba(255, 255, 255, .78) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .75);
+}
+
+main.container :is(input, textarea, select, .form-control, .search-input):focus {
+  border-color: var(--jade-accent) !important;
+  box-shadow: 0 0 0 4px rgba(47, 157, 138, .14) !important;
+}
+
+main.container :is(
+  .btn-primary, .primary-btn, .primary-button, .submit-btn,
+  .action-btn.primary, .confirm-btn, .start-btn
+) {
+  border-color: transparent !important;
+  color: #fff !important;
+  background: var(--jade-accent-strong) !important;
+  box-shadow: 0 8px 18px rgba(25, 118, 102, .22) !important;
+}
+
+main.container :is(
+  .btn-secondary, .secondary-btn, .secondary-button, .action-btn.secondary,
+  .cancel-btn, .back-btn
+) {
+  border-color: rgba(47, 157, 138, .28) !important;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(255, 255, 255, .68) !important;
+}
+
+main.container :is(button, .btn, .action-btn, .tool-btn, .icon-btn) {
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease, background-color .2s ease;
+}
+
+main.container :is(button, .btn, .action-btn, .tool-btn, .icon-btn):hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+main.container :is(table, .table, .data-table) {
+  overflow: hidden;
+  border: 1px solid var(--jade-line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .58);
+}
+
+main.container :is(th, .table-header) {
+  color: #426c64 !important;
+  background: rgba(229, 244, 238, .7) !important;
+}
+
+main.container :is(td, th, .table-row, .list-item) {
+  border-color: rgba(91, 145, 134, .14) !important;
+}
+
+.footer {
+  border-top: 1px solid rgba(255, 255, 255, .55);
+  background: rgba(244, 250, 247, .58) !important;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.footer-text {
+  color: #66817b;
+  background: rgba(255, 255, 255, .55);
+  text-shadow: none;
+}
+
+@media (max-width: 1100px) {
+  #app:not(.home-shell) .navbar-menu { gap: 1px; }
+  #app:not(.home-shell) .glass-nav-button { padding-right: 8px; padding-left: 8px; }
+  #app:not(.home-shell) .sub-title { max-width: 220px; }
+  main.container { padding-right: 18px; padding-left: 18px; }
+}
+
+@media (max-width: 760px) {
+  main.container { padding: 14px 12px 30px; }
+  main.container > :is(
+    .challenge-battle, .challenge-battle-online, .challenge-rank, .collection,
+    .daily-page, .demo-mode-page, .error-book-page, .feihualing-multiplayer,
+    .feihua-online, .feihua-page, .ranking-page, .flying-tiger-container,
+    .home, .learning-dashboard, .learning-path-page, .login-page,
+    .poem-challenge, .poem-detail, .poetry-mahjong-wrapper,
+    .poetry-challenge-page, .parkour-wrapper, .profile-page,
+    .register-container, .search-page, .voice-recitation-page, .review-page,
+    .creation-records-container, .poetry-workbench
+  ) { border-radius: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* 页面边界令牌：桌面端只保留轻薄的呼吸边距，避免内容聚成窄列。 */
+:root {
+  --page-gutter: clamp(16px, 2vw, 34px);
+}
+
+main.container {
+  width: 100%;
+  max-width: none;
+  padding-right: var(--page-gutter);
+  padding-left: var(--page-gutter);
+}
+
+/* 每个路由的第一层都是同一块舞台，内部的小卡片/弹窗仍由各页面自行控制宽度。 */
+main.container > * {
+  width: 100%;
+  max-width: none !important;
+  margin-right: 0 !important;
+  margin-left: 0 !important;
+  box-sizing: border-box;
+}
+
+@media (max-width: 760px) {
+  :root { --page-gutter: 12px; }
+}
+
+/* 顶部导航与页脚也沿用同一左右边界，页面不会出现“内容满宽、导航收窄”的断层。 */
+.navbar-container,
+.footer-container {
+  width: 100%;
+  max-width: none;
+  padding-right: var(--page-gutter);
+  padding-left: var(--page-gutter);
+}
+
+/* ========================================================================
+   智韵·灵犀 / 全站沉浸式玉青纸卷系统
+   以首页的玉青纸张、留白和暖金细线为母题，统一所有学习、游戏与创作页面。
+   动效只承担环境氛围、层级进入和交互反馈，并尊重 reduced-motion。
+   ======================================================================== */
+:root {
+  --jade-ink: #173f39;
+  --jade-ink-soft: #315d55;
+  --jade-muted: #78918a;
+  --jade-faint: #a6bcb6;
+  --jade-mist: #eef7f3;
+  --jade-accent: #2d9d8a;
+  --jade-accent-strong: #197666;
+  --jade-gold: #b08c5c;
+  --jade-gold-soft: #d9c5a7;
+  --jade-line: rgba(83, 137, 126, .22);
+  --jade-surface: rgba(255, 255, 255, .74);
+  --jade-surface-strong: rgba(255, 255, 255, .9);
+  --jade-shadow: 0 24px 70px rgba(35, 89, 79, .12);
+  --jade-shadow-soft: 0 12px 32px rgba(35, 89, 79, .09);
+  --jade-radius: 26px;
+}
+
+body {
+  min-width: 320px;
+  color: var(--jade-ink);
+  background-color: #edf7f2;
+  background-image:
+    linear-gradient(180deg, rgba(255,255,255,.38), rgba(237,247,242,.7)),
+    url('./jade-paper-ambient.png');
+  background-size: cover, cover;
+  background-position: center top;
+  background-attachment: fixed;
+}
+
+body::before {
+  z-index: -2;
+  background:
+    radial-gradient(circle at 10% 14%, rgba(166, 213, 194, .32), transparent 28%),
+    radial-gradient(circle at 90% 74%, rgba(215, 201, 170, .24), transparent 30%);
+  animation: jade-breathe 16s ease-in-out infinite alternate;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: -25%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(255,255,255,.28), transparent 58%);
+  animation: jade-drift 28s ease-in-out infinite alternate;
+}
+
+::selection {
+  background: rgba(45, 157, 138, .24);
+  color: var(--jade-ink);
+}
+
+@keyframes jade-breathe {
+  from { opacity: .72; transform: scale(1); }
+  to { opacity: 1; transform: scale(1.04); }
+}
+
+@keyframes jade-drift {
+  from { transform: translate3d(-2%, -1%, 0) rotate(-1deg); }
+  to { transform: translate3d(2%, 1%, 0) rotate(1deg); }
+}
+
+#app {
+  position: relative;
+  min-height: 100dvh;
+}
+
+#app::before {
+  content: '';
+  position: fixed;
+  top: 84px;
+  right: 3.5vw;
+  width: 1px;
+  height: 120px;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(var(--jade-gold), transparent);
+  opacity: .48;
+}
+
+/* 导航：保持首页的克制感，取消旧的紫蓝液态玻璃高光。 */
+#app .ios26-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 84px;
+  border: 0;
+  border-bottom: 1px solid rgba(93, 147, 135, .18);
+  border-radius: 0;
+  background: rgba(250, 253, 251, .78) !important;
+  box-shadow: 0 8px 28px rgba(38, 91, 81, .06) !important;
+  backdrop-filter: blur(22px) saturate(125%);
+  -webkit-backdrop-filter: blur(22px) saturate(125%);
+}
+
+#app .ios26-navbar::before,
+#app .ios26-navbar::after,
+#app .nav-liquid-border,
+#app .nav-liquid-shine { display: none; }
+
+#app .navbar-container {
+  min-height: 84px;
+  gap: 20px;
+}
+
+#app .navbar-brand {
+  flex: 0 0 auto;
+  padding: 9px 16px 8px;
+  border: 1px solid #d7e8e2 !important;
+  border-radius: 16px;
+  background: rgba(255,255,255,.58) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 5px 16px rgba(51, 108, 94, .04) !important;
+  color: var(--jade-accent-strong) !important;
+  text-shadow: none !important;
+  transition: transform .25s ease, border-color .25s ease, background-color .25s ease;
+}
+
+#app .navbar-brand::before,
+#app .navbar-brand::after { display: none; }
+#app .navbar-brand:hover {
+  transform: translateY(-2px) !important;
+  border-color: #a7d6c8 !important;
+  background: rgba(255,255,255,.88) !important;
+}
+#app .main-title {
+  color: var(--jade-accent-strong) !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 17px;
+  letter-spacing: .06em;
+}
+#app .sub-title {
+  color: #819d95 !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 9px;
+  letter-spacing: .01em;
+}
+#app .navbar-menu { gap: 4px; }
+#app .glass-nav-button {
+  position: relative;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #66817b !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  transition: color .2s ease, background-color .2s ease, border-color .2s ease, transform .2s ease;
+}
+#app .glass-nav-button::before,
+#app .glass-nav-button::after { display: none; }
+#app .glass-nav-button:hover {
+  border-color: #d3e8e0;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(235,248,242,.86) !important;
+  transform: translateY(-1px);
+}
+#app .glass-nav-active {
+  border-color: #bfe2d6 !important;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(232,247,241,.95) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* 页面舞台：所有路由共享同一块柔光纸面。 */
+main.container {
+  position: relative;
+  isolation: isolate;
+  min-height: calc(100dvh - 84px);
+  padding: 26px var(--page-gutter) 50px;
+}
+
+main.container > * {
+  position: relative;
+  z-index: 0;
+  border: 1px solid rgba(255,255,255,.72) !important;
+  border-radius: var(--jade-radius) !important;
+  background: var(--jade-surface) !important;
+  box-shadow: var(--jade-shadow) !important;
+  backdrop-filter: blur(18px) saturate(115%);
+  -webkit-backdrop-filter: blur(18px) saturate(115%);
+  animation: jade-stage-in .7s cubic-bezier(.2,.72,.2,1) both;
+}
+
+main.container > *::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent 4%, rgba(255,255,255,.95) 32%, rgba(255,255,255,.5) 68%, transparent 96%);
+}
+
+@keyframes jade-stage-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+main.container :is(h1,h2,h3,h4,h5,h6,.page-title,.section-title,.card-title,.poem-title,.title,.header-title) {
+  color: var(--jade-ink) !important;
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  letter-spacing: .02em;
+}
+
+main.container :is(p,.description,.subtitle,.meta,.hint,.empty-text,.muted) {
+  color: var(--jade-muted);
+}
+
+main.container :is(input,textarea,select,.form-control,.search-input) {
+  border: 1px solid rgba(87, 145, 132, .27) !important;
+  border-radius: 13px !important;
+  color: var(--jade-ink) !important;
+  background: rgba(255,255,255,.75) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.88) !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+}
+
+main.container :is(input,textarea,select,.form-control,.search-input):focus {
+  border-color: var(--jade-accent) !important;
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(45,157,138,.12), inset 0 1px 0 rgba(255,255,255,.88) !important;
+}
+
+main.container :is(button,.btn,.action-btn,.tool-btn,.icon-btn) {
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  border-radius: 12px;
+  transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease, background-color .22s ease;
+}
+main.container :is(button,.btn,.action-btn,.tool-btn,.icon-btn):hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+main.container :is(.btn-primary,.primary-btn,.primary-button,.submit-btn,.action-btn.primary,.confirm-btn,.start-btn,.primary-action) {
+  border-color: transparent !important;
+  color: #fff !important;
+  background: var(--jade-accent-strong) !important;
+  box-shadow: 0 10px 22px rgba(25,118,102,.2) !important;
+}
+main.container :is(.btn-secondary,.secondary-btn,.secondary-button,.action-btn.secondary,.cancel-btn,.back-btn,.secondary-action) {
+  border: 1px solid rgba(45,157,138,.28) !important;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(255,255,255,.7) !important;
+}
+
+/* 常见内容卡片：保留各页的信息结构，只把材质收束为一套。 */
+main.container :is(
+  .card,.glass-card,.panel,.content-card,.dashboard-card,.stat-card,.feature-card,
+  .game-card,.info-card,.section-card,.form-card,.login-card,.register-form,
+  .poem-card,.collection-card,.record-card,.class-card,.student-card,.knowledge-card,
+  .data-card,.rank-card,.challenge-card,.result-card,.analysis-card,.recommend-card,
+  .search-container,.calendar-section,.stats-section,.streak-card,.total-card,
+  .platform-card,.ranking-card,.daily-poem-card,.learning-hero,.quick-card,.path-card,
+  .mode-card,.workspace,.guided-workspace,.mode-workspace,.creation-editor,
+  .keyword-section,.keyword-selected,.score-modal,.panel-header,.step-content,
+  .record-list,.records-toolbar,.profile-card,.profile-section
+) {
+  border-color: var(--jade-line) !important;
+  background: var(--jade-surface-strong) !important;
+  box-shadow: var(--jade-shadow-soft) !important;
+  backdrop-filter: blur(16px) saturate(126%);
+  -webkit-backdrop-filter: blur(16px) saturate(126%);
+}
+
+/* 创作页：把三种模式和三步流程收进同一张会呼吸的纸卷。 */
+#app main.container > .poetry-workbench {
+  padding: 34px clamp(16px, 4vw, 58px) 68px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(248,252,249,.72), rgba(238,248,243,.8)),
+    url('./jade-paper-ambient.png') center / cover !important;
+}
+#app .poetry-workbench .ink-background { opacity: .34; }
+#app .poetry-workbench .ink-blob { filter: blur(96px); opacity: .13; }
+#app .poetry-workbench .title-section { margin-bottom: 34px; }
+#app .poetry-workbench .title-section::after {
+  content: '让灵感先落在纸上，再慢慢成句';
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--jade-muted);
+  font: 12px/1.5 'Noto Sans SC', sans-serif;
+  letter-spacing: .12em;
+  white-space: nowrap;
+}
+#app .poetry-workbench .main-title { color: var(--jade-ink) !important; }
+#app .poetry-workbench .brush-stroke {
+  width: clamp(52px, 10vw, 132px);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--jade-gold), transparent);
+}
+#app .poetry-workbench .mode-selector {
+  gap: 14px;
+  margin-top: 60px;
+  margin-bottom: 30px;
+}
+#app .poetry-workbench .mode-card {
+  min-height: 168px;
+  width: min(238px, 30vw);
+  padding: 22px 22px 20px;
+  border-radius: 20px !important;
+  background: rgba(255,255,255,.68) !important;
+}
+#app .poetry-workbench .mode-card:hover { box-shadow: 0 18px 38px rgba(32,94,82,.15) !important; }
+#app .poetry-workbench .mode-card.active {
+  border-color: var(--jade-gold) !important;
+  box-shadow: 0 18px 40px rgba(176,140,92,.17) !important;
+}
+#app .poetry-workbench .mode-card::before { background: linear-gradient(90deg, var(--jade-gold), #dfc7a2); }
+#app .poetry-workbench .mode-icon { filter: saturate(.82); }
+#app .poetry-workbench .mode-info h3 { color: var(--jade-ink) !important; }
+#app .poetry-workbench .mode-info p { color: var(--jade-muted); }
+#app .poetry-workbench .mode-badge {
+  border-radius: 10px;
+  color: #fff;
+  background: var(--jade-gold);
+}
+#app .poetry-workbench .guided-workspace,
+#app .poetry-workbench .mode-workspace {
+  border-radius: 26px !important;
+  background: rgba(255,255,255,.62) !important;
+}
+#app .poetry-workbench .step-indicator {
+  padding: 24px 20px 22px;
+  background: rgba(246,251,248,.66);
+  border-bottom: 1px solid rgba(83,137,126,.15);
+}
+#app .poetry-workbench .step-number {
+  border-color: var(--jade-gold-soft);
+  color: var(--jade-muted);
+  background: rgba(255,255,255,.72);
+}
+#app .poetry-workbench .step.active .step-number {
+  border-color: var(--jade-gold);
+  background: linear-gradient(135deg, #d7b98c, var(--jade-gold)) !important;
+  box-shadow: 0 10px 24px rgba(176,140,92,.28);
+}
+#app .poetry-workbench .step.completed .step-number { background: var(--jade-accent) !important; border-color: var(--jade-accent); }
+#app .poetry-workbench .step-label { color: var(--jade-muted); }
+#app .poetry-workbench .step.active .step-label { color: var(--jade-ink); }
+#app .poetry-workbench .step-connector { background: rgba(176,140,92,.18); }
+#app .poetry-workbench .step-connector::after { background: var(--jade-gold); }
+
+/* 反馈、弹窗和状态块也沿用同一材质，避免进入下一步时突然换肤。 */
+main.container :is(.loading,.loading-state,.empty,.error,.empty-state,.notice,.alert,.toast,.scene-toast) {
+  color: var(--jade-muted);
+}
+main.container :is(.modal,.modal-content,.dialog,.drawer,.popover,.dropdown-menu,.score-overlay .score-modal) {
+  border: 1px solid var(--jade-line) !important;
+  border-radius: 22px !important;
+  background: rgba(250,253,251,.94) !important;
+  box-shadow: 0 30px 80px rgba(26,83,71,.18) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.footer {
+  margin-top: 0;
+  border-top: 1px solid rgba(83,137,126,.18);
+  background: rgba(244,250,247,.72) !important;
+  box-shadow: 0 -14px 36px rgba(34,89,78,.06);
+}
+.footer::before { height: 1px; background: linear-gradient(90deg, transparent, var(--jade-gold-soft), transparent); }
+.footer-text {
+  color: var(--jade-muted);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-shadow: none;
+}
+.footer-text:hover { color: var(--jade-accent-strong); transform: none; background: transparent; box-shadow: none; }
+
+/* 页面级环境元素：像纸上的花瓣和墨色呼吸，不抢正文注意力。 */
+#app .dynamic-elements { z-index: 4; opacity: .66; }
+#app .petal {
+  background: linear-gradient(135deg, rgba(239, 169, 176, .76), rgba(221, 131, 151, .55));
+  filter: saturate(.72);
+}
+#app .petal::before { background: rgba(239, 169, 176, .62); }
+#app .petal:nth-child(2n) { background: linear-gradient(135deg, rgba(176, 211, 193, .76), rgba(112, 170, 151, .48)); }
+#app .petal:nth-child(2n)::before { background: rgba(176, 211, 193, .62); }
+#app .petal:nth-child(3n) { background: linear-gradient(135deg, rgba(221, 198, 155, .7), rgba(177, 141, 88, .44)); }
+#app .petal:nth-child(3n)::before { background: rgba(221, 198, 155, .6); }
+#app .floating-text { color: rgba(45, 108, 94, .36); }
+#app .maple-leaf { background: linear-gradient(135deg, rgba(224, 161, 105, .76), rgba(191, 116, 75, .48)); box-shadow: 0 2px 8px rgba(143, 89, 54, .12); }
+#app .ripple { background: rgba(45, 157, 138, .28); }
+
+@media (max-width: 1100px) {
+  #app .navbar-container { align-items: center; }
+  #app .navbar-menu { gap: 1px; }
+  #app .glass-nav-button { padding-inline: 8px; }
+  #app .sub-title { max-width: 210px; }
+}
+
+@media (max-width: 760px) {
+  #app::before { display: none; }
+  #app .ios26-navbar, #app .navbar-container { min-height: 72px; }
+  #app .navbar-container { align-items: flex-start; overflow-x: auto; padding-block: 9px; }
+  #app .navbar-brand { padding: 7px 11px; }
+  #app .main-title { font-size: 14px; }
+  #app .sub-title { display: none; }
+  #app .navbar-menu { position: static; display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  #app .navbar-item { flex: 0 0 auto; }
+  #app .glass-nav-button { white-space: nowrap; font-size: 11px; }
+  main.container { min-height: calc(100dvh - 72px); padding: 14px 12px 30px; }
+  main.container > * { border-radius: 20px !important; }
+  #app .poetry-workbench { padding: 28px 12px 42px; }
+  #app .poetry-workbench .title-section { gap: 12px; }
+  #app .poetry-workbench .main-title { font-size: 25px; letter-spacing: 3px; }
+  #app .poetry-workbench .title-section::after { font-size: 11px; letter-spacing: .06em; }
+  #app .poetry-workbench .mode-card { width: 100%; min-height: 0; }
+  #app .poetry-workbench .mode-selector { margin-top: 52px; }
+  #app .poetry-workbench .mode-icon { font-size: 30px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before, body::after, main.container > *, #app .ink-blob { animation: none !important; }
+}
+
+/* ========================================================================
+   创作工作台 v2：真正的空间重构
+   不是给旧卡片换颜色，而是把“情绪入口 / 模式选择 / 创作流程 / 编辑舞台”拆成四个不同层级。
+   ======================================================================== */
+#app main.container > .poetry-workbench {
+  padding: clamp(22px, 3vw, 42px) clamp(18px, 4vw, 64px) 72px;
+  background:
+    radial-gradient(circle at 8% 6%, rgba(198, 224, 211, .5), transparent 26%),
+    linear-gradient(180deg, rgba(247, 252, 249, .82), rgba(238, 248, 243, .96)) !important;
+}
+
+#app .poetry-workbench .workbench-intro {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(270px, .78fr) minmax(420px, 1.42fr);
+  min-height: 320px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(71, 124, 112, .16);
+}
+
+#app .poetry-workbench .workbench-intro-copy {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 30px 36px 36px 18px;
+}
+
+#app .poetry-workbench .workbench-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  color: var(--jade-accent-strong);
+  font: 600 10px/1.2 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+#app .poetry-workbench .workbench-eyebrow::before {
+  content: '';
+  display: inline-block;
+  width: 28px;
+  height: 1px;
+  background: var(--jade-gold);
+}
+
+#app .poetry-workbench .workbench-intro h1 {
+  max-width: 8em;
+  margin: 0;
+  color: var(--jade-ink) !important;
+  font: 600 clamp(38px, 5vw, 68px)/1.08 'Noto Serif SC', 'Songti SC', serif;
+  letter-spacing: -.04em;
+}
+#app .poetry-workbench .workbench-intro h1 em {
+  display: block;
+  color: var(--jade-accent-strong);
+  font-style: normal;
+}
+#app .poetry-workbench .workbench-intro-copy > p {
+  max-width: 24em;
+  margin: 24px 0 0;
+  color: var(--jade-muted);
+  font: 14px/1.9 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+}
+#app .poetry-workbench .intro-signature {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  color: var(--jade-ink-soft);
+}
+#app .poetry-workbench .signature-seal {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(176, 140, 92, .55);
+  color: var(--jade-gold);
+  font: 20px/1 'Noto Serif SC', serif;
+  transform: rotate(-5deg);
+}
+#app .poetry-workbench .intro-signature span:last-child { display: grid; gap: 2px; }
+#app .poetry-workbench .intro-signature strong { font: 600 13px/1.3 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .intro-signature small { color: var(--jade-muted); font: 11px/1.3 'Noto Sans SC', sans-serif; }
+
+#app .poetry-workbench .workbench-scene {
+  position: relative;
+  min-height: 320px;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 28px;
+  background: #dfeae4;
+  box-shadow: 0 18px 44px rgba(45, 91, 79, .12);
+  animation: scene-arrive .9s .12s cubic-bezier(.2,.72,.2,1) both;
+}
+#app .poetry-workbench .scene-marquee {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  width: 300%;
+  height: 100%;
+  animation: scene-pan 54s linear infinite;
+  will-change: transform;
+}
+#app .poetry-workbench .scene-marquee img {
+  display: block;
+  flex: 0 0 33.333333%;
+  width: 33.333333%;
+  height: 100%;
+  min-height: 320px;
+  object-fit: cover;
+  object-position: center;
+  filter: saturate(.84) contrast(.96);
+}
+#app .poetry-workbench .scene-wash {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(90deg, rgba(244,250,247,.96) 0%, rgba(244,250,247,.55) 18%, transparent 52%), linear-gradient(0deg, rgba(19,63,57,.18), transparent 42%);
+}
+#app .poetry-workbench .workbench-scene figcaption {
+  position: absolute;
+  right: 24px;
+  bottom: 20px;
+  display: grid;
+  gap: 4px;
+  color: #fff;
+  text-align: right;
+  text-shadow: 0 1px 12px rgba(16, 53, 46, .34);
+  z-index: 2;
+}
+#app .poetry-workbench .workbench-scene figcaption span { font: 500 22px/1.2 'Noto Serif SC', serif; }
+#app .poetry-workbench .workbench-scene figcaption small { font: 11px/1.4 'Noto Sans SC', sans-serif; opacity: .82; }
+@keyframes scene-arrive { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes scene-pan { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-66.666667%, 0, 0); } }
+
+#app .poetry-workbench .mode-selector {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 26px;
+  align-items: end;
+  margin: 30px 0 26px;
+}
+#app .poetry-workbench .mode-selector-heading {
+  display: grid;
+  align-content: end;
+  gap: 5px;
+  min-height: 110px;
+  padding-bottom: 8px;
+}
+#app .poetry-workbench .mode-selector-heading .workbench-eyebrow { margin-bottom: 8px; }
+#app .poetry-workbench .mode-selector-heading strong { color: var(--jade-ink); font: 600 20px/1.3 'Noto Serif SC', serif; }
+#app .poetry-workbench .mode-selector-heading small { color: var(--jade-muted); font: 11px/1.5 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .mode-track { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+#app .poetry-workbench .mode-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: auto;
+  min-height: 92px;
+  padding: 16px 16px 16px 14px;
+  border: 1px solid rgba(83, 137, 126, .2) !important;
+  border-radius: 16px !important;
+  color: var(--jade-ink);
+  background: rgba(255,255,255,.68) !important;
+  box-shadow: none !important;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+#app .poetry-workbench .mode-card::before { top: auto; right: 0; bottom: 0; left: 0; height: 2px; transform: scaleX(0); transform-origin: left; }
+#app .poetry-workbench .mode-card:hover { border-color: rgba(45,157,138,.5) !important; background: rgba(255,255,255,.9) !important; transform: translateY(-4px); }
+#app .poetry-workbench .mode-card.active { border-color: var(--jade-gold) !important; background: rgba(255,253,248,.92) !important; box-shadow: 0 12px 28px rgba(176,140,92,.12) !important; }
+#app .poetry-workbench .mode-card.active::before { transform: scaleX(1); background: var(--jade-gold); }
+#app .poetry-workbench .mode-index { align-self: start; color: var(--jade-faint); font: 11px/1.2 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .mode-icon { display: grid; width: 42px; height: 42px; margin: 0; place-items: center; border-radius: 12px; background: var(--jade-mist); font-size: 24px; filter: saturate(.8); }
+#app .poetry-workbench .mode-info { display: grid; gap: 4px; min-width: 0; }
+#app .poetry-workbench .mode-info strong { color: var(--jade-ink); font: 600 15px/1.3 'Noto Serif SC', serif; white-space: nowrap; }
+#app .poetry-workbench .mode-info small { overflow: hidden; color: var(--jade-muted); font: 11px/1.4 'Noto Sans SC', sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+#app .poetry-workbench .mode-badge { position: absolute; top: 8px; right: 8px; padding: 3px 7px; border-radius: 7px; color: #fff; background: var(--jade-gold); font: 10px/1.2 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .mode-active-mark { align-self: end; color: var(--jade-gold); font: 18px/1 'Noto Sans SC', sans-serif; opacity: .55; transform: translate(0, 0); transition: transform .2s ease, opacity .2s ease; }
+#app .poetry-workbench .mode-card:hover .mode-active-mark, #app .poetry-workbench .mode-card.active .mode-active-mark { opacity: 1; transform: translate(3px, -3px); }
+
+#app .poetry-workbench .creative-stage {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  min-height: 540px;
+  overflow: hidden;
+  border: 1px solid rgba(83, 137, 126, .2);
+  border-radius: 24px;
+  background: rgba(255,255,255,.56);
+  box-shadow: 0 22px 52px rgba(35,89,79,.1);
+}
+#app .poetry-workbench .stage-rail {
+  display: flex;
+  flex-direction: column;
+  padding: 28px 22px 22px;
+  border-right: 1px solid rgba(83, 137, 126, .16);
+  background: linear-gradient(180deg, rgba(239,248,243,.86), rgba(249,252,249,.55));
+}
+#app .poetry-workbench .stage-rail-heading { display: grid; gap: 5px; margin-bottom: 30px; }
+#app .poetry-workbench .stage-rail-heading span { color: var(--jade-accent-strong); font: 600 9px/1.2 'Noto Sans SC', sans-serif; letter-spacing: .14em; }
+#app .poetry-workbench .stage-rail-heading strong { color: var(--jade-ink); font: 600 19px/1.3 'Noto Serif SC', serif; }
+#app .poetry-workbench .step-indicator { display: grid; gap: 0; padding: 0; border: 0; background: transparent; }
+#app .poetry-workbench .step { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; align-items: start; min-height: 86px; }
+#app .poetry-workbench .step:not(:last-child)::after { content: ''; position: absolute; top: 31px; left: 13px; width: 1px; height: 57px; background: rgba(176,140,92,.26); }
+#app .poetry-workbench .step-number { position: relative; z-index: 1; display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--jade-gold-soft); border-radius: 50%; color: var(--jade-muted); background: rgba(255,255,255,.72); font: 12px/1 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .step.active .step-number { border-color: var(--jade-gold); color: #fff; background: var(--jade-gold) !important; box-shadow: 0 6px 16px rgba(176,140,92,.25); transform: none; }
+#app .poetry-workbench .step.completed .step-number { border-color: var(--jade-accent); color: #fff; background: var(--jade-accent) !important; }
+#app .poetry-workbench .step-label { display: grid; gap: 4px; margin-top: 1px; text-align: left; }
+#app .poetry-workbench .step-label strong { color: var(--jade-muted); font: 500 13px/1.3 'Noto Serif SC', serif; }
+#app .poetry-workbench .step-label small { color: var(--jade-faint); font: 10px/1.45 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .step.active .step-label strong { color: var(--jade-ink); font-weight: 600; }
+#app .poetry-workbench .stage-note { display: grid; gap: 7px; margin-top: auto; padding: 14px 0 16px; border-top: 1px solid rgba(83,137,126,.16); }
+#app .poetry-workbench .stage-note span { color: var(--jade-gold); font: 600 10px/1.2 'Noto Sans SC', sans-serif; letter-spacing: .12em; }
+#app .poetry-workbench .stage-note strong { color: var(--jade-ink-soft); font: 12px/1.65 'Noto Serif SC', serif; }
+#app .poetry-workbench .stage-rail-foot { display: flex; align-items: center; gap: 7px; color: var(--jade-muted); font: 10px/1.4 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .status-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--jade-accent); box-shadow: 0 0 0 4px rgba(45,157,138,.12); animation: status-pulse 2.2s ease-in-out infinite; }
+@keyframes status-pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(45,157,138,.1); } 50% { box-shadow: 0 0 0 6px rgba(45,157,138,.04); } }
+#app .poetry-workbench .alternate-rail { display: grid; align-content: start; gap: 10px; color: var(--jade-muted); }
+#app .poetry-workbench .alternate-rail-icon { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 8px; border-radius: 15px; background: rgba(255,255,255,.7); font-size: 27px; }
+#app .poetry-workbench .alternate-rail strong { color: var(--jade-ink); font: 600 16px/1.3 'Noto Serif SC', serif; }
+#app .poetry-workbench .alternate-rail p, #app .poetry-workbench .alternate-rail small { margin: 0; color: var(--jade-muted); font: 11px/1.7 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .alternate-rail-line { width: 42px; height: 1px; margin: 12px 0; background: var(--jade-gold); }
+
+#app .poetry-workbench .workspace { min-width: 0; max-width: none; margin: 0; padding: 0; }
+#app .poetry-workbench .workspace-topline { display: flex; align-items: center; justify-content: space-between; min-height: 72px; padding: 0 28px; border-bottom: 1px solid rgba(83,137,126,.15); background: rgba(255,255,255,.52); }
+#app .poetry-workbench .workspace-topline > div { display: flex; align-items: baseline; gap: 12px; }
+#app .poetry-workbench .workspace-topline .workbench-eyebrow { margin: 0; color: var(--jade-muted); font-size: 9px; letter-spacing: .12em; }
+#app .poetry-workbench .workspace-topline .workbench-eyebrow::before { width: 16px; background: var(--jade-gold-soft); }
+#app .poetry-workbench .workspace-topline strong { color: var(--jade-ink); font: 600 15px/1.3 'Noto Serif SC', serif; }
+#app .poetry-workbench .workspace-status { color: var(--jade-gold); font: 11px/1.3 'Noto Sans SC', sans-serif; }
+#app .poetry-workbench .guided-workspace, #app .poetry-workbench .mode-workspace { border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+#app .poetry-workbench .step-content { padding: 24px 28px 30px; background: transparent !important; box-shadow: none !important; }
+#app .poetry-workbench .panel-header { padding-bottom: 18px; border-bottom-color: rgba(83,137,126,.16); background: transparent !important; box-shadow: none !important; }
+
+@media (max-width: 900px) {
+  #app .poetry-workbench .workbench-intro { grid-template-columns: 1fr; min-height: 0; }
+  #app .poetry-workbench .workbench-intro-copy { min-height: 270px; padding: 32px 8px 28px; }
+  #app .poetry-workbench .workbench-intro h1 { font-size: clamp(38px, 9vw, 58px); }
+  #app .poetry-workbench .workbench-scene { min-height: 250px; border-radius: 20px; }
+  #app .poetry-workbench .scene-marquee img { min-height: 250px; }
+  #app .poetry-workbench .mode-selector { grid-template-columns: 1fr; gap: 14px; }
+  #app .poetry-workbench .mode-selector-heading { min-height: 0; }
+  #app .poetry-workbench .mode-track { grid-template-columns: 1fr; }
+  #app .poetry-workbench .creative-stage { grid-template-columns: 1fr; }
+  #app .poetry-workbench .stage-rail { border-right: 0; border-bottom: 1px solid rgba(83,137,126,.16); padding: 20px; }
+  #app .poetry-workbench .step-indicator { grid-template-columns: repeat(3, 1fr); }
+  #app .poetry-workbench .step { min-height: 54px; grid-template-columns: 28px 1fr; }
+  #app .poetry-workbench .step:not(:last-child)::after { top: 14px; left: 29px; width: calc(100% - 18px); height: 1px; }
+  #app .poetry-workbench .step-label small, #app .poetry-workbench .stage-note, #app .poetry-workbench .stage-rail-foot { display: none; }
+  #app .poetry-workbench .workspace-topline { padding: 0 20px; }
+  #app .poetry-workbench .step-content { padding: 20px; }
+}
+
+@media (max-width: 560px) {
+  #app .poetry-workbench .workbench-intro-copy { min-height: 250px; }
+  #app .poetry-workbench .workbench-intro h1 { font-size: 38px; }
+  #app .poetry-workbench .workbench-intro-copy > p { font-size: 13px; }
+  #app .poetry-workbench .mode-card { grid-template-columns: auto 40px minmax(0, 1fr) auto; }
+  #app .poetry-workbench .mode-icon { width: 38px; height: 38px; font-size: 21px; }
+  #app .poetry-workbench .workspace-topline > div { gap: 7px; }
+  #app .poetry-workbench .workspace-topline .workbench-eyebrow { display: none; }
+  #app .poetry-workbench .workspace-status { font-size: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app .poetry-workbench .workbench-scene,
+  #app .poetry-workbench .scene-marquee,
+  #app .poetry-workbench .status-pulse { animation: none !important; }
+}
+
+/* 导航栏布局 */
+#app .navbar-container {
+  justify-content: flex-start;
+}
+
+#app .navbar-container > .navbar-menu {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#app .navbar-container > .navbar-menu {
+  justify-content: flex-start;
+}
+
+@media (max-width: 760px) {
+  #app .navbar-container > .navbar-menu {
+    flex: 0 0 auto;
+  }
+}
+
+/* 错题页面的水墨氛围图需要覆盖平台级舞台底色。 */
+main.container > .error-book-page,
+main.container > .review-page {
+  background: linear-gradient(112deg, rgba(247, 252, 249, .98) 0%, rgba(247, 252, 249, .9) 54%, rgba(247, 252, 249, .74) 100%) !important;
+}
+
+@media (max-width: 760px) {
+  main.container > .error-book-page,
+  main.container > .review-page {
+    background-size: cover !important;
+  }
+}
+
+/* 个人中心全局兜底：静态部署或旧缓存只加载平台样式时，仍保持液态玻璃布局。 */
+#app .profile-page {
+  --profile-ink: #173c37;
+  --profile-muted: #6c8179;
+  --profile-jade: #2f8373;
+  --profile-deep: #1d5f56;
+  --profile-gold: #b38649;
+  position: relative;
+  isolation: isolate;
+  width: 100vw;
+  min-height: 100vh;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  padding: 0 clamp(18px, 3vw, 48px) 92px;
+  overflow: hidden;
+  color: var(--profile-ink);
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+}
+
+#app .profile-page .profile-atmosphere {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: #dfeae2;
+}
+
+#app .profile-page .profile-background,
+#app .profile-page .atmosphere-wash,
+#app .profile-page .atmosphere-grain {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#app .profile-page .profile-background {
+  min-height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  opacity: .78;
+  filter: saturate(.86) contrast(.97);
+}
+
+#app .profile-page .atmosphere-wash {
+  background: linear-gradient(180deg, rgba(238, 245, 237, .72), rgba(222, 237, 227, .32) 42%, rgba(220, 235, 225, .76));
+}
+
+#app .profile-page .atmosphere-grain {
+  opacity: .16;
+  background-image: radial-gradient(rgba(23, 60, 55, .16) .5px, transparent .5px);
+  background-size: 5px 5px;
+  mix-blend-mode: multiply;
+}
+
+#app .profile-page .profile-shell {
+  position: relative;
+  z-index: 1;
+  width: min(1240px, 100%);
+  margin: 0 auto;
+}
+
+#app .profile-page .profile-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 70px;
+  align-items: end;
+  padding: 82px 18px 42px;
+}
+
+#app .profile-page .profile-identity,
+#app .profile-page .paper-card,
+#app .profile-page .stat-card {
+  border: 1px solid rgba(255, 255, 255, .52);
+  background: linear-gradient(135deg, rgba(255, 255, 255, .32), rgba(227, 240, 231, .22));
+  box-shadow: inset 0 1px rgba(255, 255, 255, .72), inset 0 -1px rgba(25, 78, 68, .08), 0 22px 60px rgba(36, 82, 68, .13);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+
+#app .profile-page .paper-card::before,
+#app .profile-page .stat-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 14% 0%, rgba(255, 255, 255, .5), transparent 31%), linear-gradient(110deg, transparent 0 43%, rgba(255, 255, 255, .18) 68%, transparent 100%);
+}
+
+#app .profile-page .profile-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 28px 34px;
+  border-radius: 26px;
+}
+
+#app .profile-page .overview-grid,
+#app .profile-page .journal-grid,
+#app .profile-page .insight-grid,
+#app .profile-page .records-grid {
+  display: grid;
+  gap: 14px;
+}
+
+#app .profile-page .overview-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#app .profile-page .journal-grid { grid-template-columns: minmax(0, 1.65fr) minmax(280px, .85fr); }
+#app .profile-page .insight-grid,
+#app .profile-page .records-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+#app .profile-page .stat-card {
+  position: relative;
+  min-height: 170px;
+  overflow: hidden;
+  padding: 22px 23px;
+  border-radius: 20px;
+}
+
+#app .profile-page .activity-card,
+#app .profile-page .direction-card,
+#app .profile-page .ability-card,
+#app .profile-page .achievement-card,
+#app .profile-page .record-card { border-radius: 22px; }
+
+#app .profile-page .direction-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 300px;
+  padding: 25px 27px;
+  color: #edf5eb;
+  background: linear-gradient(145deg, rgba(20, 78, 68, .84), rgba(43, 113, 93, .68));
+  border-color: rgba(220, 245, 225, .3);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .28), 0 24px 55px rgba(21, 80, 67, .2);
+}
+
+#app .profile-page .direction-card .card-heading h3,
+#app .profile-page .direction-card .card-aside { color: #edf5eb; }
+
+#app .profile-page .section-heading,
+#app .profile-page .card-heading,
+#app .profile-page .activity-summary,
+#app .profile-page .activity-chart,
+#app .profile-page .activity-foot,
+#app .profile-page .ability-list,
+#app .profile-page .achievement-list,
+#app .profile-page .poem-list { position: relative; z-index: 1; }
+
+#app .profile-page .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin: 66px 0 20px; padding: 0 4px; }
+#app .profile-page .section-heading h2 { margin: 9px 0 0; color: var(--profile-ink); font: 600 29px/1.25 'Noto Serif SC', serif; }
+#app .profile-page .eyebrow { color: var(--profile-jade); font: 600 11px/1.2 'Noto Sans SC', sans-serif; letter-spacing: .2em; }
+#app .profile-page .section-note { color: var(--profile-muted); font-size: 12px; }
+#app .profile-page .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#app .profile-page .card-heading > div { display: flex; align-items: center; gap: 11px; }
+#app .profile-page .card-heading h3 { margin: 0; color: var(--profile-ink); font: 600 18px/1.3 'Noto Serif SC', serif; }
+#app .profile-page .card-index { color: var(--profile-gold); font-size: 11px; letter-spacing: .08em; }
+#app .profile-page .card-aside { color: #91a99d; font-size: 11px; }
+#app .profile-page .stat-topline { display: flex; align-items: center; justify-content: space-between; }
+#app .profile-page .stat-symbol { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid rgba(47, 131, 115, .3); border-radius: 50%; color: var(--profile-deep); background: rgba(255, 255, 255, .3); }
+#app .profile-page .stat-value { display: block; margin-top: 20px; color: var(--profile-ink); font: 600 36px/1 'Noto Serif SC', serif; }
+#app .profile-page .stat-value small { margin-left: 5px; color: var(--profile-muted); font: 400 12px 'Noto Sans SC', sans-serif; }
+#app .profile-page .stat-label { display: block; margin-top: 8px; color: var(--profile-muted); font-size: 12px; }
+#app .profile-page .stat-rule { display: block; height: 3px; margin-top: 19px; overflow: hidden; border-radius: 99px; background: rgba(47, 131, 115, .12); }
+#app .profile-page .stat-rule i { display: block; height: 100%; border-radius: inherit; background: var(--profile-jade); }
+#app .profile-page .activity-card,
+#app .profile-page .ability-card,
+#app .profile-page .achievement-card,
+#app .profile-page .record-card { padding: 25px 27px; }
+#app .profile-page .activity-summary { display: flex; gap: 32px; margin: 28px 0 15px; }
+#app .profile-page .activity-summary div { display: flex; align-items: baseline; gap: 7px; }
+#app .profile-page .activity-summary strong { color: var(--profile-ink); font: 600 25px/1 'Noto Serif SC', serif; }
+#app .profile-page .activity-summary span,
+#app .profile-page .activity-foot { color: var(--profile-muted); font-size: 11px; }
+#app .profile-page .activity-chart { display: flex; align-items: end; height: 166px; gap: 6px; padding: 14px 3px 0; border-bottom: 1px solid rgba(23, 60, 55, .13); }
+#app .profile-page .activity-column { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: end; height: 100%; }
+#app .profile-page .bar-stack { display: flex; align-items: end; justify-content: center; width: 100%; height: calc(100% - 16px); gap: 2px; }
+#app .profile-page .bar-stack i { display: block; width: min(7px, 45%); min-height: 3px; border-radius: 5px 5px 1px 1px; }
+#app .profile-page .bar-learning { background: linear-gradient(180deg, #55a68e, #247565); }
+#app .profile-page .bar-challenge { background: linear-gradient(180deg, #e1bd7a, #b68142); }
+#app .profile-page .activity-foot { display: flex; justify-content: space-between; padding-top: 11px; }
+#app .profile-page .direction-lead { max-width: 270px; margin: 34px 0 25px; color: rgba(246, 249, 235, .92); font: 400 20px/1.72 'Noto Serif SC', serif; }
+#app .profile-page .direction-meta { display: flex; align-items: center; justify-content: space-between; color: rgba(238, 245, 232, .7); font-size: 11px; }
+#app .profile-page .ink-button { align-self: flex-start; margin-top: auto; padding: 10px 0 2px; border: 0; border-bottom: 1px solid rgba(228, 197, 135, .58); color: #f1d69a; background: transparent; }
+#app .profile-page .ability-track { height: 7px; overflow: hidden; border-radius: 99px; background: rgba(47, 131, 115, .12); }
+#app .profile-page .ability-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #8bbfac, var(--profile-deep)); }
+#app .profile-page .achievement-row { display: flex; align-items: center; gap: 11px; padding: 12px 0; border-bottom: 1px solid rgba(23, 60, 55, .09); }
+#app .profile-page .achievement-row:last-child { border-bottom: 0; }
+#app .profile-page .poem-row { display: flex; align-items: center; width: 100%; gap: 11px; padding: 13px 0; border: 0; border-bottom: 1px solid rgba(23, 60, 55, .09); background: transparent; text-align: left; }
+#app .profile-page .poem-row:last-child { border-bottom: 0; }
+#app .profile-page .poem-mark { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; border: 1px solid rgba(47, 131, 115, .28); border-radius: 50%; color: var(--profile-deep); background: rgba(255, 255, 255, .35); font-size: 11px; }
+#app .profile-page .poem-copy { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+#app .profile-page .poem-copy strong { overflow: hidden; color: var(--profile-ink); font: 500 14px 'Noto Serif SC', serif; text-overflow: ellipsis; white-space: nowrap; }
+#app .profile-page .poem-copy small { color: var(--profile-muted); font-size: 10px; }
+
+@media (max-width: 900px) {
+  #app .profile-page .profile-hero { grid-template-columns: 1fr; gap: 25px; padding-top: 55px; }
+  #app .profile-page .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #app .profile-page .journal-grid,
+  #app .profile-page .insight-grid,
+  #app .profile-page .records-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 620px) {
+  #app .profile-page .profile-hero { padding: 42px 8px 30px; }
+  #app .profile-page .profile-identity { align-items: flex-start; flex-direction: column; padding: 22px 20px; }
+  #app .profile-page .overview-grid { gap: 10px; }
+  #app .profile-page .stat-card { min-height: 150px; padding: 17px; }
+  #app .profile-page .stat-value { font-size: 29px; }
+  #app .profile-page .activity-card,
+  #app .profile-page .direction-card,
+  #app .profile-page .ability-card,
+  #app .profile-page .achievement-card,
+  #app .profile-page .record-card { padding: 21px 18px; }
+}

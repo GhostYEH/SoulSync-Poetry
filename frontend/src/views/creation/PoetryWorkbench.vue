@@ -1,135 +1,163 @@
 <template>
   <div class="poetry-workbench">
-    <!-- 水墨背景装饰 -->
     <div class="ink-background">
       <div class="ink-blob" v-for="i in 6" :key="i" :class="`blob-${i}`"></div>
     </div>
 
-    <!-- 页面标题 -->
-    <div class="title-section">
-      <div class="brush-stroke left"></div>
-      <h1 class="main-title">
-        <span class="title-char" v-for="(char, i) in 'AI诗词创作工作台'" :key="i" :style="{ animationDelay: `${i * 0.08}s` }">
-          {{ char }}
-        </span>
-      </h1>
-      <div class="brush-stroke right"></div>
-    </div>
+    <!-- 新的创作入口：场景先建立情绪，工作区再承接流程。 -->
+    <section class="workbench-intro">
+      <div class="workbench-intro-copy">
+        <span class="workbench-eyebrow">CREATION STUDIO / 诗意工作室</span>
+        <h1>让灵感，<em>慢慢成诗</em></h1>
+        <p>把一个念头交给 AI，先看见它的情绪与骨架，再把最后一句留给自己。</p>
+        <div class="intro-signature">
+          <span class="signature-seal">灵</span>
+          <span><strong>今日创作</strong><small>从一处意象开始</small></span>
+        </div>
+      </div>
+      <figure class="workbench-scene">
+        <div class="scene-marquee" aria-hidden="true">
+          <img :src="sceneArt" alt="" />
+          <img :src="sceneArt" alt="" />
+          <img :src="sceneArt" alt="" />
+        </div>
+        <div class="scene-wash"></div>
+        <figcaption><span>一境入诗</span><small>山水会替你保留第一缕情绪</small></figcaption>
+      </figure>
+    </section>
 
-    <!-- 创作模式选择 -->
-    <div class="mode-selector">
-      <div
+    <section class="mode-selector" aria-label="选择创作方式">
+      <div class="mode-selector-heading">
+        <span class="workbench-eyebrow">CHOOSE A RHYTHM</span>
+        <strong>你想怎样开始？</strong>
+        <small>流程不变，入口换成更像创作的选择</small>
+      </div>
+      <div class="mode-track">
+        <button
         v-for="mode in modes"
         :key="mode.id"
         :class="['mode-card', { active: currentMode === mode.id }]"
         @click="switchMode(mode.id)"
+        :aria-pressed="currentMode === mode.id"
       >
-        <div class="mode-icon">{{ mode.icon }}</div>
-        <div class="mode-info">
-          <h3>{{ mode.title }}</h3>
-          <p>{{ mode.desc }}</p>
-        </div>
-        <div class="mode-badge" v-if="mode.badge">{{ mode.badge }}</div>
+          <span class="mode-index">{{ String(modes.indexOf(mode) + 1).padStart(2, '0') }}</span>
+          <span class="mode-icon">{{ mode.icon }}</span>
+          <span class="mode-info"><strong>{{ mode.title }}</strong><small>{{ mode.desc }}</small></span>
+          <span class="mode-badge" v-if="mode.badge">{{ mode.badge }}</span>
+          <span class="mode-active-mark" aria-hidden="true">↗</span>
+        </button>
       </div>
-    </div>
+    </section>
 
-    <!-- 主工作区域 -->
-    <div class="workspace">
-      <!-- 引导创作模式 -->
-      <transition name="slide-fade" mode="out-in">
-        <div v-if="currentMode === 'guided'" class="guided-workspace" key="guided">
-          <!-- 步骤指示器 -->
-          <div class="step-indicator">
-            <div
-              v-for="(step, index) in steps"
-              :key="index"
-              :class="['step', { active: currentStep === index + 1, completed: currentStep > index + 1 }]"
-            >
-              <div class="step-number">{{ index + 1 }}</div>
-              <div class="step-label">{{ step.label }}</div>
-              <div class="step-connector" v-if="index < steps.length - 1"></div>
+    <section class="creative-stage">
+      <aside class="stage-rail">
+        <div class="stage-rail-heading"><span>THE MAKING</span><strong>创作进度</strong></div>
+        <ol v-if="currentMode === 'guided'" class="step-indicator">
+          <li
+            v-for="(step, index) in steps"
+            :key="index"
+            :class="['step', { active: currentStep === index + 1, completed: currentStep > index + 1 }]"
+          >
+            <span class="step-number">{{ index + 1 }}</span>
+            <span class="step-label"><strong>{{ step.label }}</strong><small>{{ index === 0 ? '先说出想写的事' : index === 1 ? '让情绪找到骨架' : '把句子写成作品' }}</small></span>
+          </li>
+        </ol>
+        <div v-else class="alternate-rail">
+          <span class="alternate-rail-icon">{{ activeMode?.icon }}</span>
+          <strong>{{ activeMode?.title }}</strong>
+          <p>{{ activeMode?.desc }}</p>
+          <span class="alternate-rail-line"></span>
+          <small>完成这一场创作后，可随时切回引导流程继续完善。</small>
+        </div>
+        <div class="stage-note">
+          <span>此刻</span>
+          <strong>{{ currentStepCopy }}</strong>
+        </div>
+        <div class="stage-rail-foot"><span class="status-pulse"></span> AI 灵感引擎在线</div>
+      </aside>
+
+      <div class="workspace">
+        <div class="workspace-topline">
+          <div><span class="workbench-eyebrow">NOW CREATING</span><strong>{{ activeMode?.title }}</strong></div>
+          <span class="workspace-status">{{ currentMode === 'guided' ? `步骤 ${currentStep} / 3` : '自由创作模式' }}</span>
+        </div>
+
+        <transition name="slide-fade" mode="out-in">
+          <div v-if="currentMode === 'guided'" class="guided-workspace" key="guided">
+            <div class="step-content">
+              <InspirationPanel
+                v-if="currentStep === 1"
+                ref="inspirationPanel"
+                :theme="poemDraft.theme"
+                :genre="poemDraft.genre"
+                :is-loading="isLoading"
+                @update:theme="poemDraft.theme = $event"
+                @update:genre="poemDraft.genre = $event"
+                @generate="handleGenerateInspiration"
+                @next="handleInspirationNext"
+              />
+
+              <StructureGuide
+                v-else-if="currentStep === 2"
+                :genre="poemDraft.genre"
+                :theme="poemDraft.theme"
+                :keywords="poemDraft.keywords"
+                :mood="poemDraft.mood"
+                @back="currentStep = 1"
+                @start="currentStep = 3"
+              />
+
+              <PoemEditor
+                v-else-if="currentStep === 3"
+                ref="poemEditor"
+                :title="poemDraft.title"
+                :lines="poemDraft.lines"
+                :genre="poemDraft.genre"
+                :theme="poemDraft.theme"
+                :keywords="poemDraft.keywords"
+                :is-generating="isGenerating"
+                :is-polishing="isPolishing"
+                @update:title="poemDraft.title = $event"
+                @update:lines="poemDraft.lines = $event"
+                @recommend="handleRecommend"
+                @generate="handleGeneratePoem"
+                @polish="handlePolish"
+                @score="handleScore"
+                @save="handleSave"
+                @back="currentStep = 2"
+              />
             </div>
           </div>
 
-          <!-- 步骤内容 -->
-          <div class="step-content">
-            <!-- 步骤1：灵感生成 -->
-            <InspirationPanel
-              v-if="currentStep === 1"
-              ref="inspirationPanel"
-              :theme="poemDraft.theme"
-              :genre="poemDraft.genre"
+          <div v-else-if="currentMode === 'feihua'" class="mode-workspace" key="feihua">
+            <FeihuaMode
+              ref="feihuaMode"
               :is-loading="isLoading"
-              @update:theme="poemDraft.theme = $event"
-              @update:genre="poemDraft.genre = $event"
-              @generate="handleGenerateInspiration"
-              @next="handleInspirationNext"
-            />
-
-            <!-- 步骤2：结构引导 -->
-            <StructureGuide
-              v-else-if="currentStep === 2"
-              :genre="poemDraft.genre"
-              :theme="poemDraft.theme"
-              :keywords="poemDraft.keywords"
-              :mood="poemDraft.mood"
-              @back="currentStep = 1"
-              @start="currentStep = 3"
-            />
-
-            <!-- 步骤3：创作编辑 -->
-            <PoemEditor
-              v-else-if="currentStep === 3"
-              ref="poemEditor"
-              :title="poemDraft.title"
-              :lines="poemDraft.lines"
-              :genre="poemDraft.genre"
-              :theme="poemDraft.theme"
-              :keywords="poemDraft.keywords"
-              :is-generating="isGenerating"
+              :score="currentScore"
+              :keyword="feihuaDraft.keyword"
               :is-polishing="isPolishing"
-              @update:title="poemDraft.title = $event"
-              @update:lines="poemDraft.lines = $event"
-              @recommend="handleRecommend"
-              @generate="handleGeneratePoem"
-              @polish="handlePolish"
-              @score="handleScore"
-              @save="handleSave"
-              @back="currentStep = 2"
+              :polish-result="polishResult"
+              @update:title="feihuaDraft.title = $event"
+              @update:content="feihuaDraft.content = $event"
+              @score="handleFeihuaScore"
+              @change:keyword="feihuaDraft.keyword = $event"
+              @polish="handleFeihuaPolish"
+              @apply="handleFeihuaApplyPolish"
             />
           </div>
-        </div>
 
-        <!-- 飞花令创作模式 -->
-        <div v-else-if="currentMode === 'feihua'" class="mode-workspace" key="feihua">
-          <FeihuaMode
-            ref="feihuaMode"
-            :is-loading="isLoading"
-            :score="currentScore"
-            :keyword="feihuaDraft.keyword"
-            :is-polishing="isPolishing"
-            :polish-result="polishResult"
-            @update:title="feihuaDraft.title = $event"
-            @update:content="feihuaDraft.content = $event"
-            @score="handleFeihuaScore"
-            @change:keyword="feihuaDraft.keyword = $event"
-            @polish="handleFeihuaPolish"
-            @apply="handleFeihuaApplyPolish"
-          />
-        </div>
-
-        <!-- 接龙创作模式 -->
-        <div v-else-if="currentMode === 'chain'" class="mode-workspace" key="chain">
-          <ChainMode
-            ref="chainMode"
-            :is-loading="isLoading"
-            @start="handleChainStart"
-            @submit="handleChainSubmit"
-            @end="handleChainEnd"
-          />
-        </div>
-      </transition>
-    </div>
+          <div v-else-if="currentMode === 'chain'" class="mode-workspace" key="chain">
+            <ChainMode
+              ref="chainMode"
+              :is-loading="isLoading"
+              @start="handleChainStart"
+              @submit="handleChainSubmit"
+              @end="handleChainEnd"
+            />
+          </div>
+        </transition>
+      </div>
+    </section>
 
     <!-- 评分弹窗 -->
     <transition name="fade">
@@ -174,6 +202,7 @@ import PoemScorer from './components/PoemScorer.vue';
 import FeihuaMode from './components/FeihuaMode.vue';
 import ChainMode from './components/ChainMode.vue';
 import { api } from '../../services/api.js';
+import sceneArt from '../../assets/poetry-workbench-loop.png';
 
 export default {
   name: 'PoetryWorkbench',
@@ -219,6 +248,12 @@ export default {
       { label: '结构引导' },
       { label: '生成编辑' }
     ];
+
+    const activeMode = computed(() => modes.find(mode => mode.id === currentMode.value));
+    const currentStepCopy = computed(() => {
+      if (currentMode.value !== 'guided') return activeMode.value?.desc || '用另一种方式写下心中所想';
+      return ['先把想写的事说清楚', '让意象和情绪彼此照应', '把灵感落成可以保存的句子'][currentStep.value - 1];
+    });
 
     // 诗词草稿数据
     const poemDraft = reactive({
@@ -717,6 +752,9 @@ export default {
       modes,
       currentStep,
       steps,
+      activeMode,
+      currentStepCopy,
+      sceneArt,
 
       // 数据
       poemDraft,

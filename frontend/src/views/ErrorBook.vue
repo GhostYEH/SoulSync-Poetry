@@ -13,7 +13,7 @@
           <span class="title-icon">错</span>
           <h1 class="page-title">诗词错题本</h1>
         </div>
-        <p class="page-subtitle">知己知彼，百战不殆</p>
+        <p class="page-subtitle">把错过的，再读一遍</p>
       </div>
       <div class="header-right">
         <button class="header-action-btn" @click="startSmartReview" :disabled="errors.length === 0">
@@ -146,6 +146,8 @@
               <option value="all">全部来源</option>
               <option value="challenge">诗词闯关</option>
               <option value="battle">闯关对战</option>
+              <option value="feihualing_answer">飞花令作答</option>
+              <option value="feihualing_hint">飞花令提示</option>
             </select>
           </div>
           <div class="filter-item">
@@ -185,7 +187,7 @@
               </div>
               <div class="error-meta">
                 <span class="meta-tag source-tag" v-if="item.source">
-                  {{ item.source === 'challenge' ? '闯关' : '对战' }}
+                  {{ sourceLabel(item.source) }}
                 </span>
                 <span class="meta-tag level-tag" v-if="item.level">
                   Lv.{{ item.level }}
@@ -321,6 +323,14 @@ export default {
 
     // 展开诗词全文
     const expandedPoems = ref({});
+
+    const sourceLabel = (source) => ({
+      challenge: '闯关',
+      battle: '对战',
+      parkour: '诗词跑酷',
+      feihualing_answer: '飞花令作答',
+      feihualing_hint: '飞花令提示'
+    }[source] || '学习练习');
 
     // ---- 复习模式状态（错题复习页使用，此处仅保留兼容） ----
     const reviewMode = ref(false);
@@ -623,6 +633,7 @@ export default {
       loading, errors, filterType, filterSource, sortType,
       currentPage, pageSize, totalPages, paginatedErrors, visiblePages,
       stats, masteryRate, filteredErrors,
+      sourceLabel,
       trendChartRef, expandedPoems, reviewMode,
       removeSingle, confirmClearAll, togglePoem,
       startSmartReview, reviewSingle,
@@ -1584,5 +1595,242 @@ export default {
   .result-nav-btn { justify-content: center; width: 100%; }
   .review-hint-row { flex-direction: column; }
   .stats-cards { display: grid; grid-template-columns: 1fr 1fr; }
+}
+
+/* ===== 首页同源重构：错题本书页舞台 ===== */
+.error-book-page {
+  --error-cinnabar: #b7695f;
+  --error-cinnabar-soft: rgba(183, 105, 95, .11);
+  max-width: none;
+  min-height: calc(100dvh - 70px);
+  padding: 18px clamp(18px, 3vw, 52px) 72px;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 0 !important;
+  border-radius: 28px !important;
+  background: linear-gradient(115deg, rgba(247, 252, 249, .98) 0%, rgba(247, 252, 249, .9) 54%, rgba(247, 252, 249, .74) 100%) !important;
+  box-shadow: none !important;
+}
+
+.error-book-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(47, 157, 138, .08), transparent 25%),
+    radial-gradient(circle at 80% 76%, rgba(222, 154, 115, .09), transparent 28%);
+}
+
+.error-book-page::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 0;
+  width: 68%;
+  pointer-events: none;
+  background: url('../assets/review-inkwash.png') center right / cover no-repeat;
+  opacity: .22;
+  mix-blend-mode: multiply;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .35) 22%, #000 58%, #000 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .35) 22%, #000 58%, #000 100%);
+}
+.error-book-page > * { position: relative; z-index: 1; }
+
+.error-book-page .page-header {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px 0 26px;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 1fr);
+  align-items: center;
+  gap: 18px;
+  position: relative;
+  top: auto;
+  background: rgba(255, 255, 255, .52) !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(74, 133, 121, .16) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+.error-book-page .header-left,
+.error-book-page .header-right { min-width: 0; }
+.error-book-page .header-right { display: flex; justify-content: flex-end; }
+.error-book-page .header-center { position: relative; }
+.error-book-page .page-title-wrap { gap: 12px; }
+.error-book-page .title-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(47, 157, 138, .12) !important;
+  border-color: rgba(47, 157, 138, .2) !important;
+  font-family: var(--font-calligraphy);
+}
+.error-book-page .page-title {
+  margin: 0;
+  color: var(--jade-ink) !important;
+  font-family: var(--font-ancient);
+  font-size: clamp(22px, 2.2vw, 30px);
+  letter-spacing: .08em;
+}
+.error-book-page .page-subtitle {
+  margin: 6px 0 0;
+  color: var(--jade-muted) !important;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: .16em;
+}
+.error-book-page .back-btn,
+.error-book-page .header-action-btn {
+  border-radius: 10px;
+  font-family: var(--font-sans);
+  box-shadow: none;
+}
+.error-book-page .back-btn {
+  padding: 9px 14px;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(255, 255, 255, .62) !important;
+  border-color: rgba(47, 157, 138, .24) !important;
+}
+.error-book-page .header-action-btn {
+  padding: 10px 16px;
+  color: #fff !important;
+  background: var(--jade-accent-strong) !important;
+  border-color: transparent !important;
+  box-shadow: 0 8px 20px rgba(25, 118, 102, .16);
+}
+.error-book-page .header-action-btn:hover:not(:disabled) { box-shadow: 0 12px 26px rgba(25, 118, 102, .22); }
+
+.error-book-page .main-content {
+  width: 100%;
+  max-width: 1440px;
+  margin: 22px auto 0;
+  gap: 20px;
+}
+.error-book-page .stats-row {
+  grid-template-columns: minmax(310px, .78fr) minmax(0, 1.22fr);
+  gap: 20px;
+}
+.error-book-page .stats-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.error-book-page .stat-card,
+.error-book-page .chart-panel,
+.error-book-page .control-row,
+.error-book-page .error-card {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .72) !important;
+  border-color: rgba(74, 133, 121, .18) !important;
+  box-shadow: 0 12px 32px rgba(30, 82, 73, .07) !important;
+}
+.error-book-page .stat-card { padding: 17px 18px; }
+.error-book-page .stat-card:hover,
+.error-book-page .error-card:hover { border-color: rgba(47, 157, 138, .34) !important; box-shadow: 0 16px 36px rgba(30, 82, 73, .11) !important; }
+.error-book-page .stat-icon { border-radius: 12px; }
+.error-book-page .total-icon { color: var(--jade-accent-strong); background: rgba(47, 157, 138, .1); }
+.error-book-page .mastered-icon { color: #5f856f; background: rgba(95, 133, 111, .12); }
+.error-book-page .week-icon { color: var(--error-cinnabar); background: var(--error-cinnabar-soft); }
+.error-book-page .rate-icon { color: #6f8e9c; background: rgba(111, 142, 156, .12); }
+.error-book-page .stat-value { color: var(--jade-ink) !important; font-family: var(--font-sans); font-size: 24px; }
+.error-book-page .stat-value.mastered { color: #5f856f !important; }
+.error-book-page .stat-value.week { color: var(--error-cinnabar) !important; }
+.error-book-page .stat-value.rate { color: #6f8e9c !important; }
+.error-book-page .stat-label,
+.error-book-page .chart-title,
+.error-book-page .legend-item { color: var(--jade-muted) !important; font-family: var(--font-sans); }
+.error-book-page .chart-panel { padding: 22px 24px 18px; min-height: 190px; }
+.error-book-page .chart-title { font-size: 15px; font-weight: 600; letter-spacing: .08em; }
+.error-book-page .chart-area { height: 158px; }
+.error-book-page .total-dot { background: var(--error-cinnabar); }
+.error-book-page .mastered-dot { background: var(--jade-accent); }
+
+.error-book-page .control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  padding: 18px 22px;
+  gap: 20px;
+}
+.error-book-page .filter-group { gap: 14px 20px; }
+.error-book-page .filter-item { align-items: flex-start; flex-direction: column; gap: 5px; }
+.error-book-page .filter-item label { color: var(--jade-muted) !important; font-family: var(--font-sans); font-size: 11px; letter-spacing: .08em; }
+.error-book-page .filter-select {
+  min-width: 146px;
+  border-radius: 9px;
+  color: var(--jade-ink) !important;
+  background: rgba(247, 252, 249, .9) !important;
+  border-color: rgba(74, 133, 121, .22) !important;
+  font-family: var(--font-sans);
+}
+.error-book-page .control-actions { align-items: center; }
+.error-book-page .ctrl-btn { border-radius: 10px; font-family: var(--font-sans); }
+.error-book-page .ctrl-btn.primary { background: var(--jade-accent-strong) !important; border-color: transparent !important; }
+.error-book-page .ctrl-btn.danger { color: var(--error-cinnabar) !important; background: var(--error-cinnabar-soft) !important; border-color: rgba(183, 105, 95, .22) !important; }
+
+.error-book-page .error-list { gap: 14px; }
+.error-book-page .error-card { padding: 22px 24px 18px; }
+.error-book-page .poem-title-text,
+.error-book-page .question-content,
+.error-book-page .explanation-text,
+.error-book-page .full-poem-text { color: var(--jade-ink) !important; font-family: var(--font-ancient); }
+.error-book-page .poem-title-text { font-size: 19px; letter-spacing: .04em; }
+.error-book-page .poem-author-text,
+.error-book-page .question-label,
+.error-book-page .answer-label,
+.error-book-page .explanation-label,
+.error-book-page .add-time,
+.error-book-page .last-review,
+.error-book-page .poem-label { color: var(--jade-muted) !important; font-family: var(--font-sans); }
+.error-book-page .error-question-block,
+.error-book-page .error-explanation { background: rgba(239, 248, 244, .72) !important; border-color: rgba(74, 133, 121, .15) !important; }
+.error-book-page .error-question-block { border-radius: 14px; }
+.error-book-page .question-content { font-size: 17px; }
+.error-book-page .answer-arrow { color: var(--jade-accent); }
+.error-book-page .wrong-text { color: var(--error-cinnabar); background: var(--error-cinnabar-soft); }
+.error-book-page .correct-text { color: #4f8a72; background: rgba(79, 138, 114, .11); }
+.error-book-page .source-tag,
+.error-book-page .level-tag,
+.error-book-page .mastered-tag { color: var(--jade-accent-strong); background: rgba(47, 157, 138, .1); }
+.error-book-page .wrong-count-tag { color: var(--error-cinnabar); background: var(--error-cinnabar-soft); }
+.error-book-page .full-poem-preview { border-color: rgba(74, 133, 121, .24); }
+.error-book-page .error-card-footer { border-color: rgba(74, 133, 121, .14); }
+.error-book-page .footer-btn { border-radius: 9px; font-family: var(--font-sans); }
+.error-book-page .footer-btn.review-btn { color: var(--jade-accent-strong); background: rgba(47, 157, 138, .1); border-color: rgba(47, 157, 138, .22); }
+.error-book-page .footer-btn.delete-btn { color: var(--error-cinnabar); background: var(--error-cinnabar-soft); border-color: rgba(183, 105, 95, .2); }
+.error-book-page .pagination { padding: 12px 0 0; }
+.error-book-page .page-btn { border-radius: 9px; color: var(--jade-accent-strong); background: rgba(255, 255, 255, .64); border-color: rgba(74, 133, 121, .2); }
+.error-book-page .page-btn.active { background: var(--jade-accent-strong); border-color: transparent; }
+.error-book-page .empty-state { padding: 132px 20px 160px; }
+.error-book-page .empty-state h3 { color: var(--jade-ink) !important; font-family: var(--font-ancient); }
+.error-book-page .empty-state p { color: var(--jade-muted) !important; font-family: var(--font-sans); }
+.error-book-page .action-link-btn { border-radius: 10px; background: var(--jade-accent-strong); font-family: var(--font-sans); }
+
+@media (max-width: 900px) {
+  .error-book-page .stats-row { grid-template-columns: 1fr; }
+  .error-book-page .chart-panel { display: block; }
+}
+@media (max-width: 680px) {
+  .error-book-page { padding: 10px 12px 48px; }
+  .error-book-page::after { width: 92%; opacity: .16; }
+  .error-book-page .page-header { grid-template-columns: 1fr; gap: 12px; padding-bottom: 18px; }
+  .error-book-page .header-center { order: -1; text-align: left; }
+  .error-book-page .header-right { justify-content: stretch; }
+  .error-book-page .header-action-btn { width: 100%; justify-content: center; }
+  .error-book-page .control-row { grid-template-columns: 1fr; }
+  .error-book-page .filter-group { display: grid; grid-template-columns: 1fr 1fr; }
+  .error-book-page .filter-select { min-width: 0; width: 100%; }
+  .error-book-page .control-actions { justify-content: stretch; }
+  .error-book-page .control-actions > * { flex: 1; justify-content: center; }
+  .error-book-page .error-card { padding: 18px 16px 15px; }
+  .error-book-page .answer-comparison { align-items: stretch; }
+  .error-book-page .answer-row { min-width: 100%; }
+  .error-book-page .answer-arrow { display: none; }
 }
 </style>

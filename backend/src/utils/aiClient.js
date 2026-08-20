@@ -215,6 +215,81 @@ class AIClient {
     throw lastError;
   }
 
+  async stream(payload, options = {}) {
+    const timeout = options.timeout || this.defaultPerAttemptTimeout;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const requestId = crypto.randomUUID();
+
+    try {
+      const response = await fetch(this.apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`,
+          ...(options.headers || {})
+        },
+        body: JSON.stringify({ ...payload, stream: true }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new AIError(mapStatusToError(response.status), `API request failed with status ${response.status}`, errorText, response.status);
+      }
+      if (!response.body) throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'Streaming response body is empty');
+
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let fullText = '';
+      const emitEvent = (line) => {
+        if (!line.startsWith('data:')) return;
+        const raw = line.slice(5).trim();
+        if (!raw || raw === '[DONE]') return;
+        let event;
+        try { event = JSON.parse(raw); } catch (_) { return; }
+        const delta = event.choices?.[0]?.delta || {};
+        const content = delta.content || delta.reasoning_content || '';
+        if (content) {
+          fullText += content;
+          if (typeof options.onToken === 'function') options.onToken(content);
+        }
+      };
+
+      const consumeChunk = (value, done = false) => {
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        lines.forEach(emitEvent);
+      };
+
+      if (typeof response.body.getReader === 'function') {
+        const reader = response.body.getReader();
+        while (true) {
+          const { value, done } = await reader.read();
+          consumeChunk(value, done);
+          if (done) break;
+        }
+      } else {
+        for await (const chunk of response.body) {
+          consumeChunk(chunk);
+        }
+        consumeChunk(new Uint8Array(), true);
+      }
+      if (buffer.trim()) emitEvent(buffer.trim());
+      this.log({ requestId, task: options.taskName || 'AI_Stream', model: payload.model, status: 'success' });
+      return fullText;
+    } catch (error) {
+      const mappedError = error.name === 'AbortError'
+        ? new AIError(AI_ERRORS.TIMEOUT, 'Request timeout')
+        : error instanceof AIError ? error : new AIError(AI_ERRORS.NETWORK_ERROR, error.message, error);
+      this.log({ requestId, task: options.taskName || 'AI_Stream', model: payload.model, status: 'error', errorCode: mappedError.code });
+      throw mappedError;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   log(info) {
     // 简单的 JSON log 输出，确保不记录敏感信息
     console.log(JSON.stringify({

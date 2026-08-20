@@ -13,7 +13,7 @@
           <span class="title-icon">习</span>
           <h1 class="page-title">错题复习</h1>
         </div>
-        <p class="page-subtitle">温故而知新，可以为师矣</p>
+        <p class="page-subtitle">一题一题，把掌握写回记忆</p>
       </div>
       <div class="header-right">
         <router-link to="/challenge/error-book" class="error-book-link-btn">
@@ -1290,5 +1290,169 @@ export default {
   .progress-stats { gap: 8px; }
   .stat-pill { min-width: 70px; padding: 8px 12px; }
   .pill-num { font-size: 20px; }
+}
+
+/* ===== 首页同源重构：错题复习书页舞台 ===== */
+.review-page {
+  --review-cinnabar: #b7695f;
+  --review-cinnabar-soft: rgba(183, 105, 95, .11);
+  max-width: none;
+  min-height: calc(100dvh - 70px);
+  padding: 18px clamp(18px, 3vw, 52px) 72px;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 0 !important;
+  border-radius: 28px !important;
+  background: linear-gradient(112deg, rgba(247, 252, 249, .98) 0%, rgba(247, 252, 249, .9) 54%, rgba(247, 252, 249, .74) 100%) !important;
+  box-shadow: none !important;
+}
+.review-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle at 12% 70%, rgba(47, 157, 138, .08), transparent 28%);
+}
+.review-page::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 0;
+  width: 68%;
+  pointer-events: none;
+  background: url('../assets/review-inkwash.png') center right / cover no-repeat;
+  opacity: .22;
+  mix-blend-mode: multiply;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .35) 22%, #000 58%, #000 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .35) 22%, #000 58%, #000 100%);
+}
+.review-page > * { position: relative; z-index: 1; }
+.review-page .review-page-header {
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 16px 0 26px;
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 1fr);
+  align-items: center;
+  gap: 18px;
+  position: relative;
+  top: auto;
+  background: rgba(255, 255, 255, .52) !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(74, 133, 121, .16) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+.review-page .header-left,
+.review-page .header-right { min-width: 0; }
+.review-page .header-right { display: flex; justify-content: flex-end; }
+.review-page .header-center { position: relative; }
+.review-page .page-title-wrap { gap: 12px; }
+.review-page .title-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  color: var(--jade-accent-strong) !important;
+  background: rgba(47, 157, 138, .12) !important;
+  border-color: rgba(47, 157, 138, .2) !important;
+  font-family: var(--font-calligraphy);
+}
+.review-page .page-title {
+  margin: 0;
+  color: var(--jade-ink) !important;
+  font-family: var(--font-ancient);
+  font-size: clamp(22px, 2.2vw, 30px);
+  letter-spacing: .08em;
+}
+.review-page .page-subtitle { margin: 6px 0 0; color: var(--jade-muted) !important; font-family: var(--font-sans); font-size: 12px; letter-spacing: .16em; }
+.review-page .back-btn,
+.review-page .error-book-link-btn { border-radius: 10px; font-family: var(--font-sans); box-shadow: none; }
+.review-page .back-btn { padding: 9px 14px; color: var(--jade-accent-strong) !important; background: rgba(255, 255, 255, .62) !important; border-color: rgba(47, 157, 138, .24) !important; }
+.review-page .error-book-link-btn { padding: 10px 15px; color: var(--jade-accent-strong) !important; background: rgba(255, 255, 255, .64) !important; border-color: rgba(47, 157, 138, .24) !important; }
+
+.review-page .review-body { width: 100%; max-width: 980px; margin: 22px auto 0; gap: 18px; }
+.review-page .progress-header,
+.review-page .question-area {
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .74) !important;
+  border-color: rgba(74, 133, 121, .18) !important;
+  box-shadow: 0 14px 34px rgba(30, 82, 73, .08) !important;
+}
+.review-page .progress-header { display: grid; grid-template-columns: auto minmax(250px, 1fr); align-items: center; gap: 30px; padding: 18px 24px; }
+.review-page .progress-stats { justify-content: flex-start; margin: 0; gap: 10px; }
+.review-page .stat-pill { min-width: 76px; padding: 8px 13px; border-radius: 12px; }
+.review-page .stat-pill.total { background: rgba(47, 157, 138, .1); }
+.review-page .stat-pill.remaining { background: var(--review-cinnabar-soft); }
+.review-page .stat-pill.mastered { background: rgba(95, 133, 111, .12); }
+.review-page .pill-num { font-family: var(--font-sans); }
+.review-page .total .pill-num { color: var(--jade-accent-strong); }
+.review-page .remaining .pill-num { color: var(--review-cinnabar); }
+.review-page .mastered .pill-num { color: #5f856f; }
+.review-page .pill-label,
+.review-page .progress-text { color: var(--jade-muted) !important; font-family: var(--font-sans); }
+.review-page .progress-bar-bg { height: 7px; background: rgba(47, 157, 138, .1); }
+.review-page .progress-bar-fill { background: var(--jade-accent-strong); }
+
+.review-page .question-area { padding: clamp(24px, 4vw, 46px) clamp(20px, 5vw, 58px); }
+.review-page .poem-context { margin-bottom: 26px; padding-bottom: 24px; border-color: rgba(74, 133, 121, .14); }
+.review-page .poem-title { color: var(--jade-ink) !important; font-family: var(--font-ancient); font-size: 22px; letter-spacing: .06em; }
+.review-page .poem-author { color: var(--jade-muted) !important; font-family: var(--font-sans); }
+.review-page .poem-full-text { background: rgba(239, 248, 244, .7) !important; border-color: rgba(74, 133, 121, .15) !important; border-radius: 14px; }
+.review-page .poem-pre { color: #3c625b !important; font-family: var(--font-ancient); }
+.review-page .question-display { margin-bottom: 26px; }
+.review-page .question-label-row { color: var(--jade-accent-strong) !important; font-family: var(--font-sans); letter-spacing: .12em; }
+.review-page .question-label-row svg { color: var(--jade-accent); }
+.review-page .question-main-text { padding: 20px 10px 25px; color: var(--jade-ink) !important; background: transparent !important; border: 0 !important; border-bottom: 1px solid rgba(74, 133, 121, .14) !important; border-radius: 0; font-family: var(--font-ancient); font-size: clamp(24px, 3vw, 34px); line-height: 1.65; letter-spacing: .05em; }
+.review-page .question-meta { justify-content: flex-start; margin-top: 14px; }
+.review-page .meta-tag { font-family: var(--font-sans); }
+.review-page .meta-tag:not(.wrong-times):not(.mastered-tag) { color: var(--jade-accent-strong); background: rgba(47, 157, 138, .1); }
+.review-page .meta-tag.wrong-times { color: var(--review-cinnabar); background: var(--review-cinnabar-soft); }
+.review-page .meta-tag.mastered-tag { color: #5f856f; background: rgba(95, 133, 111, .12); }
+.review-page .answer-input-field { border: 1px solid rgba(74, 133, 121, .28); border-radius: 13px; color: var(--jade-ink) !important; background: rgba(255, 255, 255, .88) !important; font-family: var(--font-sans); }
+.review-page .answer-input-field:focus { border-color: var(--jade-accent) !important; box-shadow: 0 0 0 4px rgba(47, 157, 138, .12) !important; }
+.review-page .action-row { align-items: center; }
+.review-page .hint-toggle-btn { border-radius: 10px; color: var(--jade-accent-strong); background: rgba(47, 157, 138, .1); border-color: rgba(47, 157, 138, .22); font-family: var(--font-sans); }
+.review-page .submit-btn { border-radius: 10px; background: var(--jade-accent-strong) !important; font-family: var(--font-sans); box-shadow: 0 8px 18px rgba(25, 118, 102, .17); }
+.review-page .hints-area { background: rgba(239, 248, 244, .76); border-color: rgba(74, 133, 121, .17); border-radius: 14px; }
+.review-page .hints-title,
+.review-page .hint-body,
+.review-page .hint-mask,
+.review-page .hints-loading-text,
+.review-page .hints-empty { color: var(--jade-accent-strong); font-family: var(--font-sans); }
+.review-page .hint-card { background: rgba(47, 157, 138, .08); }
+.review-page .hint-card:hover,
+.review-page .hint-card.revealed { background: rgba(47, 157, 138, .13); }
+.review-page .hint-num { color: var(--jade-accent-strong); background: rgba(47, 157, 138, .13); }
+
+.review-page .result-card { border-radius: 16px; }
+.review-page .result-card.correct { background: rgba(79, 138, 114, .08); border-color: rgba(79, 138, 114, .22); }
+.review-page .result-card.wrong { background: var(--review-cinnabar-soft); border-color: rgba(183, 105, 95, .22); }
+.review-page .result-card.correct .result-icon-wrap { color: #4f8a72; }
+.review-page .result-card.wrong .result-icon-wrap { color: var(--review-cinnabar); }
+.review-page .result-heading,
+.review-page .ai-exp-text { color: var(--jade-ink) !important; font-family: var(--font-ancient); }
+.review-page .answer-line-label { color: var(--jade-muted); font-family: var(--font-sans); }
+.review-page .wrong-answer-text { color: var(--review-cinnabar); background: var(--review-cinnabar-soft); }
+.review-page .correct-answer-text { color: #4f8a72; background: rgba(79, 138, 114, .11); }
+.review-page .ai-explanation { background: rgba(239, 248, 244, .78); border-color: rgba(74, 133, 121, .17); }
+.review-page .ai-exp-header { color: var(--jade-accent-strong); font-family: var(--font-sans); }
+.review-page .mastered-banner { color: #5f856f; background: rgba(95, 133, 111, .12); border-color: rgba(95, 133, 111, .22); font-family: var(--font-sans); }
+.review-page .result-action-btn { border-radius: 10px; font-family: var(--font-sans); }
+.review-page .result-action-btn.primary { background: var(--jade-accent-strong) !important; border-color: transparent; }
+.review-page .result-action-btn.secondary { color: var(--jade-accent-strong); background: rgba(255, 255, 255, .64); border-color: rgba(47, 157, 138, .22); }
+
+@media (max-width: 760px) {
+  .review-page { padding: 10px 12px 48px; }
+  .review-page::after { width: 92%; opacity: .16; }
+  .review-page .review-page-header { grid-template-columns: 1fr; gap: 12px; padding-bottom: 18px; }
+  .review-page .header-center { order: -1; text-align: left; }
+  .review-page .header-right { justify-content: stretch; }
+  .review-page .error-book-link-btn { width: 100%; justify-content: center; }
+  .review-page .progress-header { grid-template-columns: 1fr; gap: 14px; }
+  .review-page .progress-stats { justify-content: space-between; }
+  .review-page .question-main-text { font-size: 22px; }
 }
 </style>

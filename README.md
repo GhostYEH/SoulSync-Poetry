@@ -75,7 +75,6 @@
 ### 1. 安装依赖
 
 ```bash
-npm install
 cd backend && npm install
 cd ../frontend && npm install
 ```
@@ -97,38 +96,22 @@ JWT_SECRET=your-secret-key-change-in-production
 PORT=3000
 ```
 
-复制 `frontend/.env.example` 为 `frontend/.env`（如果需要自定义配置）。
-
 ### 4. 数据库迁移与种子
 
 ```bash
 cd backend
 npm run db:migrate   # 创建 37 张表 + 索引
-npm run db:seed      # 基础诗词 + 基础题目
-npm run db:seed:dev  # 开发测试账号（可选）
+npm run db:seed      # 基础诗词 + 基础题目 + 开发测试账号
 ```
 
 ### 5. 启动
 
-应用采用 Fail Fast 机制，如果 PostgreSQL 不可用，应用将在启动时立即退出。
-
-开发环境（根目录运行）：
 ```bash
-npm run dev
-```
-或者分别启动：
-```bash
-cd backend && npm run dev
+cd backend && npm start
 cd frontend && npm run dev
 ```
 
 ## API 接口
-
-### 健康检查
-| 接口 | 认证 | 说明 |
-|------|------|------|
-| `GET /health/live` | 无 | 检查 Node 进程是否存活 |
-| `GET /health/ready` | 无 | 检查 Node 进程、PostgreSQL 配置是否就绪以及关键表是否可访问 |
 
 ### 认证
 | 接口 | 认证 | 说明 |
@@ -273,20 +256,24 @@ backend/
 ```bash
 cd backend
 
-# 运行所有基础和单元测试
-npm test
+# 单元测试（无需 PostgreSQL）
+node tests/auth.test.js                    # 认证中间件
+node tests/personalizedTutorAuth.test.js   # personalized-tutor 串用户防护
+node tests/learningCore.test.js            # 掌握度算法
+node tests/idempotency.test.js             # 幂等性
+node tests/abilityAggregation.test.js      # 能力聚合
+node tests/ragTutor.test.js                # RAG 纯函数
 
-# 基础API功能测试
-npm run test:smoke
+# 集成测试（需要 PostgreSQL + DATABASE_URL）
+node tests/integration.test.js
+node tests/api.test.js
+```
 
-# 事务测试
-npm run test:transaction
+### 安全测试
 
-# 安全测试
-npm run test:security
-
-# 运行所有验证（包括SQLite兼容性和防作弊测试等）
-npm run test:all
+```bash
+cd backend
+npm run test:security   # IDOR + 防作弊 + JWT验证（15/15）
 ```
 
 ## 安全加固

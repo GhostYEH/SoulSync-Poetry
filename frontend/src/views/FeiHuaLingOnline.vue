@@ -774,6 +774,7 @@ const loadCurrentUserRank = async () => {
 onUnmounted(() => {
   stopTimer()
   if (errorTimer) clearTimeout(errorTimer)
+  feihualingSocket.clearHandlers()
   feihualingSocket.disconnect()
 })
 </script>

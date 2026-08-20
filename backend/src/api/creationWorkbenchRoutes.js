@@ -593,7 +593,7 @@ router.post('/feihua/score', optionalAuthenticateToken, async (req, res) => {
       data: {
         total: 0,
         dimensions: { keyword: 0, content: 0, rhythm: 0, mood: 0, creativity: 0 },
-        suggestions: '【亮点】无\n【不足】AI 暂不可用，请配置 SILICONFLOW_API_KEY 后重试\n【建议】检查网络与密钥'
+        suggestions: '【亮点】无\n【不足】AI 暂不可用，请配置 ZHIPU_API_KEY 后重试\n【建议】检查网络与密钥'
       }
     });
   } catch (error) {

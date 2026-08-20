@@ -12,18 +12,18 @@ const publicFetch = async (url) => {
 };
 
 // 获取token
-export const getToken = (isTeacher = false) => {
-  return localStorage.getItem(isTeacher ? 'teacherToken' : 'token');
+export const getToken = () => {
+  return localStorage.getItem('token');
 };
 
 // 构建请求头
-const getHeaders = (includeAuth = true, isTeacher = false) => {
+const getHeaders = (includeAuth = true) => {
   const headers = {
     'Content-Type': 'application/json'
   };
   
   if (includeAuth) {
-    const token = getToken(isTeacher);
+    const token = getToken();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
@@ -44,7 +44,6 @@ export const TIMEOUTS = {
 // 通用请求方法
 export const request = async (url, options = {}) => {
   const timeout = options.timeout || TIMEOUTS.SHORT;
-  const isTeacher = url.startsWith('/teacher') || options.isTeacher;
   const skipAuthRedirect = options.skipAuthRedirect || false;
   
   try {
@@ -55,7 +54,7 @@ export const request = async (url, options = {}) => {
     const response = await fetch(`${baseUrl}${url}`, {
       ...options,
       headers: {
-        ...getHeaders(options.includeAuth !== false, isTeacher),
+        ...getHeaders(options.includeAuth !== false),
         ...options.headers
       },
       signal: controller.signal
@@ -68,21 +67,11 @@ export const request = async (url, options = {}) => {
     if (!response.ok) {
       // 处理认证错误
       if (response.status === 401 && !skipAuthRedirect) {
-        if (isTeacher) {
-          localStorage.removeItem('teacherToken');
-          localStorage.removeItem('teacher');
-          localStorage.removeItem('teacherInfo');
-          if (!isRedirecting && window.location.pathname !== '/teacher/login') {
-            isRedirecting = true;
-            window.location.href = '/teacher/login';
-          }
-        } else {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          if (!isRedirecting && window.location.pathname !== '/login') {
-            isRedirecting = true;
-            window.location.href = '/login';
-          }
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        if (!isRedirecting && window.location.pathname !== '/login') {
+          isRedirecting = true;
+          window.location.href = '/login';
         }
         throw new Error('认证令牌已过期，请重新登录');
       }
@@ -100,6 +89,61 @@ export const request = async (url, options = {}) => {
     }
     console.error('API请求失败:', error);
     throw error;
+  }
+};
+
+// 读取后端 SSE 文本流，onToken 会在每个增量片段到达时触发。
+export const streamAI = async (payload, { onToken, onDone, timeout = TIMEOUTS.LONG } = {}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  let fullText = '';
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/ai/stream`, {
+      method: 'POST',
+      headers: getHeaders(true, false),
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || data.error || 'AI流式请求失败');
+    }
+    if (!response.body) throw new Error('浏览器不支持流式响应');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    const consume = (line) => {
+      if (!line.startsWith('data:')) return;
+      const raw = line.slice(5).trim();
+      if (!raw) return;
+      const event = JSON.parse(raw);
+      if (event.type === 'token' && event.content) {
+        fullText += event.content;
+        onToken?.(event.content, fullText);
+      } else if (event.type === 'error') {
+        throw new Error(event.message || 'AI流式请求失败');
+      } else if (event.type === 'done') {
+        onDone?.(fullText);
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || '';
+      lines.forEach(consume);
+      if (done) break;
+    }
+    if (buffer.trim()) consume(buffer.trim());
+    return fullText;
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('AI流式请求超时');
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
 };
 
@@ -173,6 +217,7 @@ export const api = {
   
   // AI相关
   ai: {
+    stream: (payload, options) => streamAI(payload, options),
     explain: (data) => request('/ai/explain', {
       method: 'POST',
       body: JSON.stringify(data)
@@ -318,6 +363,11 @@ export const api = {
 
   // 飞花令游戏保存（幂等：gameSessionId 保证 retry 不重复）
   feihua: {
+    hint: (data) => request('/feihua/hint', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      timeout: 90000
+    }),
     save: (data) => request('/feihua/save', {
       method: 'POST',
       body: JSON.stringify(data)
@@ -422,20 +472,6 @@ export const api = {
       body: JSON.stringify(params),
       timeout: 120000
     })
-  },
-
-  // 教师分析相关
-  analytics: {
-    getWeakPoints: (classId) => request(`/analytics/class/${classId}/weak-points`),
-    getAlerts: (classId) => request(`/analytics/class/${classId}/alerts`),
-    createTask: (data) => request('/analytics/tasks', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    }),
-    getTasks: (classId) => request(`/analytics/class/${classId}/tasks`),
-    getTrend: (classId, days = 30) => request(`/analytics/class/${classId}/trend?days=${days}`),
-    getMastery: (classId) => request(`/analytics/class/${classId}/mastery`),
-    getClassOverview: (classId) => request(`/analytics/class/${classId}/overview`)
   },
 
   // 首页相关

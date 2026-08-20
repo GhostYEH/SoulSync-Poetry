@@ -10,18 +10,6 @@ const Collection = () => import('../views/Collection.vue')
 const FeiHuaLingSingle = () => import('../views/FeiHuaLingSingle.vue')
 const Login = () => import('../views/Login.vue')
 const Register = () => import('../views/Register.vue')
-// 导入教师端视图组件
-const TeacherLogin = () => import('../views/teacher/TeacherLogin.vue')
-const TeacherRegister = () => import('../views/teacher/TeacherRegister.vue')
-const TeacherLayout = () => import('../views/teacher/TeacherLayout.vue')
-const TeacherDashboard = () => import('../views/teacher/Dashboard.vue')
-const KnowledgeDiagnosisView = () => import('../views/teacher/KnowledgeDiagnosisView.vue')
-const StudentDetail = () => import('../views/teacher/StudentDetail.vue')
-const ClassDetail = () => import('../views/teacher/ClassDetail.vue')
-const ClassManagement = () => import('../views/teacher/ClassManagement.vue')
-const StudentManagement = () => import('../views/teacher/StudentManagement.vue')
-const PoemManagement = () => import('../views/teacher/PoemManagement.vue')
-const GameData = () => import('../views/teacher/GameData.vue')
 const PoetryParkour = () => import('../views/PoetryParkour.vue')
 const PoetryCardCatch = () => import('../views/PoetryCardCatch.vue')
 
@@ -81,7 +69,8 @@ const routes = [
   {
     path: '/feihualing/online',
     name: 'FeiHuaLingOnline',
-    component: () => import('../views/FeiHuaLingOnline.vue'),
+    // 旧在线入口复用统一雅集工作台，避免从深链接进入另一套旧视觉。
+    component: FeiHuaLingSingle,
     meta: {
       title: '在线飞花令 - 古诗词学习系统',
       requiresAuth: true
@@ -111,106 +100,6 @@ const routes = [
     meta: {
       title: '注册 - 古诗词学习系统'
     }
-  },
-  // 教师端路由
-  {
-    path: '/teacher/login',
-    name: 'TeacherLogin',
-    component: TeacherLogin,
-    meta: {
-      title: '教师登录 - 古诗词学习系统'
-    }
-  },
-  {
-    path: '/teacher/register',
-    name: 'TeacherRegister',
-    component: TeacherRegister,
-    meta: {
-      title: '教师注册 - 古诗词学习系统'
-    }
-  },
-  {
-    path: '/teacher',
-    component: TeacherLayout,
-    meta: { requiresTeacherAuth: true },
-    children: [
-      {
-        path: '',
-        redirect: '/teacher/dashboard'
-      },
-      {
-        path: 'dashboard',
-        name: 'TeacherDashboard',
-        component: TeacherDashboard,
-        meta: {
-          title: '教师看板 - 古诗词学习系统',
-          requiresTeacherAuth: true
-        }
-      },
-      {
-        path: 'knowledge',
-        name: 'TeacherKnowledgeDiagnosis',
-        component: KnowledgeDiagnosisView,
-        meta: {
-          title: '认知诊断 - 古诗词学习系统',
-          requiresTeacherAuth: true
-        }
-      },
-      {
-        path: 'student/:id/detail',
-        name: 'StudentDetail',
-        component: StudentDetail,
-        meta: {
-          title: '学生详情 - 古诗词学习系统',
-          requiresTeacherAuth: true
-        }
-      },
-      {
-        path: 'class/:classId',
-        name: 'ClassDetail',
-        component: ClassDetail,
-        meta: {
-          title: '班级详情 - 古诗词学习系统',
-          requiresTeacherAuth: true
-        }
-      },
-      {
-        path: 'classes',
-        name: 'TeacherClasses',
-        component: ClassManagement,
-        meta: {
-          title: '班级管理 - 古诗词学习系统',
-          requiresTeacherAuth: true
-        }
-      },
-      {
-        path: 'students',
-        name: 'TeacherStudents',
-        component: StudentManagement,
-        meta: {
-          title: '学生管理 - 古诗词学习系统',
-          requiresTeacherAuth: true
-        }
-      },
-      {
-        path: 'poems',
-        name: 'TeacherPoems',
-        component: PoemManagement,
-        meta: {
-          title: '诗词库管理 - 古诗词学习系统',
-          requiresTeacherAuth: true
-        }
-      },
-      {
-        path: 'game-data',
-        name: 'TeacherGameData',
-        component: GameData,
-        meta: {
-          title: '对战数据 - 古诗词学习系统',
-          requiresTeacherAuth: true
-        }
-      }
-    ]
   },
   // 404 路由
   {
@@ -395,7 +284,7 @@ router.beforeEach((to, from, next) => {
     // 从详情/子页回到主导航：视为后退
     direction = 'back'
   } else {
-    // 进入详情/子页/教师端：视为前进
+    // 进入详情或子页：视为前进
     direction = 'forward'
   }
   // 通过自定义事件通知 App.vue 更新过渡名称
@@ -425,72 +314,12 @@ function isTokenExpired(token) {
   }
 }
 
-import { API_BASE_URL } from '../services/api'
-
-async function verifyToken(token, type) {
-  if (!token || isTokenExpired(token)) {
-    return false
-  }
-  
-  try {
-    const endpoint = type === 'teacher' 
-      ? `${API_BASE_URL}/teacher/dashboard`
-      : `${API_BASE_URL}/auth/verify`
-    
-    const response = await fetch(endpoint, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    return response.ok
-  } catch {
-    return false
-  }
-}
-
 router.beforeEach(async (to, from, next) => {
   if (to.meta.title) {
     document.title = to.meta.title
   }
   
-  const token = localStorage.getItem('token')
-  const teacherToken = localStorage.getItem('teacherToken')
-  
-  if (token && teacherToken) {
-    if (to.path.startsWith('/teacher/')) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      localStorage.removeItem('userInfo')
-      localStorage.removeItem('studentId')
-      localStorage.removeItem('userRole')
-    } else {
-      localStorage.removeItem('teacherToken')
-      localStorage.removeItem('teacher')
-      localStorage.removeItem('teacherInfo')
-    }
-  }
-  
-  if (to.meta.requiresTeacherAuth) {
-    const teacherToken = localStorage.getItem('teacherToken')
-    
-    if (!teacherToken) {
-      localStorage.setItem('teacherRedirectPath', to.fullPath)
-      next('/teacher/login')
-      return
-    }
-    
-    if (isTokenExpired(teacherToken)) {
-      localStorage.removeItem('teacherToken')
-      localStorage.removeItem('teacher')
-      localStorage.removeItem('teacherInfo')
-      localStorage.setItem('teacherRedirectPath', to.fullPath)
-      next('/teacher/login')
-      return
-    }
-    
-    next()
-  } 
-  else if (to.meta.requiresAuth) {
+  if (to.meta.requiresAuth) {
     const token = localStorage.getItem('token')
     
     if (!token) {

@@ -93,7 +93,7 @@ async function searchPoemsByTags(tags, limit = 5) {
  * 根据知识点 code 检索相关诗词
  *
  * 可解释性原则：若无可靠关键词映射，返回空数组而非随机诗词。
- * 随机诗词会被包装成"知识点相关来源"，误导学生和教师。
+ * 随机诗词会被包装成"知识点相关来源"，误导学习者。
  * 教学上下文仍可依赖 targetPoem（若提供 poemId）和 practiceQuestions（题库关联）。
  */
 async function findPoemsForKnowledgePoint(kpCode, limit = 5) {

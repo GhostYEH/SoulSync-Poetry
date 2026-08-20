@@ -346,9 +346,10 @@ export default {
       }
       invitingUserId.value = user.userId;
       waitingAccept.value = { username: user.username, userId: user.userId };
-      socket.value.emit('challenge-send-invitation', {
-        targetUserId: user.userId,
-        targetUsername: user.username
+        socket.value.emit('challenge-send-invitation', {
+          targetUserId: user.userId,
+          targetUsername: user.username,
+          username: myUsername.value
       });
       showToast(`已向 ${user.username} 发送邀请`, 'info');
     };
@@ -368,7 +369,8 @@ export default {
       console.log('[ChallengeBattleOnline] 接受邀请:', receivedInvitation.value);
       socket.value?.emit('challenge-accept-invitation', {
         inviteId: receivedInvitation.value.inviteId,
-        inviterId: receivedInvitation.value.fromId
+        inviterId: receivedInvitation.value.fromId,
+        username: myUsername.value
       });
       showToast('已接受邀请，对战即将开始...', 'success');
     };

@@ -1,4 +1,5 @@
 const db = require('./db');
+const { DEFAULT_POEMS } = require('../../scripts/initSqlite');
 
 async function loadPoems() {
   const result = await db.query('SELECT * FROM poems');
@@ -10,7 +11,7 @@ async function loadPoems() {
     content: row.content,
     tags: row.tags ? row.tags.split(',') : []
   }));
-  console.log(`成功从 PostgreSQL 加载 ${poems.length} 首诗词`);
+  console.log(`成功加载数据库中 ${poems.length} 首诗词`);
   return poems;
 }
 
@@ -18,7 +19,21 @@ async function loadPoemsSync() {
   return await loadPoems();
 }
 
+function useDefaultPoems() {
+  const poems = DEFAULT_POEMS.map((p, i) => ({
+    id: i + 1,
+    title: p.title,
+    author: p.author,
+    dynasty: p.dynasty,
+    content: p.content,
+    tags: []
+  }));
+  console.log(`使用默认诗词数据 ${poems.length} 首`);
+  return poems;
+}
+
 module.exports = {
   loadPoems,
-  loadPoemsSync
+  loadPoemsSync,
+  useDefaultPoems
 };

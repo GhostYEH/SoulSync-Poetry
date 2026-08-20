@@ -13,6 +13,7 @@ const duelTimers = new Map();
 // 断线重连等待计时器（闯关对战）
 const reconnectTimers = new Map();
 const RECONNECT_WAIT_TIME = 30000; // 30秒重连等待时间
+const feihuaReconnectTimers = new Map();
 
 function setupSocket(io) {
   io.on('connection', (socket) => {
@@ -42,6 +43,17 @@ function setupSocket(io) {
         challengeBattleService.addUser(currentUserId, decoded.username, socket.id);
         challengeBattleService.updatePlayerSocketId(currentUserId, socket.id);
 
+        const feihuaReconnectTimer = feihuaReconnectTimers.get(currentUserId);
+        if (feihuaReconnectTimer) {
+          clearTimeout(feihuaReconnectTimer);
+          feihuaReconnectTimers.delete(currentUserId);
+          const room = feihualingService.getRoom(feihualingService.getUser(currentUserId)?.inGame);
+          if (room?.status === 'playing') {
+            room.turnStartTime = Date.now();
+            startTurnTimer(room.id, io);
+          }
+        }
+
         // 检查是否有重连等待计时器，如果有则清除并恢复游戏
         for (const [timerKey, timer] of reconnectTimers.entries()) {
           if (timerKey.endsWith(`_${currentUserId}`)) {
@@ -70,7 +82,7 @@ function setupSocket(io) {
                 }
               });
               // 重新启动游戏计时器
-              startDualInviteTimer(roomId, io);
+              startDualInviteTimer(roomId, io, challengeBattleService);
             }
             break;
           }
@@ -200,7 +212,7 @@ function setupSocket(io) {
         if (!keywordOk) {
           finalResult = { isValid: false, score: 0, reason: `诗句中未包含令字「${room.keyword}」`, source: 'server' };
         } else {
-          // 使用 Qwen/Qwen2.5-7B-Instruct 模型判题
+          // 使用智谱模型判题
           const usedPoemTexts = room.usedPoems.map(p => p.original || p.normalized);
           finalResult = await evaluateFeihuaPoem(poem, room.keyword, room.difficulty || 'medium', usedPoemTexts);
           finalResult.source = 'ai';
@@ -240,6 +252,7 @@ function setupSocket(io) {
           });
         }
       } catch (err) {
+        feihualingService.releaseAnswer(data?.roomId, currentUserId);
         console.error('[Feihua] 提交诗句失败:', err);
         socket.emit('error', { error: '提交诗句失败，请重试' });
       }
@@ -248,7 +261,14 @@ function setupSocket(io) {
 
     socket.on('game-over', (data) => {
       const { roomId, winnerId, loserId, reason } = data;
-      const result = feihualingService.endGame(roomId, winnerId, loserId, reason);
+      const room = feihualingService.getRoom(roomId);
+      const quitter = room?.players.find(player => String(player.id) === String(currentUserId));
+      const opponent = room?.players.find(player => String(player.id) !== String(currentUserId));
+      if (!quitter || !opponent || String(loserId) !== String(currentUserId)) {
+        socket.emit('error', { error: '无效的退出请求' });
+        return;
+      }
+      const result = feihualingService.endGame(roomId, opponent.id, quitter.id, reason);
       if (!result.success) { socket.emit('error', { error: result.error }); return; }
       clearTurnTimer(roomId);
       result.players.forEach(player => {
@@ -284,14 +304,22 @@ function setupSocket(io) {
       try {
         const { roomId, answer } = data;
         const submitResult = challengeBattleService.submitSingleAnswer(roomId, currentUserId, answer);
-        if (!submitResult.success) { socket.emit('error', { error: submitResult.error }); return; }
+        if (!submitResult.success) {
+          if (submitResult.timeout) {
+            const timeoutResult = await challengeBattleService.timeoutSingleGame(roomId, currentUserId);
+            emitSingleTimeoutResult(socket, timeoutResult);
+          } else {
+            socket.emit('error', { error: submitResult.error });
+          }
+          return;
+        }
         socket.emit('challenge-answer-result', {
           isCorrect: submitResult.isCorrect,
           correctAnswer: submitResult.correctAnswer,
           question: submitResult.question
         });
         setTimeout(async () => {
-          const nextResult = await challengeBattleService.nextSingleQuestion(roomId);
+          const nextResult = await challengeBattleService.nextSingleQuestion(roomId, currentUserId);
           if (nextResult.type === 'finished') {
             challengeBattleService.saveSingleRecord(challengeBattleService.getRoom(roomId));
             socket.emit('challenge-finished', {
@@ -315,19 +343,8 @@ function setupSocket(io) {
     socket.on('challenge-timeout', async (data) => {
       try {
         const { roomId } = data;
-        const result = await challengeBattleService.timeoutSingleGame(roomId);
-        if (result && result.type === 'finished') {
-          socket.emit('challenge-finished', {
-            type: 'finished', reason: 'timeout', totalQuestions: result.totalQuestions,
-            correctCount: result.correctCount, wrongCount: result.wrongCount,
-            wrongQuestions: result.wrongQuestions, players: result.resultPlayers
-          });
-        } else if (result) {
-          socket.emit('challenge-timeouted', {
-            correctAnswer: result.correctAnswer, question: result.question,
-            currentRound: result.currentRound, correctCount: result.correctCount, wrongCount: result.wrongCount
-          });
-        }
+        const result = await challengeBattleService.timeoutSingleGame(roomId, currentUserId);
+        emitSingleTimeoutResult(socket, result);
       } catch (err) { console.error('[Challenge] 超时处理失败:', err); }
     });
 
@@ -347,7 +364,7 @@ function setupSocket(io) {
           }
           return;
         }
-        const result = challengeBattleService.quitSingleGame(roomId);
+        const result = challengeBattleService.quitSingleGame(roomId, currentUserId);
         if (result) {
           socket.emit('challenge-finished', {
             type: 'finished', reason: 'quit', totalQuestions: result.totalQuestions,
@@ -361,9 +378,9 @@ function setupSocket(io) {
     // ==============================================================
     // 诗词闯关 - 双人匹配模式（保持不变）
     // ==============================================================
-    socket.on('challenge-match-start', (data) => {
+    socket.on('challenge-match-start', async (data) => {
       if (!currentUserId) { socket.emit('error', { error: '未登录' }); return; }
-      const room = challengeBattleService.addToMatchmaking(currentUserId, data.username || '玩家', socket.id);
+      const room = await challengeBattleService.addToMatchmaking(currentUserId, data.username || '玩家', socket.id);
       if (room) {
         const roomInfo = challengeBattleService.getRoomInfo(room);
         roomInfo.currentQuestion = room.question;
@@ -459,9 +476,9 @@ function setupSocket(io) {
       if (!targetSocket) { socket.emit('error', { error: '目标用户不在线' }); return; }
       if (targetSocket.inGame) { socket.emit('error', { error: '目标用户正在对战中' }); return; }
 
-      const inviteId = challengeBattleService.createInvitation(currentUserId, data.username || '玩家', targetUserId);
+      const inviteId = challengeBattleService.createInvitation(currentUserId, data.username || inviter.username, targetUserId);
       io.to(targetSocket.socketId).emit('challenge-invitation', {
-        inviteId, fromId: currentUserId, from: data.username || '玩家'
+        inviteId, fromId: currentUserId, from: data.username || inviter.username
       });
       socket.emit('challenge-invitation-sent', { inviteId, targetUsername });
     });
@@ -473,7 +490,7 @@ function setupSocket(io) {
 
       const { inviteId, inviterId } = data;
       const result = await challengeBattleService.acceptDualInvitation(
-        inviterId, currentUserId, data.username || '玩家', socket.id, inviteId
+        inviterId, currentUserId, data.username || challengeBattleService.getUser(currentUserId)?.username || '玩家', socket.id, inviteId
       );
 
       console.log('[Challenge] 接受邀请结果:', result);
@@ -628,59 +645,38 @@ function setupSocket(io) {
         challengeBattleService.removeFromMatchmaking(currentUserId);
         io.emit('challenge-matchmaking-count', { count: challengeBattleService.getMatchmakingQueueSize() });
 
-        // 飞花令断线
+        const challengeUser = challengeBattleService.getUser(currentUserId);
+        if (challengeUser?.socketId === socket.id && !challengeUser.inGame) {
+          challengeBattleService.removeUser(socket.id);
+        }
+
+        // 飞花令断线：房间保留 30 秒，重连后恢复同一局。
+        const feihuaUser = feihualingService.getUser(currentUserId);
+        const feihuaRoomId = feihuaUser?.inGame;
         const onlineUsers = feihualingService.removeUser(socket.id);
         io.emit('online-users', onlineUsers);
-
-        const user = feihualingService.getUser(currentUserId);
-        if (user && user.inGame) {
-          const roomId = user.inGame;
-          const room = feihualingService.getRoom(roomId);
-          if (room && room.status === 'playing') {
-            const result = feihualingService.handleDisconnect(roomId, currentUserId);
+        const feihuaRoom = feihualingService.getRoom(feihuaRoomId);
+        const feihuaPlayer = feihuaRoom?.players.find(p => String(p.id) === String(currentUserId));
+        if (feihuaRoom?.status === 'playing' && feihuaPlayer?.disconnected) {
+          clearTurnTimer(feihuaRoomId);
+          const oldTimer = feihuaReconnectTimers.get(currentUserId);
+          if (oldTimer) clearTimeout(oldTimer);
+          feihuaReconnectTimers.set(currentUserId, setTimeout(async () => {
+            const room = feihualingService.getRoom(feihuaRoomId);
+            const player = room?.players.find(p => String(p.id) === String(currentUserId));
+            if (!room || !player?.disconnected) return;
+            const result = feihualingService.handleDisconnect(feihuaRoomId, currentUserId);
             if (result) {
-              if (room.isRanking) {
-                feihuaRankingService.updateRankingAfterBattle(result.winner.id, result.loser.id)
-                  .then(rankingChange => {
-                    result.players.forEach(player => {
-                      if (player.socketId && player.id !== currentUserId) {
-                        io.to(player.socketId).emit('opponent-disconnected', {
-                          opponentId: currentUserId, opponentName: result.loser?.username,
-                          winner: { userId: result.winner.id, username: result.winner.username },
-                          message: '对手已断线，你获胜！', reason: result.reason, currentRound: result.totalRounds,
-                          isRanking: room.isRanking, rankingChange
-                        });
-                      }
-                    });
-                  }).catch(e => {
-                    result.players.forEach(player => {
-                      if (player.socketId && player.id !== currentUserId) {
-                        io.to(player.socketId).emit('opponent-disconnected', {
-                          opponentId: currentUserId, opponentName: result.loser?.username,
-                          winner: { userId: result.winner.id, username: result.winner.username },
-                          message: '对手已断线，你获胜！', reason: result.reason, currentRound: result.totalRounds
-                        });
-                      }
-                    });
-                  });
-              } else {
-                result.players.forEach(player => {
-                  if (player.socketId && player.id !== currentUserId) {
-                    io.to(player.socketId).emit('opponent-disconnected', {
-                      opponentId: currentUserId, opponentName: result.loser?.username,
-                      winner: { userId: result.winner.id, username: result.winner.username },
-                      message: '对手已断线，你获胜！', reason: result.reason, currentRound: result.totalRounds
-                    });
-                  }
-                });
-              }
+              await broadcastFeihuaDisconnect(room, result, currentUserId, io);
+              feihualingService.removeUser(player.socketId);
             }
-          }
+            feihuaReconnectTimers.delete(currentUserId);
+          }, RECONNECT_WAIT_TIME));
         }
 
         // 闯关对战断线 - 添加重连等待时间
-        const challengeUser = challengeBattleService.getUser(currentUserId);
-        if (challengeUser && challengeUser.inGame) {
+        const activeChallengeUser = challengeBattleService.getUser(currentUserId);
+        if (activeChallengeUser && activeChallengeUser.socketId === socket.id && activeChallengeUser.inGame) {
           for (const [roomId, room] of challengeBattleService.rooms.entries()) {
             if (room.mode === 'dual-invite' && room.status === 'playing') {
               const playerIndex = room.players.findIndex(p => String(p.id) === String(currentUserId));
@@ -714,6 +710,7 @@ function setupSocket(io) {
                         }
                       });
                       io.emit('online-users', challengeBattleService.getOnlineUsersList());
+                      challengeBattleService.removeUser(socket.id);
                     }
                   }
                   reconnectTimers.delete(timerKey);
@@ -884,6 +881,47 @@ function clearTurnTimer(roomId) {
     clearInterval(roomTimers.get(roomId));
     roomTimers.delete(roomId);
   }
+}
+
+function emitSingleTimeoutResult(socket, result) {
+  if (!result) return;
+  if (result.type === 'finished') {
+    socket.emit('challenge-finished', {
+      type: 'finished', reason: 'timeout', totalQuestions: result.totalQuestions,
+      correctCount: result.correctCount, wrongCount: result.wrongCount,
+      wrongQuestions: result.wrongQuestions, players: result.resultPlayers
+    });
+    return;
+  }
+  socket.emit('challenge-timeouted', {
+    correctAnswer: result.correctAnswer, question: result.question,
+    currentRound: result.currentRound, correctCount: result.correctCount, wrongCount: result.wrongCount
+  });
+}
+
+async function broadcastFeihuaDisconnect(room, result, disconnectedUserId, io) {
+  let rankingChange = null;
+  if (room.isRanking) {
+    try {
+      rankingChange = await feihuaRankingService.updateRankingAfterBattle(result.winner.userId, result.loser.userId);
+    } catch (error) {
+      console.error('[飞花令] 断线更新排位分失败:', error.message);
+    }
+  }
+  room.players.forEach(player => {
+    if (player.socketId && String(player.id) !== String(disconnectedUserId)) {
+      io.to(player.socketId).emit('opponent-disconnected', {
+        opponentId: disconnectedUserId,
+        opponentName: result.loser?.username,
+        winner: result.winner,
+        message: '对手断线，重连等待超时，你获胜！',
+        reason: result.reason,
+        currentRound: result.totalRounds,
+        isRanking: room.isRanking,
+        rankingChange
+      });
+    }
+  });
 }
 
 module.exports = setupSocket;

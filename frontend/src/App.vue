@@ -1,5 +1,5 @@
 <template>
-  <div id="app" @mousemove="createMapleLeaf">
+  <div id="app" :class="{ 'home-shell': $route.path === '/' }" @mousemove="createMapleLeaf">
 
     <!-- 自定义标题栏 (Electron环境) -->
     <TitleBar v-if="isElectron" />
@@ -16,15 +16,14 @@
       <div class="nav-liquid-shine"></div>
       <div class="container navbar-container">
         <!-- 品牌 logo/标题 -->
-        <router-link :to="isTeacher ? '/teacher/dashboard' : '/'" class="navbar-brand">
+        <router-link to="/" class="navbar-brand">
           <div class="brand-title">
             <div class="main-title">《智韵·灵犀》</div>
             <div class="sub-title">——基于大模型认知引擎与多维行为分析的智能化古诗词学习系统</div>
           </div>
         </router-link>
         
-        <!-- 学生端导航 -->
-        <ul v-if="!isTeacher" class="navbar-menu">
+        <ul class="navbar-menu">
           <li class="navbar-item">
             <router-link to="/" class="glass-nav-button" active-class="glass-nav-active">首页</router-link>
           </li>
@@ -49,68 +48,7 @@
           <li class="navbar-item">
             <router-link to="/profile" class="glass-nav-button" active-class="glass-nav-active">个人中心</router-link>
           </li>
-          <li class="navbar-item">
-            <button class="glass-nav-button switch-teacher-btn" @click="switchToTeacher">切换教师端</button>
-          </li>
         </ul>
-        
-        <!-- 教师端导航 -->
-        <div v-else class="teacher-nav">
-          <!-- 桌面端导航 -->
-          <ul class="navbar-menu teacher-navbar-menu">
-            <li class="navbar-item">
-              <router-link to="/teacher/dashboard" class="glass-nav-button" active-class="glass-nav-active">管理看板</router-link>
-            </li>
-            <li class="navbar-item">
-              <router-link to="/teacher/classes" class="glass-nav-button" active-class="glass-nav-active">班级管理</router-link>
-            </li>
-            <li class="navbar-item">
-              <router-link to="/teacher/students" class="glass-nav-button" active-class="glass-nav-active">学生管理</router-link>
-            </li>
-            <li class="navbar-item">
-              <router-link to="/teacher/poems" class="glass-nav-button" active-class="glass-nav-active">诗词库管理</router-link>
-            </li>
-            <li class="navbar-item">
-              <router-link to="/teacher/game-data" class="glass-nav-button" active-class="glass-nav-active">对战数据</router-link>
-            </li>
-            <li class="navbar-item">
-              <button class="glass-nav-button switch-teacher-btn" @click="switchToStudent">切换学生端</button>
-            </li>
-            <li class="navbar-item">
-              <button class="glass-nav-button logout-btn" @click="handleLogout">退出登录</button>
-            </li>
-          </ul>
-          
-          <!-- 移动端汉堡菜单 -->
-          <div class="mobile-menu-toggle" @click="toggleMobileMenu">
-            <div class="menu-icon"></div>
-          </div>
-          <div v-if="mobileMenuOpen" class="mobile-menu">
-            <ul class="mobile-menu-list">
-              <li class="mobile-menu-item">
-                <router-link to="/teacher/dashboard" class="mobile-menu-link" @click="toggleMobileMenu">管理看板</router-link>
-              </li>
-              <li class="mobile-menu-item">
-                <router-link to="/teacher/classes" class="mobile-menu-link" @click="toggleMobileMenu">班级管理</router-link>
-              </li>
-              <li class="mobile-menu-item">
-                <router-link to="/teacher/students" class="mobile-menu-link" @click="toggleMobileMenu">学生管理</router-link>
-              </li>
-              <li class="mobile-menu-item">
-                <router-link to="/teacher/poems" class="mobile-menu-link" @click="toggleMobileMenu">诗词库管理</router-link>
-              </li>
-              <li class="mobile-menu-item">
-                <router-link to="/teacher/game-data" class="mobile-menu-link" @click="toggleMobileMenu">对战数据</router-link>
-              </li>
-              <li class="mobile-menu-item">
-                <button class="mobile-menu-link switch-student-btn" @click="switchToStudent">切换学生端</button>
-              </li>
-              <li class="mobile-menu-item">
-                <button class="mobile-menu-link logout-btn" @click="handleLogout">退出登录</button>
-              </li>
-            </ul>
-          </div>
-        </div>
       </div>
     </nav>
 
@@ -151,9 +89,7 @@ export default {
       lastMapleLeafTime: 0,
       poemWords: ['春', '夏', '秋', '冬', '风', '花', '雪', '月', '山', '水', '云', '霞', '诗', '词', '歌', '赋', '人', '生', '梦', '想', '情', '意', '心', '境', '远', '近', '高', '低', '东', '西', '南', '北', '天', '地', '日', '月', '星', '辰'],
       collectionCount: 0,
-      mobileMenuOpen: false,
       isElectron: false,
-      isTeacher: false,
       transitionName: 'page-forward',
       lastPath: '/',
       keepAliveIncludes: ['PoemDetail'],
@@ -161,16 +97,9 @@ export default {
     }
   },
 
-  watch: {
-    $route() {
-      this.refreshIsTeacher();
-    }
-  },
-
   mounted() {
     // 检测是否在Electron环境中
     this.isElectron = typeof window !== 'undefined' && window.electronAPI;
-    this.refreshIsTeacher();
 
     // 检测URL参数，启动演示模式
     const params = new URLSearchParams(window.location.search)
@@ -238,14 +167,6 @@ export default {
     handlePageTransition(e) {
       this.transitionName = `page-${e.detail.direction}`
     },
-    // 刷新教师身份判定（替代 $forceUpdate，避免整个 App 重渲染）
-    // 仅依据真实教师凭证或当前处于教师路由，不再依赖持久化偏好 currentLoginType，
-    // 避免未登录时因残留偏好导致导航栏显示教师端而页面却是学生端的不一致问题
-    refreshIsTeacher() {
-      const teacherToken = localStorage.getItem('teacherToken');
-      const onTeacherRoute = !!(this.$route && this.$route.path && this.$route.path.startsWith('/teacher/'));
-      this.isTeacher = !!(teacherToken || onTeacherRoute);
-    },
     // 导航栏鼠标跟踪效果
     handleNavbarMouseMove(e) {
       const navbar = e.currentTarget;
@@ -298,10 +219,6 @@ export default {
     handleStorageChange(event) {
       if (event.key === 'collectedPoems') {
         this.updateCollectionCount()
-      }
-      // 监听身份相关数据变化，仅刷新教师判定而非整个 App
-      if (['token', 'teacherToken', 'user', 'teacher', 'userInfo', 'teacherInfo', 'studentId', 'teacherId', 'userRole', 'teacherRole', 'currentLoginType'].includes(event.key)) {
-        this.refreshIsTeacher()
       }
     },
     createDynamicElements() {
@@ -479,71 +396,14 @@ export default {
         }, animationDuration * 1000)
       }
     },
-    // 切换移动端菜单
-    toggleMobileMenu() {
-      this.mobileMenuOpen = !this.mobileMenuOpen
-    },
-    // 教师退出登录
-    handleLogout() {
-      // 保存当前登录类型
-      const currentLoginType = localStorage.getItem('currentLoginType') || 'teacher';
-      // 清除身份数据但保留登录类型
-      this.clearAuthData()
-      // 跳转到教师登录页
-      this.$router.push('/teacher/login')
-      this.refreshIsTeacher()
-    },
-    // 清除身份数据但保留登录类型
     clearAuthData() {
-      // 学生端相关数据
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       localStorage.removeItem('userInfo')
       localStorage.removeItem('studentId')
       localStorage.removeItem('userRole')
-      // 教师端相关数据
-      localStorage.removeItem('teacherToken')
-      localStorage.removeItem('teacher')
-      localStorage.removeItem('teacherInfo')
-      localStorage.removeItem('teacherId')
-      localStorage.removeItem('teacherRole')
-      // 其他可能的身份相关数据
       localStorage.removeItem('redirectPath')
       localStorage.removeItem('authToken')
-      // 注意：不清除 currentLoginType
-    },
-    // 完全清除所有数据（用于切换登录类型时）
-    clearAllData() {
-      // 清除所有数据，包括登录类型
-      localStorage.clear()
-    },
-    // 切换到教师端
-    switchToTeacher() {
-      // 保存当前登录类型为教师
-      localStorage.setItem('currentLoginType', 'teacher')
-      // 清除学生端相关数据
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      localStorage.removeItem('userInfo')
-      localStorage.removeItem('studentId')
-      localStorage.removeItem('userRole')
-      // 跳转到教师登录页
-      this.$router.push('/teacher/login')
-      this.refreshIsTeacher()
-    },
-    // 切换到学生端
-    switchToStudent() {
-      // 保存当前登录类型为学生
-      localStorage.setItem('currentLoginType', 'student')
-      // 清除教师端相关数据
-      localStorage.removeItem('teacherToken')
-      localStorage.removeItem('teacher')
-      localStorage.removeItem('teacherInfo')
-      localStorage.removeItem('teacherId')
-      localStorage.removeItem('teacherRole')
-      // 跳转到学生登录页
-      this.$router.push('/login')
-      this.refreshIsTeacher()
     }
   }
 }
@@ -812,135 +672,6 @@ export default {
   }
 }
 
-/* 教师导航栏样式 */
-.teacher-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.teacher-navbar-menu {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  flex-wrap: nowrap;
-}
-
-.logout-btn {
-  background: rgba(205, 133, 63, 0.2) !important;
-  color: #8b4513 !important;
-  border-color: rgba(205, 133, 63, 0.4) !important;
-}
-
-.logout-btn:hover {
-  background: rgba(205, 133, 63, 0.3) !important;
-  transform: translateY(-4px) !important;
-}
-
-/* 移动端菜单样式 */
-.mobile-menu-toggle {
-  display: none;
-  cursor: pointer;
-  padding: 10px;
-}
-
-.menu-icon {
-  width: 30px;
-  height: 24px;
-  position: relative;
-  cursor: pointer;
-}
-
-.menu-icon::before,
-.menu-icon::after {
-  content: '';
-  position: absolute;
-  width: 100%;
-  height: 3px;
-  background: #8b4513;
-  border-radius: 3px;
-  transition: all 0.3s ease;
-}
-
-.menu-icon::before {
-  top: 0;
-}
-
-.menu-icon::after {
-  bottom: 0;
-}
-
-.menu-icon::before {
-  transform: translateY(10.5px);
-}
-
-.mobile-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  width: 200px;
-  background: white;
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-  border-radius: 0 0 8px 8px;
-  z-index: 1000;
-  animation: slideDown 0.3s ease-out;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.mobile-menu-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.mobile-menu-item {
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.mobile-menu-item:last-child {
-  border-bottom: none;
-}
-
-.mobile-menu-link {
-  display: block;
-  padding: 15px 20px;
-  text-decoration: none;
-  color: #8b4513;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 16px;
-  transition: background-color 0.3s ease;
-}
-
-.mobile-menu-link:hover {
-  background-color: rgba(205, 133, 63, 0.1);
-}
-
-.mobile-menu-link.logout-btn {
-  background: rgba(205, 133, 63, 0.2);
-  border: none;
-  width: 100%;
-  text-align: left;
-  cursor: pointer;
-}
-
-.mobile-menu-link.logout-btn:hover {
-  background: rgba(205, 133, 63, 0.3);
-}
-
 /* 品牌标题样式 */
 .brand-title {
   display: flex;
@@ -973,57 +704,8 @@ export default {
   padding: 10px 0;
 }
 
-/* 切换教师端按钮样式 */
-.switch-teacher-btn {
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.15), rgba(205, 133, 63, 0.15)) !important;
-  color: #8b4513 !important;
-  border: 1px solid rgba(139, 69, 19, 0.3) !important;
-  padding: 8px 16px !important;
-  font-size: 14px !important;
-  cursor: pointer;
-  transition: all 0.3s ease !important;
-  font-family: 'SimSun', 'STSong', serif;
-}
-
-.switch-teacher-btn:hover {
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.25), rgba(205, 133, 63, 0.25)) !important;
-  transform: translateY(-4px) !important;
-  box-shadow: 0 4px 12px rgba(139, 69, 19, 0.2) !important;
-  border-color: rgba(139, 69, 19, 0.5) !important;
-}
-
-.switch-student-btn {
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.15), rgba(205, 133, 63, 0.15)) !important;
-  color: #8b4513 !important;
-  border: 1px solid rgba(139, 69, 19, 0.3) !important;
-  padding: 8px 16px !important;
-  font-size: 14px !important;
-  cursor: pointer;
-  transition: all 0.3s ease !important;
-  font-family: 'SimSun', 'STSong', serif;
-  width: 100%;
-  text-align: left;
-}
-
-.switch-student-btn:hover {
-  background: linear-gradient(135deg, rgba(139, 69, 19, 0.25), rgba(205, 133, 63, 0.25)) !important;
-  border-color: rgba(139, 69, 19, 0.5) !important;
-}
-
 /* 响应式设计 */
 @media (max-width: 768px) {
-  .teacher-navbar-menu {
-    display: none;
-  }
-  
-  .mobile-menu-toggle {
-    display: block;
-  }
-  
-  .navbar-menu {
-    display: none;
-  }
-  
   .navbar-container {
     position: relative;
   }
@@ -1035,5 +717,52 @@ export default {
   .sub-title {
     font-size: 10px;
   }
+}
+</style>
+
+<style>
+/* 首页导航的视觉层级 */
+.home-shell .ios26-navbar {
+  --nav-glass-bg: rgba(255, 255, 255, .88);
+  --nav-glass-bg-hover: rgba(255, 255, 255, .94);
+  --nav-glass-border: #dce9e5;
+  --nav-glass-border-hover: #b9ddd4;
+  --nav-glass-shadow: 0 10px 28px rgba(28, 89, 81, .07);
+  --nav-glass-shadow-hover: 0 14px 34px rgba(28, 89, 81, .1);
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: var(--nav-glass-shadow);
+}
+
+.home-shell .nav-liquid-border,
+.home-shell .nav-liquid-shine,
+.home-shell .ios26-navbar::before,
+.home-shell .ios26-navbar::after { display: none; }
+
+.home-shell .navbar-container { min-height: 68px; gap: 26px; }
+.home-shell .navbar-brand {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border: 1px solid #dce9e5 !important;
+  border-radius: 13px;
+  color: #218c7c !important;
+  background: #f4fbf8 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  letter-spacing: 0;
+}
+.home-shell .navbar-brand::before,
+.home-shell .navbar-brand::after { display: none; }
+.home-shell .navbar-brand:hover { border-color: #a9dacf !important; background: #ecf8f3 !important; box-shadow: none !important; transform: translateY(-1px) !important; }
+.home-shell .main-title { color: #218c7c !important; font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif; font-size: 17px; letter-spacing: .02em; }
+.home-shell .sub-title { max-width: 300px; overflow: hidden; color: #8ba39d !important; font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif; font-size: 9px; letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }
+.home-shell .navbar-menu { gap: 5px; }
+.home-shell .glass-nav-button { padding: 8px 11px; border: 1px solid transparent; border-radius: 9px; color: #718984; background: transparent; box-shadow: none; font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif; font-size: 12px; }
+.home-shell .glass-nav-button:hover { border-color: #dce9e5; color: #218c7c; background: #f3faf7; box-shadow: none; transform: translateY(-1px); }
+.home-shell .glass-nav-active { border-color: #c5e5dc !important; color: #218c7c !important; background: #eaf6f2 !important; box-shadow: none !important; transform: none !important; }
+@media (max-width: 1100px) {
+  .home-shell .navbar-menu { gap: 1px; }
+  .home-shell .glass-nav-button { padding-right: 8px; padding-left: 8px; }
+  .home-shell .sub-title { max-width: 220px; }
 }
 </style>

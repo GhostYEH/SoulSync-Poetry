@@ -1,13 +1,19 @@
 /**
  * 防作弊 + 输入验证测试
  *
- * 纯 PostgreSQL 实现，使用动态测试账号
+ * 测试范围:
+ * 1. 答题防作弊: 服务端忽略客户端 isCorrect
+ * 2. 卡牌游戏: score 边界验证
+ * 3. 飞花令: 必填字段验证
+ * 4. 诗词挑战: 评分边界验证
+ * 5. 错题本: 必填字段验证
+ *
+ * 使用临时 SQLite 数据库，不污染真实 poetry.db
  */
 const { spawn } = require('child_process');
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
-const db = require('../src/utils/db');
-const bcrypt = require('bcrypt');
 
 const BACKEND_DIR = path.join(__dirname, '..');
 
@@ -51,31 +57,12 @@ function assert(cond, msg) {
   else { failed++; console.error(`  [FAIL] ${msg}`); }
 }
 
-async function createFixtures() {
-  const ts = Date.now();
-  const studentUsername = `cheat_student_${ts}`;
-  const pwdHash = await bcrypt.hash('123456', 10);
-  
-  const resStudent = await db.query(
-    `INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'student') RETURNING id`,
-    [studentUsername, pwdHash]
-  );
-  const studentId = resStudent.rows[0].id;
-  
-  return { studentUsername, studentId };
-}
-
-async function cleanupFixtures(fixtures) {
-  if (!fixtures) return;
-  await db.query(`DELETE FROM users WHERE id = $1`, [fixtures.studentId]);
-}
-
-async function runTests(fixtures) {
+async function runTests() {
   console.log('\n--- 学生登录 ---');
   const loginRes = await fetch('http://localhost:3000/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: fixtures.studentUsername, password: '123456' }),
+    body: JSON.stringify({ username: 'Studentdemo', password: '123456' }),
   });
   const loginData = loginRes.json();
   const token = loginData.data?.token;
@@ -224,52 +211,44 @@ async function main() {
   console.log('防作弊 + 输入验证测试');
   console.log('========================================');
 
-  if (!process.env.DATABASE_URL) {
-    if (process.env.GITHUB_ACTIONS) {
-      console.error('  [FAIL] 必须提供 DATABASE_URL 环境变量 (PostgreSQL 测试必须运行)');
-      process.exit(1);
-    } else {
-      console.log('  [SKIPPED] 未提供 DATABASE_URL，本地跳过防作弊测试');
-      process.exit(0);
-    }
-  }
+  const realDbPath = path.join(BACKEND_DIR, 'db', 'poetry.db');
+  const tempDbPath = path.join(BACKEND_DIR, 'tests', `tmp-cheat-${Date.now()}.db`);
+  fs.copyFileSync(realDbPath, tempDbPath);
+  console.log(`  临时数据库: ${tempDbPath}`);
 
-  let server;
-  let fixtures = null;
+  const server = spawn('node', ['server.js'], {
+    cwd: BACKEND_DIR,
+    env: { ...process.env, DB_TYPE: 'sqlite', DB_PATH: tempDbPath, NODE_ENV: 'test' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  server.stdout.on('data', (d) => {
+    const s = d.toString().trim();
+    if (s && !s.includes('dotenv')) console.log(`  [server] ${s}`);
+  });
+  server.stderr.on('data', (d) => {
+    const s = d.toString().trim();
+    if (s && !s.includes('ECONNREFUSED')) console.error(`  [server!] ${s}`);
+  });
+
   try {
-    fixtures = await createFixtures();
-    console.log(`  创建测试账号: ${fixtures.studentUsername}`);
-    
-    server = spawn('node', ['server.js'], {
-      cwd: BACKEND_DIR,
-      env: { ...process.env, NODE_ENV: 'test' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    server.stdout.on('data', (d) => {
-      const s = d.toString().trim();
-      if (s && !s.includes('dotenv')) console.log(`  [server] ${s}`);
-    });
-    server.stderr.on('data', (d) => {
-      const s = d.toString().trim();
-      if (s && !s.includes('ECONNREFUSED')) console.error(`  [server!] ${s}`);
-    });
-
     await waitForServer();
     console.log('  服务器已就绪');
-    await runTests(fixtures);
+    await runTests();
   } catch (err) {
     console.error('测试失败:', err.message);
     failed++;
-  } finally {
-    if (fixtures) {
-      try { await cleanupFixtures(fixtures); } catch(e) { console.error('清理 fixture 失败', e); }
-    }
-    if (server) server.kill();
-    setTimeout(() => {
-      process.exit(failed > 0 ? 1 : 0);
-    }, 1500);
   }
+
+  console.log('\n========================================');
+  console.log(`结果: ${passed} 通过, ${failed} 失败`);
+  console.log('========================================');
+
+  server.kill();
+  setTimeout(() => {
+    try { fs.unlinkSync(tempDbPath); } catch (e) {}
+    process.exit(failed > 0 ? 1 : 0);
+  }, 1500);
 }
 
 main();

@@ -9,15 +9,6 @@ const { AIClient, AIError, AI_ERRORS, robustJSONParse } = require('../utils/aiCl
 const PROMPT_VERSION = 'v1.0';
 const CACHE_VERSION = 'v1.0';
 
-// 创建统一的 AI Client 实例
-const defaultAIClient = new AIClient({
-  apiKey: config.ai.apiKey,
-  apiUrl: config.ai.apiUrl,
-  model: config.ai.model,
-  timeout: 30000,
-  name: 'DefaultAI'
-});
-
 const zhipuAIClient = new AIClient({
   apiKey: config.zhipu.apiKey,
   apiUrl: config.zhipu.apiUrl,
@@ -25,6 +16,99 @@ const zhipuAIClient = new AIClient({
   timeout: 30000,
   name: 'ZhipuAI'
 });
+
+const sparkAIClient = new AIClient({
+  apiKey: config.spark.apiPassword,
+  apiUrl: config.spark.apiUrl,
+  model: config.spark.model,
+  timeout: config.spark.timeout || 60000,
+  name: 'SparkLiteFallback'
+});
+
+function withFallbackModel(payload, options = {}) {
+  const primaryPayload = { ...payload, model: payload.model || config.zhipu.model };
+  const fallbackPayload = { ...payload, model: config.spark.model };
+  const primaryOptions = {
+    ...options,
+    taskName: options.taskName || 'AI_Primary',
+    isJsonResponse: options.isJsonResponse !== false
+  };
+  const fallbackOptions = {
+    ...options,
+    taskName: `${options.taskName || 'AI'}:SparkLiteFallback`,
+    isJsonResponse: options.isJsonResponse !== false
+  };
+
+  return zhipuAIClient.request(primaryPayload, primaryOptions).catch(async primaryError => {
+    if (!config.spark.apiPassword) throw primaryError;
+    console.warn('[aiService] 智谱调用失败，切换讯飞星火 Spark Lite:', {
+      code: primaryError.code,
+      status: primaryError.status,
+      message: primaryError.message
+    });
+    return sparkAIClient.request(fallbackPayload, fallbackOptions);
+  });
+}
+
+function withFallbackStream(payload, options = {}) {
+  const primaryPayload = { ...payload, model: payload.model || config.zhipu.model };
+  const fallbackPayload = { ...payload, model: config.spark.model };
+  return zhipuAIClient.stream(primaryPayload, options).catch(async primaryError => {
+    if (!config.spark.apiPassword) throw primaryError;
+    console.warn('[aiService] 智谱流式调用失败，切换讯飞星火 Spark Lite:', {
+      code: primaryError.code,
+      status: primaryError.status,
+      message: primaryError.message
+    });
+    return sparkAIClient.stream(fallbackPayload, {
+      ...options,
+      taskName: `${options.taskName || 'AI_Stream'}:SparkLiteFallback`
+    });
+  });
+}
+
+// 兼容历史上仍直接使用 fetch 的文本任务，统一补上智谱 -> 星火降级。
+async function fetchChatWithFallback(payload, { signal, taskName = 'AI_DirectFetch' } = {}) {
+  const primaryPayload = { ...payload, model: payload.model || config.zhipu.model };
+  const fallbackPayload = { ...payload, model: config.spark.model };
+  const requestController = signal ? null : new AbortController();
+  const requestSignal = signal || requestController.signal;
+  const timeoutId = requestController ? setTimeout(() => requestController.abort(), config.zhipu.timeout || 60000) : null;
+  const post = (url, apiKey, body) => fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(body),
+    signal: requestSignal
+  });
+
+  try {
+    const response = await post(config.zhipu.apiUrl, config.zhipu.apiKey, primaryPayload);
+    if (response.ok) return response;
+    const message = await response.text().catch(() => '');
+    const code = response.status === 401 || response.status === 403
+      ? AI_ERRORS.AUTH_FAILED
+      : response.status === 429
+        ? AI_ERRORS.RATE_LIMITED
+        : response.status >= 500
+          ? AI_ERRORS.UNAVAILABLE
+          : AI_ERRORS.BAD_REQUEST;
+    throw new AIError(code, `Primary AI request failed with status ${response.status}`, message, response.status);
+  } catch (primaryError) {
+    if (!config.spark.apiPassword) throw primaryError;
+    console.warn('[aiService] 直接文本调用失败，切换讯飞星火 Spark Lite:', {
+      task: taskName,
+      code: primaryError.code,
+      status: primaryError.status,
+      message: primaryError.message
+    });
+    return post(config.spark.apiUrl, config.spark.apiPassword, fallbackPayload);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
 
 // 生成统一的缓存 Key
 function generateAdvancedCacheKey(poemId, content, taskType, model, promptVersion = PROMPT_VERSION) {
@@ -57,20 +141,20 @@ async function callAIGenerateJSON(prompt, systemContent, options = {}) {
     response_format: { type: "json_object" }
   };
 
-  return await defaultAIClient.request(payload, {
-      timeout: options.timeout || 35000,
-      maxRetries: 2,
-      taskName: 'callAIGenerateJSON',
-      isJsonResponse: true
-    });
+  return await withFallbackModel(payload, {
+    timeout: options.timeout || 35000,
+    maxRetries: 2,
+    taskName: 'callAIGenerateJSON',
+    isJsonResponse: true
+  });
 }
 
 module.exports.callAIGenerateJSON = callAIGenerateJSON;
 
-// 调用硅基流动生成JSON（诗词创作模块专用，使用Qwen/Qwen2.5-7B-Instruct）
+// 调用智谱生成 JSON（诗词创作模块专用）
 async function callZhipuGenerateJSON(prompt, systemContent, options = {}) {
   if (!config.zhipu.apiKey) {
-    console.log('[aiService] 缺少硅基流动API密钥，返回null');
+    console.log('[aiService] 缺少智谱API密钥，返回null');
     return null;
   }
 
@@ -87,12 +171,12 @@ async function callZhipuGenerateJSON(prompt, systemContent, options = {}) {
     response_format: { type: "json_object" }
   };
 
-  return await zhipuAIClient.request(payload, {
-      timeout: options.timeout || 35000,
-      maxRetries: 2,
-      taskName: 'callZhipuGenerateJSON',
-      isJsonResponse: true
-    });
+  return await withFallbackModel(payload, {
+    timeout: options.timeout || 35000,
+    maxRetries: 2,
+    taskName: 'callZhipuGenerateJSON',
+    isJsonResponse: true
+  });
 }
 
 module.exports.callZhipuGenerateJSON = callZhipuGenerateJSON;
@@ -156,12 +240,12 @@ function buildPrompt(poem, title, author, explanationType) {
   }
 }
 
-// AI背诵检测（使用硅基流动 Qwen/Qwen2.5-7B-Instruct）
+// AI背诵检测（使用智谱 GLM-4-Flash-250414）
 async function getAIRecitationCheck(original, input, poemTitle, poemAuthor, learningRecord) {
   try {
     const apiKey = config.zhipu.apiKey;
     if (!apiKey) {
-      console.error('[aiService] 缺少硅基流动API密钥');
+      console.error('[aiService] 缺少智谱API密钥');
       return {
         score: 0,
         wrongChars: [],
@@ -275,7 +359,7 @@ async function getAIRecitationCheck(original, input, poemTitle, poemAuthor, lear
 }
 
 
-// 获取AI讲解（使用硅基流动 Qwen/Qwen2.5-7B-Instruct）
+// 获取AI讲解（使用智谱 GLM-4-Flash-250414）
 async function getAIExplanation(poem, title, author, explanationType) {
   try {
     const cacheKey = generateAdvancedCacheKey(null, poem, `explanation_${explanationType || 'full'}`, config.zhipu.model);
@@ -292,7 +376,7 @@ async function getAIExplanation(poem, title, author, explanationType) {
       throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
     }
     
-    console.log('[aiService] 发送AI讲解请求（硅基流动）:', {
+    console.log('[aiService] 发送AI讲解请求（智谱）:', {
       title: title || '无标题',
       explanationType: explanationType,
       hasApiKey: !!apiKey
@@ -308,7 +392,7 @@ async function getAIExplanation(poem, title, author, explanationType) {
     });
 
     if (!result) {
-      console.error('[aiService] 硅基流动AI讲解返回null');
+      console.error('[aiService] 智谱AI讲解返回null');
       return { degraded: true, error: 'AI服务暂时不可用' };
     }
 
@@ -496,7 +580,7 @@ function buildTutorPrompt(poem, title, author, question, history = []) {
     3. 回答必须基于这首诗的标题、作者、正文内容
     4. 必须引用具体诗句来支持你的回答
     5. 教学风格，亲切自然，符合中学语文老师身份
-    6. 回答简洁明了，不超过100字
+    6. 回答简洁明了，控制在80-140字
     7. 用解释语气，有结构，不学术论文口吻，不闲聊口吻
     8. 直接回答问题，不要使用任何引言或开场白
     9. 保持上下文连贯，记住之前的对话内容
@@ -509,7 +593,7 @@ function buildTutorPrompt(poem, title, author, question, history = []) {
     `;
 }
 
-// 获取助教回答（使用硅基流动 Qwen/Qwen2.5-7B-Instruct）
+// 获取助教回答（使用智谱 GLM-4-Flash-250414）
 async function getAIResponse(poem, title, author, question, history = []) {
   try {
     console.log('[aiService] 处理AI助教请求:', {
@@ -520,7 +604,7 @@ async function getAIResponse(poem, title, author, question, history = []) {
     
     const apiKey = config.zhipu.apiKey;
     if (!apiKey) {
-      console.error('[aiService] 缺少硅基流动API密钥');
+      console.error('[aiService] 缺少智谱API密钥');
       return {
         answer: `针对你关于这首诗的问题，我需要更多信息来为你解答。请具体说明你想了解的方面，比如诗句含义、作者背景、艺术特色等，我会为你详细分析。`
       };
@@ -695,15 +779,7 @@ async function getAIrewritePoem(poem, title, author) {
       stream: false
     };
     
-    const response = await fetch(config.ai.apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(requestData),
-      timeout: config.ai.timeout
-    });
+    const response = await fetchChatWithFallback(requestData, { taskName: 'getAIrewritePoem' });
     
     if (!response.ok) {
       throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
@@ -751,15 +827,7 @@ async function getDimensionExplanation(poem, title, author, dimension) {
       stream: false
     };
     
-    const response = await fetch(config.ai.apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(requestData),
-      timeout: config.ai.timeout
-    });
+    const response = await fetchChatWithFallback(requestData, { taskName: 'getDimensionExplanation' });
     
     if (!response.ok) {
       throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
@@ -811,15 +879,7 @@ async function getLearningAdvice(poem, title, author) {
       stream: false
     };
     
-    const response = await fetch(config.ai.apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(requestData),
-      timeout: config.ai.timeout
-    });
+    const response = await fetchChatWithFallback(requestData, { taskName: 'getLearningAdvice' });
     
     if (!response.ok) {
       throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
@@ -871,15 +931,7 @@ async function getSimplifiedExplanation(poem, title, author, originalExplanation
       stream: false
     };
     
-    const response = await fetch(config.ai.apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(requestData),
-      timeout: config.ai.timeout
-    });
+    const response = await fetchChatWithFallback(requestData, { taskName: 'getSimplifiedExplanation' });
     
     if (!response.ok) {
       throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response.status}`);
@@ -928,37 +980,7 @@ async function getCharInfo(prompt) {
       response_format: { type: "json_object" }
     };
     
-    let response;
-    let retries = 3;
-    
-    while (retries >= 0) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), config.ai.timeout || 60000);
-      
-      try {
-        response = await fetch(config.ai.apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${apiKey}`
-          },
-          body: JSON.stringify(requestData),
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        break;
-      } catch (error) {
-        clearTimeout(timeoutId);
-        if (retries > 0 && (error.name === 'AbortError' || error.message.includes('timeout'))) {
-          retries--;
-          console.log('AI请求超时，重试中...');
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } else {
-          throw error;
-        }
-      }
-    }
+    const response = await fetchChatWithFallback(requestData, { taskName: 'getCharInfo' });
     
     if (!response || !response.ok) {
       throw new AIError(response?.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `API请求失败: ${response?.status || '未知错误'}`);
@@ -1175,7 +1197,7 @@ async function generatePoemImage(poem, title, author) {
   }
 }
 
-// 飞花令评判（使用Qwen/Qwen2.5-7B-Instruct模型）
+// 飞花令评判（使用智谱模型）
 async function evaluateFeihuaPoem(poem, keyword, difficulty = 'medium', usedPoems = []) {
   try {
     const apiKey = config.zhipu.apiKey;
@@ -1295,9 +1317,7 @@ async function evaluateFeihua(poem, keyword) {
 
 `;
 
-    const feihuaModel = 'Qwen/Qwen2.5-7B-Instruct';
-    const feihuaApiUrl = 'https://api.siliconflow.cn/v1/chat/completions';
-
+    const feihuaModel = config.zhipu.model;
     const requestData = {
       model: feihuaModel,
       messages: [
@@ -1320,15 +1340,7 @@ async function evaluateFeihua(poem, keyword) {
     const timeoutId = setTimeout(() => controller.abort(), config.ai.timeout || 30000);
 
     try {
-      const response = await fetch(feihuaApiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(requestData),
-        signal: controller.signal
-      });
+      const response = await fetchChatWithFallback(requestData, { signal: controller.signal, taskName: 'evaluateFeihuaPoem' });
 
       clearTimeout(timeoutId);
 
@@ -1511,15 +1523,7 @@ async function generateDuelQuestions(count = 1, excludeTitles = [], attempt = 0)
     const timeoutId = setTimeout(() => controller.abort(), config.ai.timeout || 30000);
 
     try {
-      const response = await fetch(config.ai.apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(requestData),
-        signal: controller.signal
-      });
+      const response = await fetchChatWithFallback(requestData, { signal: controller.signal, taskName: 'generateDuelQuestions' });
 
       clearTimeout(timeoutId);
 
@@ -1769,25 +1773,17 @@ ${JSON.stringify(poemSamples, null, 2)}
 只输出JSON，不要解释，不要markdown代码块。`;
 
   try {
-    const response = await fetch(config.ai.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.ai.model,
-        messages: [
-          { role: 'system', content: '你是一个专业的古诗词搜索引擎排序助手。' },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 800,
-        top_p: 0.8,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
+    const response = await fetchChatWithFallback({
+      model: config.ai.model,
+      messages: [
+        { role: 'system', content: '你是一个专业的古诗词搜索引擎排序助手。' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 800,
+      top_p: 0.8,
+      stream: false,
+    }, { signal: controller.signal, taskName: 'rankPoemsWithAI' });
 
     clearTimeout(timeoutId);
 
@@ -1941,25 +1937,17 @@ ${poemList}
 - 只输出JSON，不要任何其他内容`;
 
   try {
-    const response = await fetch(config.ai.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.ai.model,
-        messages: [
-          { role: 'system', content: '你是一位古诗词研究专家。回答必须是JSON格式。' },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.7,
-        max_tokens: 500,
-        top_p: 0.8,
-        stream: false,
-      }),
-      signal: controller.signal,
-    });
+    const response = await fetchChatWithFallback({
+      model: config.ai.model,
+      messages: [
+        { role: 'system', content: '你是一位古诗词研究专家。回答必须是JSON格式。' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 500,
+      top_p: 0.8,
+      stream: false,
+    }, { signal: controller.signal, taskName: 'analyzeSearchResults' });
 
     clearTimeout(timeoutId);
 
@@ -2064,25 +2052,17 @@ async function getPoemBackground(title, author, dynasty, content) {
   const timeoutId = setTimeout(() => controller.abort(), config.ai.timeout || 30000);
 
   try {
-    const response = await fetch(config.ai.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.ai.model,
-        messages: [
-          { role: 'system', content: '你是一位博学儒雅的古代文学学者，擅长用简洁优美的语言讲述诗词背后的故事。' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.8,
-        max_tokens: 400,
-        top_p: 0.85,
-        stream: false
-      }),
-      signal: controller.signal
-    });
+    const response = await fetchChatWithFallback({
+      model: config.ai.model,
+      messages: [
+        { role: 'system', content: '你是一位博学儒雅的古代文学学者，擅长用简洁优美的语言讲述诗词背后的故事。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.8,
+      max_tokens: 400,
+      top_p: 0.85,
+      stream: false
+    }, { signal: controller.signal, taskName: 'getPoemBackground' });
 
     clearTimeout(timeoutId);
 
@@ -2119,23 +2099,15 @@ async function getPoemStory(title, author, content) {
   const timeoutId = setTimeout(() => controller.abort(), config.zhipu.timeout || 30000);
 
   try {
-    const response = await fetch(config.zhipu.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.zhipu.model,
-        messages: [
-          { role: 'system', content: '你是一位风趣幽默的故事大王，擅长将诗词背后的故事讲得生动有趣。' },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: 200,
-        temperature: 0.8
-      }),
-      signal: controller.signal
-    });
+    const response = await fetchChatWithFallback({
+      model: config.zhipu.model,
+      messages: [
+        { role: 'system', content: '你是一位风趣幽默的故事大王，擅长将诗词背后的故事讲得生动有趣。' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 200,
+      temperature: 0.8
+    }, { signal: controller.signal, taskName: 'getPoemStory' });
 
     clearTimeout(timeoutId);
 
@@ -2173,25 +2145,17 @@ async function getRecitationGuide(title, author, content, dynasty) {
   const timeoutId = setTimeout(() => controller.abort(), config.ai.timeout || 30000);
 
   try {
-    const response = await fetch(config.ai.apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'Qwen/Qwen2.5-7B-Instruct',
-        messages: [
-          { role: 'system', content: '你是一位专业资深的朗诵艺术指导老师。你的回答必须是标准JSON格式。' },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.6,
-        max_tokens: 800,
-        top_p: 0.85,
-        stream: false
-      }),
-      signal: controller.signal
-    });
+    const response = await fetchChatWithFallback({
+      model: config.ai.model,
+      messages: [
+        { role: 'system', content: '你是一位专业资深的朗诵艺术指导老师。你的回答必须是标准JSON格式。' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.6,
+      max_tokens: 800,
+      top_p: 0.85,
+      stream: false
+    }, { signal: controller.signal, taskName: 'getRecitationGuide' });
 
     clearTimeout(timeoutId);
 
@@ -2255,6 +2219,70 @@ function getBuiltinRecitationGuide(title, content) {
   };
 }
 
+// 面向前端的纯文本流式接口。结构化 JSON 业务继续使用上面的 JSON 调用，
+// 需要即时展示的讲解/助教内容统一通过智谱 SSE 输出 Markdown 文本。
+async function streamAIText({
+  type = 'tutor',
+  poem = '',
+  title = '',
+  author = '',
+  question = '',
+  history = [],
+  explanationType = '',
+  dynasty = '',
+  onToken
+} = {}) {
+  if (!config.zhipu.apiKey) {
+    throw new AIError(AI_ERRORS.AUTH_FAILED, '智谱 API 密钥缺失');
+  }
+
+  const systemContent = `你是一位亲切、严谨的中文古诗词老师。
+质量要求：
+1. 只能依据用户提供的诗文、题目和作者回答，不要编造诗句、典故、年代或作者经历；不确定的背景要明确说“资料有不同说法”或“无法仅凭诗文确定”。
+2. 必须引用用户提供的原句来支撑分析，引用时保持原字，不得改写成似是而非的诗句。
+3. 先给结论，再给依据；避免“这首诗表达了深刻情感”等空泛套话。
+4. 输出有效、简洁的 Markdown，合理使用小标题、加粗和列表；不要输出 JSON、HTML 或“以下是答案”等套话。
+5. 绝对不要使用三个反引号代码围栏包裹 Markdown，也不要把正文写成代码块。`;
+  let userPrompt = '';
+
+  if (type === 'tutor') {
+    userPrompt = buildTutorPrompt(poem, title, author, question, history)
+      + '\n请先直接回答学生的问题，再用1-2处原诗句解释依据；总长度控制在80-140字，使用 Markdown 段落或短列表。';
+  } else if (type === 'explain') {
+    userPrompt = `请赏析古诗《${title || '未知'}》（${author || '佚名'}）：\n\n${poem}\n\n`
+      + (explanationType ? `请重点从“${explanationType}”角度分析。` : '请依次输出“白话理解”“关键词与手法”“意境与情感”“思考问题”四个小节。')
+      + '\n每个小节都必须结合原诗中的具体字词；思考问题列出2-3个开放问题；总长度控制在350字以内。';
+  } else if (type === 'background') {
+    userPrompt = `请用 Markdown 写《${title || '未知'}》（${author || '佚名'}）的创作背景，使用“时代与背景”“创作场景”“情感落点”等清晰小标题，结合${dynasty || '其时代'}、可能的创作场景、缘由和核心情感，控制在120-180字。只写有可靠依据的作者与时代信息；不要为了凑背景添加具体历史事件、地点、隐居经历或“某年某地创作”等未经确认的细节。史实不确定时请标注“传说”或“资料有不同说法”；无法确认时直接写“具体情况无法仅凭现有资料确定”，再改为分析诗文可见的场景与情感。不要把诗句中的推断补写成真实史实。`;
+  } else if (type === 'story') {
+    userPrompt = `请用 Markdown 讲一个关于《${title || '未知'}》（${author || '佚名'}）的100字以内趣味故事，可以是诗词典故或有可靠依据的诗人轶事。无法确认真伪的内容必须标注“传说”，不要杜撰具体历史细节。`;
+  } else if (type === 'recitation-guide') {
+    userPrompt = `请为《${title || '未知'}》（${author || '佚名'}）制定诵读指南。诗文如下：\n${poem}\n\n请直接输出 Markdown 正文，不要使用三个反引号代码围栏。输出“节奏停顿”“情感把控”“练习技巧”三个小节。停顿必须根据实际句式，不要机械套用五言/七言模板；技巧列出3条可操作建议。`;
+  } else if (type === 'rewrite') {
+    userPrompt = `请将《${title || '未知'}》（${author || '佚名'}）改写成通俗、优美的现代白话文。原诗：\n${poem}\n\n逐句保留原诗的意象、动作和情感，不新增原诗没有的情节；使用 Markdown 输出，150字以内。`;
+  } else if (type === 'dimension') {
+    userPrompt = `请从“${question || '艺术特色'}”维度赏析《${title || '未知'}》（${author || '佚名'}）：\n${poem}\n\n至少引用一处原句说明；使用 Markdown 输出，150字以内。`;
+  } else if (type === 'advice') {
+    userPrompt = `请为正在学习《${title || '未知'}》（${author || '佚名'}）的学生提供3条具体、可执行的学习建议。诗文：\n${poem}\n\n建议必须与这首诗的内容相关，使用 Markdown 列表输出，150字以内。`;
+  } else {
+    throw new AIError(AI_ERRORS.BAD_REQUEST, `Unsupported stream type: ${type}`);
+  }
+
+  return withFallbackStream({
+    model: config.zhipu.model,
+    messages: [
+      { role: 'system', content: systemContent },
+      { role: 'user', content: userPrompt }
+    ],
+    temperature: 0.7,
+    max_tokens: 800
+  }, {
+    timeout: 90000,
+    taskName: `streamAIText:${type}`,
+    onToken
+  });
+}
+
 module.exports = {
   getAIExplanation,
   checkRecitation,
@@ -2285,7 +2313,8 @@ module.exports = {
   analyzeSearchResults,
   detectSearchEmotion,
   generateAuthorAvatar,
-  generateTTS
+  generateTTS,
+  streamAIText
 };
 
 // 生成诗句意境图
@@ -2624,9 +2653,30 @@ module.exports = {
   callAIGenerateJSON,
   checkRecitation,
   handleAIExplanation,
+  getAIExplanation,
+  getAIResponse,
+  getAIrewritePoem,
+  getDimensionExplanation,
+  getLearningAdvice,
+  getSimplifiedExplanation,
+  getAIRecitationCheck,
+  getCharInfo,
   generateDuelQuestions,
+  generateChallengeQuestion,
+  verifyChallengeAnswer,
+  generateAIHelp,
+  getAIGeneratedQuestions,
   aiPoemSearch,
   generatePoemImage,
+  evaluateFeihuaPoem,
+  repairDuelQuestionFromFullPoem,
   generateAuthorAvatar,
-  generateTTS
+  generatePoemSceneImage,
+  getPoemBackground,
+  getPoemStory,
+  getRecitationGuide,
+  analyzeSearchResults,
+  detectSearchEmotion,
+  generateTTS,
+  streamAIText
 };

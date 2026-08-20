@@ -97,7 +97,7 @@ router.get('/dashboard', authenticateToken, async (req, res) => {
   }
 });
 
-// AI 学习建议（智谱 GLM-4.7-Flash，密钥由服务端 ZHIPU_API_KEY 配置）
+// AI 学习建议（智谱 GLM-4-Flash-250414，密钥由服务端 ZHIPU_API_KEY 配置）
 router.post('/ai-suggestions', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;

@@ -153,11 +153,7 @@ class FeihualingService {
               username: user.username,
               disconnectTime: Date.now()
             });
-
-            setTimeout(() => {
-              this.handleReconnectTimeout(userId);
-            }, this.RECONNECT_TIMEOUT);
-
+            // 由 socket 层负责倒计时和通知对手；这里保留在线记录以支持重连。
             continue;
           }
         }
@@ -334,6 +330,8 @@ class FeihualingService {
       currentTurn: Math.floor(Math.random() * 2),
       currentRound: 1,
       usedPoems: [],
+      // AI 判题是异步的；同一回合只允许一个答案进入验证流程。
+      answerInProgress: null,
       turnTimeLimit: diffConfig.timeLimit,
       turnStartTime: Date.now(),
       createdAt: Date.now(),
@@ -401,6 +399,10 @@ class FeihualingService {
       return { success: false, error: '游戏已结束' };
     }
 
+    if (room.answerInProgress !== null) {
+      return { success: false, error: '上一答案正在验证，请稍候' };
+    }
+
     if (!poem || typeof poem !== 'string' || poem.trim() === '') {
       return { success: false, error: '请输入诗句' };
     }
@@ -426,6 +428,8 @@ class FeihualingService {
     })) {
       return { success: false, error: '该诗句已被使用', isDuplicate: true };
     }
+
+    room.answerInProgress = userId;
 
     return {
       success: true,
@@ -455,10 +459,12 @@ class FeihualingService {
       return usedNorm === normalizedPoem;
     });
     if (alreadyUsed) {
+      room.answerInProgress = null;
       return this._endRoundWithResult(room, opponent, player, 'answer_invalid', '该诗句已被使用');
     }
 
     if (!aiResult || !aiResult.isValid) {
+      room.answerInProgress = null;
       return this._endRoundWithResult(room, opponent, player, 'answer_invalid', aiResult ? aiResult.reason : '诗句无效');
     }
 
@@ -475,6 +481,7 @@ class FeihualingService {
     room.currentTurn = (room.currentTurn + 1) % 2;
     room.currentRound += 1;
     room.turnStartTime = Date.now();
+    room.answerInProgress = null;
 
     return {
       isCorrect: true,
@@ -491,6 +498,13 @@ class FeihualingService {
       currentTurn: room.currentTurn,
       nextPlayer: room.players[room.currentTurn]
     };
+  }
+
+  releaseAnswer(roomId, userId) {
+    const room = this.rooms.get(roomId);
+    if (room && (userId == null || room.answerInProgress === userId)) {
+      room.answerInProgress = null;
+    }
   }
 
   _endRoundWithResult(room, winner, loser, reason, reasonDetail) {

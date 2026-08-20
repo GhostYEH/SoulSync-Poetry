@@ -7,7 +7,7 @@
  *    与 masteryUpdateEngine 的 Weighted Bayesian Evidence Model v2 冲突。
  *    系统只能有一套 Source of Truth: student_knowledge_states。
  *
- *    teacherRoutes.js 已移除所有 fallback 到本服务的逻辑。
+ *    由学生学习数据驱动知识诊断。
  *    保留本文件仅供历史参考，不应被生产路由调用。
  *
  * 设计理念：

@@ -35,36 +35,65 @@ setInterval(() => {
   console.log('[creationRoutes] 清理过期限流记录完成');
 }, 3600000);
 
-function checkAIRateLimit(key) {
+function checkAIRateLimit(req) {
+  const userId = req.user.userId;
   const now = Date.now();
 
-  if (!aiRateLimitMap.has(key)) {
-    aiRateLimitMap.set(key, []);
+  if (!aiRateLimitMap.has(userId)) {
+    aiRateLimitMap.set(userId, []);
   }
 
-  const records = aiRateLimitMap.get(key);
+  const records = aiRateLimitMap.get(userId);
   const filteredRecords = records.filter(record => now - record < 60000);
-  aiRateLimitMap.set(key, filteredRecords);
+  aiRateLimitMap.set(userId, filteredRecords);
 
   if (filteredRecords.length >= 5) {
     return false;
   }
 
   filteredRecords.push(now);
-  aiRateLimitMap.set(key, filteredRecords);
+  aiRateLimitMap.set(userId, filteredRecords);
   return true;
 }
 
-const authenticateToken = require('../middleware/auth');
-const optionalAuthenticateToken = authenticateToken.optionalAuthenticateToken;
+function optionalAuthenticateToken(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (token) {
+      const jwt = require('jsonwebtoken');
+      const JWT_SECRET = config.jwt.secret || 'your-secret-key';
+
+      jwt.verify(token, JWT_SECRET, (err, decoded) => {
+        if (err) {
+          req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
+          next();
+        } else {
+          req.user = {
+            userId: decoded.userId,
+            username: decoded.username
+          };
+          next();
+        }
+      });
+    } else {
+      req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
+      next();
+    }
+  } catch (error) {
+    console.error('认证失败:', error);
+    req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
+    next();
+  }
+}
 
 router.post('/novice/generate', optionalAuthenticateToken, async (req, res) => {
   try {
+    const userId = req.user.userId;
     const { theme, genre } = req.body;
-    let userId = req.user ? req.user.userId : null;
-    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
 
-    if (!checkAIRateLimit(rateLimitKey)) {
+    if (!checkAIRateLimit(req)) {
       console.error('[creationRoutes] 生成引导诗 失败', { userId, error: '请求过于频繁，请稍后重试' });
       return res.status(429).json({ success: false, message: '请求过于频繁，请稍后重试' });
     }
@@ -107,8 +136,9 @@ router.post('/novice/generate', optionalAuthenticateToken, async (req, res) => {
       console.log('[creationRoutes] 生成引导诗 成功', { userId, theme: escapedTheme, genre: escapedGenre });
       return res.json({ success: true, data: result, message: '生成成功' });
     } else {
-      console.error('[creationRoutes] 生成引导诗 AI失败', { userId, theme: escapedTheme, genre: escapedGenre });
-      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
+      const mockData = config.creation.defaultData.noviceGenerate(theme, genre);
+      console.error('[creationRoutes] 生成引导诗 AI失败，返回模拟数据', { userId, theme: escapedTheme, genre: escapedGenre });
+      return res.json({ success: false, data: mockData, message: 'AI服务暂时不可用，已返回参考示例' });
     }
   } catch (error) {
     console.error('[creationRoutes] 生成引导诗 失败', { userId: req.user.userId, params: req.body, error: error.stack || error.message });
@@ -118,11 +148,10 @@ router.post('/novice/generate', optionalAuthenticateToken, async (req, res) => {
 
 router.post('/novice/check', optionalAuthenticateToken, async (req, res) => {
   try {
-    const { title, author, userPoem, referencePoem } = req.body;
-    let userId = req.user ? req.user.userId : null;
-    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
+    const userId = req.user.userId;
+    const { userPoem, referencePoem, title, author } = req.body;
 
-    if (!checkAIRateLimit(rateLimitKey)) {
+    if (!checkAIRateLimit(req)) {
       console.error('[creationRoutes] 校验填词结果 失败', { userId, error: '请求过于频繁，请稍后重试' });
       return res.status(429).json({ success: false, message: '请求过于频繁，请稍后重试' });
     }
@@ -192,8 +221,9 @@ ${escapedUserPoem}
       console.log('[creationRoutes] 校验填词结果 成功', { userId });
       return res.json({ success: true, data: result, message: '校验成功' });
     } else {
-      console.error('[creationRoutes] 校验填词结果 AI失败', { userId });
-      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
+      const mockData = config.creation.defaultData.noviceCheck;
+      console.error('[creationRoutes] 校验填词结果 AI失败，返回模拟数据', { userId });
+      return res.json({ success: false, data: mockData, message: 'AI服务暂时不可用，已返回参考示例' });
     }
   } catch (error) {
     console.error('[creationRoutes] 校验填词结果 失败', { userId: req.user.userId, params: req.body, error: error.stack || error.message });
@@ -203,11 +233,10 @@ ${escapedUserPoem}
 
 router.post('/assist/generate-reference', optionalAuthenticateToken, async (req, res) => {
   try {
+    const userId = req.user.userId;
     const { theme, genre } = req.body;
-    let userId = req.user ? req.user.userId : null;
-    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
 
-    if (!checkAIRateLimit(rateLimitKey)) {
+    if (!checkAIRateLimit(req)) {
       console.error('[creationRoutes] 生成参考诗词 失败', { userId, error: '请求过于频繁，请稍后重试' });
       return res.status(429).json({ success: false, message: '请求过于频繁，请稍后重试' });
     }
@@ -245,8 +274,9 @@ router.post('/assist/generate-reference', optionalAuthenticateToken, async (req,
       console.log('[creationRoutes] 生成参考诗词 成功', { userId, theme: escapedTheme, genre: escapedGenre });
       return res.json({ success: true, data: result, message: '生成成功' });
     } else {
-      console.error('[creationRoutes] 生成参考诗词 AI失败', { userId, theme: escapedTheme, genre: escapedGenre });
-      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
+      const mockData = config.creation.defaultData.assistGenerateReference(theme, genre);
+      console.error('[creationRoutes] 生成参考诗词 AI失败，返回模拟数据', { userId, theme: escapedTheme, genre: escapedGenre });
+      return res.json({ success: false, data: mockData, message: 'AI服务暂时不可用，已返回参考示例' });
     }
   } catch (error) {
     console.error('[creationRoutes] 生成参考诗词 失败', { userId: req.user.userId, params: req.body, error: error.stack || error.message });
@@ -256,11 +286,10 @@ router.post('/assist/generate-reference', optionalAuthenticateToken, async (req,
 
 router.post('/assist/score', optionalAuthenticateToken, async (req, res) => {
   try {
-    const { title, author, poem, genre, theme } = req.body;
-    let userId = req.user ? req.user.userId : null;
-    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
+    const userId = req.user.userId;
+    const { poem, title, author, genre, theme } = req.body;
 
-    if (!checkAIRateLimit(rateLimitKey)) {
+    if (!checkAIRateLimit(req)) {
       console.error('[creationRoutes] 评分 失败', { userId, error: '请求过于频繁，请稍后重试' });
       return res.status(429).json({ success: false, message: '请求过于频繁，请稍后重试' });
     }
@@ -316,8 +345,9 @@ ${escapedPoem}
       console.log('[creationRoutes] 评分 成功', { userId, total: scoreResult.total });
       return res.json({ success: true, data: responseData, message: '评分成功' + (imageResult ? '，已生成意境图' : '') });
     } else {
-      console.error('[creationRoutes] 评分 AI失败', { userId });
-      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
+      const mockData = { total: 0, dimensions: { content: 0, rhythm: 0, mood: 0, language: 0, creativity: 0 }, suggestions: 'AI服务暂时不可用，请稍后重试。', image: imageResult || null };
+      console.error('[creationRoutes] 评分 AI失败，返回空分', { userId });
+      return res.json({ success: false, data: mockData, message: 'AI服务暂时不可用，请稍后重试' });
     }
   } catch (error) {
     console.error('[creationRoutes] 评分 失败', { userId: req.user.userId, params: req.body, error: error.stack || error.message });
@@ -327,10 +357,7 @@ ${escapedPoem}
 
 router.post('/assist/generate-image', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user ? req.user.userId : null;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: '请先登录' });
-    }
+    const userId = req.user.userId;
     const { poem, title, author } = req.body;
 
     console.log('[creationRoutes] 生成意境图 信息', { userId, params: { title, author } });
@@ -365,13 +392,8 @@ router.post('/assist/generate-image', optionalAuthenticateToken, async (req, res
 
 router.post('/works/save', optionalAuthenticateToken, async (req, res) => {
   try {
-    let userId = req.user ? req.user.userId : null;
-    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
+    const userId = req.user.userId;
     const { title, content, genre, theme, creation_mode, ai_reference, score_data, modification_suggestions } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({ success: false, message: '请先登录' });
-    }
 
     console.log('[creationRoutes] 保存作品 信息', { userId, params: { title, genre, theme, creation_mode } });
 
@@ -399,10 +421,7 @@ router.post('/works/save', optionalAuthenticateToken, async (req, res) => {
 router.delete('/works/:id', optionalAuthenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user ? req.user.userId : null;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: '请先登录' });
-    }
+    const userId = req.user.userId;
 
     console.log('[creationRoutes] 删除作品 信息', { userId, params: { id } });
 
@@ -426,10 +445,7 @@ router.delete('/works/:id', optionalAuthenticateToken, async (req, res) => {
 router.get('/works/list', optionalAuthenticateToken, async (req, res) => {
   try {
     const { page, pageSize, offset } = parsePagination(req, 10);
-    const userId = req.user ? req.user.userId : null;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: '请先登录' });
-    }
+    const userId = req.user.userId;
 
     console.log('[creationRoutes] 查询作品列表 信息', { userId, params: { page, pageSize } });
 
@@ -462,10 +478,7 @@ router.get('/works/list', optionalAuthenticateToken, async (req, res) => {
 router.get('/works/:id', optionalAuthenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user ? req.user.userId : null;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: '请先登录' });
-    }
+    const userId = req.user.userId;
 
     console.log('[creationRoutes] 查询作品详情 信息', { userId, params: { id } });
 
@@ -489,10 +502,7 @@ router.get('/works/:id', optionalAuthenticateToken, async (req, res) => {
 
 router.get('/stats', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user ? req.user.userId : null;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: '请先登录' });
-    }
+    const userId = req.user.userId;
 
     console.log('[creationRoutes] 查询创作成长数据 信息', { userId });
 

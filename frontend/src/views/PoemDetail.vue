@@ -296,7 +296,7 @@
           <div v-else-if="poemBackground" class="poem-background-content">
             <div class="background-item">
               <div class="item-icon">🏛️</div>
-              <div class="item-text">{{ poemBackground }}</div>
+              <div class="item-text" v-html="renderMarkdown(poemBackground)"></div>
             </div>
             <div v-if="poemBackgroundTips" class="background-tips">
               <div class="tips-label">💡 学习提示</div>
@@ -322,7 +322,7 @@
             <span>加载中...</span>
           </div>
           <div v-else-if="poemStory" class="poem-story-content">
-            <div class="story-text">{{ poemStory }}</div>
+            <div class="story-text" v-html="renderMarkdown(poemStory)"></div>
           </div>
           <button
             v-else
@@ -341,6 +341,9 @@
           <div v-if="recitationGuideLoading" class="card-loading">
             <div class="mini-spinner"></div>
             <span>加载中...</span>
+          </div>
+          <div v-else-if="recitationGuideMarkdown" class="recitation-guide-content markdown-content">
+            <div v-html="renderMarkdown(recitationGuideMarkdown)"></div>
           </div>
           <div v-else-if="recitationGuide" class="recitation-guide-content">
             <div v-if="recitationGuide.rhythm" class="guide-section">
@@ -383,7 +386,7 @@
                 :class="['chat-message', message.role]"
               >
                 <div class="message-content">
-                  {{ message.content }}
+                  <div v-html="renderMarkdown(message.content)"></div>
                 </div>
               </div>
               <div v-if="tutorLoading" class="chat-message bot loading">
@@ -430,7 +433,7 @@
           <div v-if="aiExplanations.daily_life_explanation" class="explanation-content">
             <div class="explanation-section">
               <h3>🏠 日常生活场景化解读</h3>
-              <p>{{ aiExplanations.daily_life_explanation }}</p>
+              <div v-html="renderMarkdown(aiExplanations.daily_life_explanation)"></div>
             </div>
           </div>
           
@@ -438,7 +441,7 @@
           <div v-if="aiExplanations.keyword_analysis" class="explanation-content">
             <div class="explanation-section">
               <h3>🔍 关键字词分析</h3>
-              <p>{{ aiExplanations.keyword_analysis }}</p>
+              <div v-html="renderMarkdown(aiExplanations.keyword_analysis)"></div>
             </div>
           </div>
           
@@ -446,10 +449,17 @@
           <div v-if="aiExplanations.artistic_conception" class="explanation-content">
             <div class="explanation-section">
               <h3>✨ 艺术意境解析</h3>
-              <p>{{ aiExplanations.artistic_conception }}</p>
+              <div v-html="renderMarkdown(aiExplanations.artistic_conception)"></div>
             </div>
           </div>
           
+          <div v-if="aiExplanations.markdown" class="explanation-content markdown-content">
+            <div class="explanation-section">
+              <h3>🖋️ 流式赏析</h3>
+              <div v-html="renderMarkdown(aiExplanations.markdown)"></div>
+            </div>
+          </div>
+
           <!-- 引导性思考题 -->
           <div v-if="aiExplanations.thinking_questions" class="explanation-content">
             <div class="explanation-section">
@@ -504,7 +514,7 @@
 
             <div v-if="tutorData.teaching && tutorData.teaching.explanation" class="tutor-explanation">
               <h4>📖 个性化讲解</h4>
-              <p class="teaching-text">{{ tutorData.teaching.explanation }}</p>
+              <div class="teaching-text markdown-content" v-html="renderMarkdown(tutorData.teaching.explanation)"></div>
             </div>
 
             <div v-if="tutorData.teaching && tutorData.teaching.keyPoints && tutorData.teaching.keyPoints.length > 0" class="tutor-key-points">
@@ -518,7 +528,7 @@
 
             <div v-if="tutorData.teaching && tutorData.teaching.practiceAdvice" class="tutor-advice">
               <h4>✍️ 练习建议</h4>
-              <p>{{ tutorData.teaching.practiceAdvice }}</p>
+              <div v-html="renderMarkdown(tutorData.teaching.practiceAdvice)"></div>
             </div>
 
             <div v-if="tutorData.practiceQuestions && tutorData.practiceQuestions.length > 0" class="tutor-practice">
@@ -816,6 +826,8 @@
 <script>
 import io from 'socket.io-client'
 import { generateAttemptId } from '../utils/attemptId'
+import { request, streamAI, TIMEOUTS } from '../services/api'
+import { renderMarkdown } from '../utils/markdown'
 
 const API_BASE_URL = 'http://localhost:3000'
 
@@ -831,6 +843,7 @@ export default {
       audio: null,
       // AI讲解相关状态
       aiExplanations: {
+        markdown: null,
         daily_life_explanation: null,
         keyword_analysis: null,
         artistic_conception: null,
@@ -880,6 +893,7 @@ export default {
       poemStoryError: '',
       // 诵读技巧指南
       recitationGuide: null,
+      recitationGuideMarkdown: null,
       recitationGuideLoading: false,
       recitationGuideError: '',
       // AI助教聊天相关
@@ -899,6 +913,7 @@ export default {
       // 图像生成相关
       imageStatus: 'idle', // idle, pending, success, fail
       backgroundImage: null,
+      imageStatusTimer: null,
       bgImageFadingIn: false,   // 控制 AI 意境图淡入
       bgImageLoading: false,    // 标记图片正在加载中
       contentEntering: false,   // 内容区进入动画标记
@@ -1012,6 +1027,8 @@ export default {
     this.studyStartTime = Date.now()
     console.log('开始学习计时:', this.studyStartTime)
     
+    // 先建立 Socket，再请求详情，避免后端在图片生成失败时发出的状态事件被错过。
+    this.initSocket()
     this.fetchPoemDetail()
 
     try {
@@ -1020,9 +1037,6 @@ export default {
         this.selectionPopup.placementMode = saved
       }
     } catch (e) { /* ignore */ }
-    
-    // 初始化Socket.io连接
-    this.initSocket()
     
     // 初始化AI助教欢迎消息
     if (this.tutorMessages.length === 0) {
@@ -1058,6 +1072,10 @@ export default {
     if (this.socket) {
       this.socket.disconnect()
     }
+    if (this.imageStatusTimer) {
+      clearTimeout(this.imageStatusTimer)
+      this.imageStatusTimer = null
+    }
     // 清理轮播定时器
     if (this.carouselInterval) {
       clearInterval(this.carouselInterval)
@@ -1066,6 +1084,7 @@ export default {
     document.removeEventListener('mouseup', this.handleTextSelection);
   },
   methods: {
+    renderMarkdown,
     // 加载个性化教学（RAG 驱动）
     async loadPersonalizedTutor() {
       if (this.tutorLoading || !this.poem) return
@@ -1118,21 +1137,32 @@ export default {
         
         // 监听图像生成状态
         this.socket.on('image-generate-pending', (data) => {
+          if (this.poem && String(data?.poemId) !== String(this.poem.id)) return
           console.log('图像生成中:', data)
           this.imageStatus = 'pending'
         })
         
         this.socket.on('image-generate-success', (data) => {
+      if (this.poem && String(data?.poemId) !== String(this.poem.id)) return
       console.log('图像生成成功:', data)
       this.imageStatus = 'success'
+      if (this.imageStatusTimer) {
+        clearTimeout(this.imageStatusTimer)
+        this.imageStatusTimer = null
+      }
       // 触发 AI 意境图淡入（先清空再设新图片，由 @load 触发 fade-in）
       this.bgImageFadingIn = false
       this.backgroundImage = data.url
     })
         
         this.socket.on('image-generate-fail', (data) => {
+          if (this.poem && String(data?.poemId) !== String(this.poem.id)) return
           console.log('图像生成失败:', data)
           this.imageStatus = 'fail'
+          if (this.imageStatusTimer) {
+            clearTimeout(this.imageStatusTimer)
+            this.imageStatusTimer = null
+          }
           // 显示错误提示
           this.$message?.error(data.error || '背景图生成失败，将使用默认背景')
         })
@@ -1146,6 +1176,15 @@ export default {
       
       console.log('开始预生成背景图')
       this.imageStatus = 'pending'
+      if (this.imageStatusTimer) clearTimeout(this.imageStatusTimer)
+      // 预生成是独立的增强能力，不能让失效密钥把详情页留在“生成中”。
+      this.imageStatusTimer = setTimeout(() => {
+        if (this.imageStatus === 'pending') {
+          this.imageStatus = 'fail'
+          this.bgImageLoading = false
+        }
+        this.imageStatusTimer = null
+      }, 15000)
       
       try {
         const data = await request('/ai/image/pregenerate', {
@@ -1159,9 +1198,16 @@ export default {
           timeout: TIMEOUTS.LONG
         })
         console.log('预生成请求已发送:', data)
+        if (data && data.success === false) {
+          this.imageStatus = 'fail'
+        }
       } catch (error) {
         console.error('预生成失败:', error)
         this.imageStatus = 'fail'
+        if (this.imageStatusTimer) {
+          clearTimeout(this.imageStatusTimer)
+          this.imageStatusTimer = null
+        }
       }
     },
     // 预加载图片
@@ -1203,6 +1249,10 @@ export default {
       if (this.poemAbortController) {
         this.poemAbortController.abort()
       }
+      if (this.imageStatusTimer) {
+        clearTimeout(this.imageStatusTimer)
+        this.imageStatusTimer = null
+      }
       this.poemAbortController = new AbortController()
 
       // 生成当前请求ID
@@ -1219,6 +1269,7 @@ export default {
         this.isImmersiveMode = false
         // 重置AI讲解相关状态
         this.aiExplanations = {
+          markdown: null,
           daily_life_explanation: null,
           keyword_analysis: null,
           artistic_conception: null,
@@ -1253,6 +1304,7 @@ export default {
         this.poemStoryError = ''
         // 重置诵读技巧指南状态
         this.recitationGuide = null
+        this.recitationGuideMarkdown = null
         this.recitationGuideLoading = false
         this.recitationGuideError = ''
         // 重置AI助教聊天记录
@@ -1304,7 +1356,8 @@ export default {
         this.bgImageFadingIn = false
         this.imageStatus = 'idle'
         // 预生成背景图
-        this.pregenerateBackground()
+        // 图片生成不参与详情页主链路；失败时保留默认古风背景。
+        void this.pregenerateBackground()
       } catch (err) {
         // 忽略取消请求的错误
         if (err.name === 'AbortError') {
@@ -1342,37 +1395,16 @@ export default {
           this.aiError[key] = ''
         })
         
-        // 准备请求数据
-        const requestData = {
+        this.aiExplanations.markdown = ''
+        await streamAI({
+          type: 'explain',
           poem: this.poem.content,
           title: this.poem.title,
           author: this.poem.author
-        }
-        
-        // 准备请求配置
-        const requestConfig = {
-          method: 'POST',
-          body: JSON.stringify(requestData),
-          signal: this.abortController.signal
-        }
-        
-        try {
-          // 使用批量API端点，只发送一个请求
-          const batchData = await request('/ai/explainPoem/batch', {
-            method: 'POST',
-            body: JSON.stringify(requestData),
-            timeout: TIMEOUTS.LONG,
-            signal: this.abortController.signal
-          })
-          
-          // 更新AI讲解数据
-          this.aiExplanations.daily_life_explanation = batchData.daily_life_explanation
-          this.aiExplanations.keyword_analysis = batchData.keyword_analysis
-          this.aiExplanations.artistic_conception = batchData.artistic_conception
-          this.aiExplanations.thinking_questions = batchData.thinking_questions
-        } finally {
-          clearTimeout(timeoutId);
-        }
+        }, {
+          timeout: TIMEOUTS.LONG,
+          onToken: (_token, fullText) => { this.aiExplanations.markdown = fullText }
+        })
       } catch (err) {
         // 忽略取消请求的错误
         if (err.name === 'AbortError') {
@@ -1663,25 +1695,15 @@ export default {
       this.poemBackgroundError = ''
 
       try {
-        const data = await request('/ai/poem/background', {
-          method: 'POST',
-          body: JSON.stringify({
-            title: this.poem.title,
-            author: this.poem.author,
-            dynasty: this.poem.dynasty,
-            content: this.poem.content
-          }),
-          timeout: TIMEOUTS.LONG
+        this.poemBackground = ''
+        await streamAI({
+          type: 'background', poem: this.poem.content, title: this.poem.title,
+          author: this.poem.author, dynasty: this.poem.dynasty
+        }, {
+          timeout: TIMEOUTS.LONG,
+          onToken: (_token, fullText) => { this.poemBackground = fullText }
         })
-
-        if (data) {
-          this.poemBackground = data.background || ''
-          this.poemBackgroundTips = data.tips || ''
-        } else {
-          // 后端不支持时，使用内置数据
-          this.poemBackground = this.getBuiltinBackground(this.poem.title, this.poem.author, this.poem.dynasty)
-          this.poemBackgroundTips = '了解创作背景有助于理解诗词的情感和意境，更好地背诵和鉴赏。'
-        }
+        this.poemBackgroundTips = '边读背景，边回看诗句，更容易把握诗人的情感。'
       } catch (error) {
         console.error('获取诗词背景失败:', error)
         this.poemBackground = this.getBuiltinBackground(this.poem.title, this.poem.author, this.poem.dynasty)
@@ -1710,21 +1732,14 @@ export default {
       this.poemStoryError = ''
 
       try {
-        const data = await request('/ai/poem/story', {
-          method: 'POST',
-          body: JSON.stringify({
-            title: this.poem.title,
-            author: this.poem.author,
-            content: this.poem.content
-          }),
-          timeout: TIMEOUTS.LONG
+        this.poemStory = ''
+        await streamAI({
+          type: 'story', poem: this.poem.content, title: this.poem.title,
+          author: this.poem.author
+        }, {
+          timeout: TIMEOUTS.LONG,
+          onToken: (_token, fullText) => { this.poemStory = fullText }
         })
-
-        if (data) {
-          this.poemStory = data.story || ''
-        } else {
-          this.poemStory = this.getBuiltinStory(this.poem.title, this.poem.author)
-        }
       } catch (error) {
         console.error('获取诗词故事失败:', error)
         this.poemStory = this.getBuiltinStory(this.poem.title, this.poem.author)
@@ -1750,22 +1765,14 @@ export default {
       this.recitationGuideError = ''
 
       try {
-        const data = await request('/ai/poem/recitation-guide', {
-          method: 'POST',
-          body: JSON.stringify({
-            title: this.poem.title,
-            author: this.poem.author,
-            content: this.poem.content,
-            dynasty: this.poem.dynasty
-          }),
-          timeout: TIMEOUTS.LONG
+        this.recitationGuideMarkdown = ''
+        await streamAI({
+          type: 'recitation-guide', poem: this.poem.content, title: this.poem.title,
+          author: this.poem.author, dynasty: this.poem.dynasty
+        }, {
+          timeout: TIMEOUTS.LONG,
+          onToken: (_token, fullText) => { this.recitationGuideMarkdown = fullText }
         })
-
-        if (data && data.rhythm) {
-          this.recitationGuide = data
-        } else {
-          this.recitationGuide = this.getBuiltinRecitationGuide(this.poem.title, this.poem.content)
-        }
       } catch (error) {
         console.error('获取诵读技巧失败:', error)
         this.recitationGuide = this.getBuiltinRecitationGuide(this.poem.title, this.poem.content)
@@ -2073,28 +2080,15 @@ export default {
           content: msg.content
         }));
         
-        // 发送请求
-        const data = await request('/ai/tutor', {
-          method: 'POST',
-          body: JSON.stringify({
-            poem: this.poem.content,
-            title: this.poem.title,
-            author: this.poem.author,
-            question: question,
-            history: history
-          }),
-          timeout: TIMEOUTS.LONG
-        });
-        
-        // 添加AI回答，确保长度不超过100字
-        let answer = data.data.answer;
-        if (answer.length > 100) {
-          answer = answer.substring(0, 97) + '...';
-        }
-        this.tutorMessages.push({
-          role: 'bot',
-          content: answer
-        });
+        const botMessage = { role: 'bot', content: '' }
+        this.tutorMessages.push(botMessage)
+        await streamAI({
+          type: 'tutor', poem: this.poem.content, title: this.poem.title,
+          author: this.poem.author, question, history
+        }, {
+          timeout: TIMEOUTS.LONG,
+          onToken: (_token, fullText) => { botMessage.content = fullText }
+        })
       } catch (error) {
         console.error('发送AI助教消息失败:', error);
         // 添加错误消息
@@ -2482,26 +2476,15 @@ export default {
           content: msg.content
         }));
 
-        const data = await request('/ai/tutor', {
-          method: 'POST',
-          body: JSON.stringify({
-            poem: this.poem.content,
-            title: this.poem.title,
-            author: this.poem.author,
-            question: question,
-            history: history
-          }),
-          timeout: TIMEOUTS.LONG
-        });
-
-        let answer = data.data.answer;
-        if (answer.length > 150) {
-          answer = answer.substring(0, 147) + '...';
-        }
-        this.tutorMessages.push({
-          role: 'bot',
-          content: answer
-        });
+        const botMessage = { role: 'bot', content: '' }
+        this.tutorMessages.push(botMessage)
+        await streamAI({
+          type: 'tutor', poem: this.poem.content, title: this.poem.title,
+          author: this.poem.author, question, history
+        }, {
+          timeout: TIMEOUTS.LONG,
+          onToken: (_token, fullText) => { botMessage.content = fullText }
+        })
       } catch (error) {
         console.error('发送AI助教消息失败:', error);
         this.tutorMessages.push({

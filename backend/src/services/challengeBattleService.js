@@ -401,6 +401,8 @@ class ChallengeBattleService {
       wrongQuestions: [],
       currentRound: 1,
       totalTime: 30,
+      questionStartedAt: Date.now(),
+      questionAnswered: false,
       correctCount: 0,
       wrongCount: 0,
       createdAt: Date.now()
@@ -415,12 +417,18 @@ class ChallengeBattleService {
     if (!room) return { success: false, error: '房间不存在' };
     if (room.status !== 'playing') return { success: false, error: '游戏已结束' };
     if (room.mode !== 'single') return { success: false, error: '不是单人模式' };
+    if (String(room.userId) !== String(userId)) return { success: false, error: '你不属于该单人房间' };
+    if (room.questionAnswered) return { success: false, error: '本题已经作答，请等待下一题' };
+    if (Date.now() - room.questionStartedAt >= room.totalTime * 1000) {
+      return { success: false, error: '本题已超时', timeout: true };
+    }
 
     const currentQuestion = room.questions[room.questions.length - 1];
     const normalizedUser = normalizeStr(answer);
     const normalizedCorrect = normalizeStr(currentQuestion.answer);
     const isCorrect = normalizedUser === normalizedCorrect;
 
+    room.questionAnswered = true;
     if (isCorrect) {
       room.correctCount++;
     } else {
@@ -443,10 +451,11 @@ class ChallengeBattleService {
     };
   }
 
-  async nextSingleQuestion(roomId) {
+  async nextSingleQuestion(roomId, userId) {
     const room = this.rooms.get(roomId);
     if (!room || room.status !== 'playing') return null;
     if (room.mode !== 'single') return null;
+    if (userId != null && String(room.userId) !== String(userId)) return null;
 
     const nextRound = room.questions.length + 1;
     if (nextRound > 30) {
@@ -457,6 +466,8 @@ class ChallengeBattleService {
     room.questions.push({ ...question, round: nextRound });
     room.usedTitles.push(question.title);
     room.currentRound = nextRound;
+    room.questionStartedAt = Date.now();
+    room.questionAnswered = false;
 
     return {
       success: true,
@@ -467,10 +478,14 @@ class ChallengeBattleService {
     };
   }
 
-  async timeoutSingleGame(roomId) {
+  async timeoutSingleGame(roomId, userId) {
     const room = this.rooms.get(roomId);
     if (!room || room.status !== 'playing') return null;
     if (room.mode !== 'single') return null;
+    if (String(room.userId) !== String(userId)) return null;
+    if (room.questionAnswered) return null;
+
+    room.questionAnswered = true;
 
     room.wrongCount++;
     const currentQuestion = room.questions[room.questions.length - 1];
@@ -483,7 +498,7 @@ class ChallengeBattleService {
       title: currentQuestion.title
     });
 
-    const nextResult = await this.nextSingleQuestion(roomId);
+    const nextResult = await this.nextSingleQuestion(roomId, userId);
     if (nextResult.type === 'finished') {
       this.saveSingleRecord(room);
       return nextResult;
@@ -513,10 +528,11 @@ class ChallengeBattleService {
     };
   }
 
-  quitSingleGame(roomId) {
+  quitSingleGame(roomId, userId) {
     const room = this.rooms.get(roomId);
     if (!room || room.status !== 'playing') return null;
     if (room.mode !== 'single') return null;
+    if (String(room.userId) !== String(userId)) return null;
 
     const result = this.endSingleGame(room);
     this.saveSingleRecord(room);
@@ -634,6 +650,8 @@ class ChallengeBattleService {
     };
 
     this.rooms.set(roomId, room);
+    this.setUserInGame(player1.userId, true);
+    this.setUserInGame(player2.userId, true);
     return room;
   }
 

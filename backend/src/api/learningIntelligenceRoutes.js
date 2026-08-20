@@ -87,6 +87,14 @@ router.get('/student/events', authenticateToken, async (req, res) => {
   }
 });
 
-
+// 初始化知识种子（幂等，需登录后调用）
+router.post('/seed', authenticateToken, async (req, res) => {
+  try {
+    await knowledgeModel.seedKnowledgePoints();
+    res.json({ success: true, message: '知识模型种子化完成' });
+  } catch (err) {
+    res.status(500).json({ message: '种子化失败: ' + err.message });
+  }
+});
 
 module.exports = router;

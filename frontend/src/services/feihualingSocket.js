@@ -218,6 +218,10 @@ class FeihualingSocket {
     }
   }
 
+  clearHandlers() {
+    this.eventHandlers = {};
+  }
+
   // 触发事件
   trigger(event, data) {
     if (this.eventHandlers[event]) {

@@ -13,6 +13,51 @@ require('dotenv').config();
 // 在所有的 AI 路由之前，统一尝试解析 token，以便后续限流器能获取到 req.user
 router.use(optionalAuthenticateToken);
 
+// 普通文本 AI 的统一 SSE 接口。前端收到 token 后即可实时渲染 Markdown；
+// 文生图、TTS 等二进制/异步任务仍走原有接口。
+router.post('/stream', aiRateLimiter, async (req, res, next) => {
+  const { type, poem, title, author, question, history, explanationType, dynasty } = req.body || {};
+  if (!type || !['tutor', 'explain', 'background', 'story', 'recitation-guide', 'rewrite', 'dimension', 'advice'].includes(type)) {
+    return res.status(400).json({ message: '缺少或不支持的流式 AI 类型' });
+  }
+  if (['tutor', 'explain', 'background', 'story', 'recitation-guide', 'rewrite', 'dimension', 'advice'].includes(type) && !poem) {
+    return res.status(400).json({ message: '缺少诗词内容' });
+  }
+
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  try {
+    await aiService.streamAIText({
+      type,
+      poem,
+      title,
+      author,
+      question,
+      history: Array.isArray(history) ? history : [],
+      explanationType,
+      dynasty,
+      onToken: (content) => {
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: 'token', content })}\n\n`);
+      }
+    });
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      res.end();
+    }
+  } catch (error) {
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message: error.message || 'AI流式请求失败' })}\n\n`);
+      res.end();
+    } else {
+      next(error);
+    }
+  }
+});
+
 const imageCache = new Map();
 const generationTasks = new Map();
 const userRateLimits = new Map();
@@ -292,7 +337,7 @@ router.post('/recite-check', aiRateLimiter, async function(req, res, next) {
       return;
     }
 
-    // 使用AI检测（调用Qwen/Qwen2.5-7B-Instruct模型）
+    // 使用智谱模型检测
     const result = await aiService.getAIRecitationCheck(original, input, poem_title, poem_author, null);
 
     if (poem_id && result.score < 90) {
@@ -701,7 +746,7 @@ async function generateImage(poemId, title, author, content, socket) {
     const promptText = '根据古诗词《' + title + '》（作者：' + author + '）的内容生成一幅中国风图像，画面要准确描绘诗中所描述的场景和意境，' + content + '，中国传统风格，高清细腻，氛围感强，无任何文字、无水印、无logo，画面干净统一，适合做网页背景图';
 
     console.log('生成图像的prompt:', promptText);
-    console.log('使用API密钥:', SILICON_FLOW_API_KEY.substring(0, 10) + '...');
+    console.log('使用硅基流动API密钥: 已配置');
 
     const response = await axios.post('https://api.siliconflow.cn/v1/images/generations', {
       model: 'Kwai-Kolors/Kolors',
@@ -767,7 +812,12 @@ async function generateImage(poemId, title, author, content, socket) {
       throw new Error('API返回格式错误');
     }
   } catch (error) {
-    console.error('图像生成失败:', error);
+    // 不要直接打印 AxiosError：其中的 config.headers 会包含完整 Authorization 密钥。
+    const providerMessage = error && error.response && error.response.data && error.response.data.message;
+    console.error('图像生成失败:', {
+      status: error && error.response ? error.response.status : undefined,
+      message: providerMessage || (error && error.message) || '未知错误'
+    });
     socket.emit('image-generate-fail', {
       poemId: poemId,
       error: error.message

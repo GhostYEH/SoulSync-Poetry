@@ -1,6 +1,5 @@
 const { JsonWebTokenError } = require('jsonwebtoken');
 const { ApiError, ERROR_CODES } = require('../utils/apiResponse');
-const { AIError, AI_ERRORS } = require('../utils/aiClient');
 
 const PG_ERRORS = {
   '23505': { status: 409, code: ERROR_CODES.CONFLICT, message: '资源冲突' },
@@ -20,40 +19,6 @@ function errorHandler(err, req, res, next) {
       success: false,
       error: { code: err.code, message: err.message, ...(err.detail && { detail: err.detail }) },
       message: err.message,
-    });
-  }
-
-  if (err instanceof AIError) {
-    let status = 500;
-    let message = 'AI服务异常';
-    
-    switch (err.code) {
-      case AI_ERRORS.TIMEOUT:
-        status = 504;
-        message = 'AI服务响应超时';
-        break;
-      case AI_ERRORS.RATE_LIMITED:
-        status = 429;
-        message = 'AI请求过于频繁，请稍后再试';
-        break;
-      case AI_ERRORS.UNAVAILABLE:
-        status = 503;
-        message = 'AI服务暂时不可用';
-        break;
-      case AI_ERRORS.INVALID_RESPONSE:
-        status = 502;
-        message = 'AI返回了无法解析的响应';
-        break;
-      case AI_ERRORS.AUTH_FAILED:
-        status = 500;
-        message = 'AI服务配置异常';
-        break;
-    }
-    
-    return res.status(status).json({
-      success: false,
-      error: { code: err.code, message, ...(isDev && { detail: err.message }) },
-      message
     });
   }
 

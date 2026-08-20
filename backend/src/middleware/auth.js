@@ -36,29 +36,26 @@ function authenticateToken(req, res, next) {
 
 module.exports = authenticateToken;
 
-// 可选认证中间件：如果请求带了 token 则解析并验证
+// 可选认证中间件：如果请求带了 token 则解析，不带也不报错
 function optionalAuthenticateToken(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
-    
     if (!token) {
       req.user = null;
       return next();
     }
-    
     jwt.verify(token, config.jwt.secret, (err, decoded) => {
       if (err) {
-        // 存在 Token 但无效（伪造、过期、格式错误等），应该拦截
-        const code = err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID';
-        return res.status(401).json({ message: '认证令牌无效或已过期', code });
+        req.user = null;
+      } else {
+        req.user = { userId: decoded.userId, username: decoded.username };
       }
-      
-      req.user = { userId: decoded.userId, username: decoded.username };
       next();
     });
   } catch (error) {
-    return res.status(401).json({ message: '认证处理失败', code: 'AUTH_ERROR' });
+    req.user = null;
+    next();
   }
 }
 

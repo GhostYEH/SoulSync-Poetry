@@ -7,20 +7,14 @@ try {
   const dbJsPath = path.join(__dirname, '../src/utils/db.js');
   const dbJsContent = fs.readFileSync(dbJsPath, 'utf8');
   
-  const forbiddenKeywords = ['node:sqlite', 'sqliteQuery', 'sqliteTxQueue'];
-  let foundForbidden = false;
+  const requiredKeywords = ['node:sqlite', 'sqliteQuery', 'ensureDialect', 'DB_TYPE'];
+  const missing = requiredKeywords.filter(keyword => !dbJsContent.includes(keyword));
 
-  forbiddenKeywords.forEach(keyword => {
-    if (dbJsContent.includes(keyword)) {
-      console.error(`❌ 测试失败: db.js 中仍然包含 ${keyword}`);
-      foundForbidden = true;
-    }
-  });
-
-  if (foundForbidden) {
+  if (missing.length) {
+    missing.forEach(keyword => console.error(`❌ 测试失败: db.js 缺少 ${keyword}`));
     exitCode = 1;
   } else {
-    console.log('✅ SQLite fallback 及相关逻辑已被彻底移除');
+    console.log('✅ SQLite 数据库模式与方言探测逻辑存在');
   }
 } catch (err) {
   console.error('❌ 读取 db.js 失败', err);
