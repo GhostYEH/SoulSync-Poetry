@@ -485,6 +485,11 @@ export const api = {
     getData: () => request('/personalized', { timeout: 60000 }),
     getReviewRecommendations: () => request('/personalized/review', { timeout: 20000 }),
     getLearnRecommendations: () => request('/personalized/learn', { timeout: 20000 }),
+    getAISuggestionDashboard: (forceRefresh = false) => request('/personalized/advice', {
+      method: 'POST',
+      body: JSON.stringify({ forceRefresh }),
+      timeout: TIMEOUTS.MEDIUM
+    }),
     getAIAnalysis: (forceRefresh = false) => request(`/personalized/analysis${forceRefresh ? '?forceRefresh=true' : ''}`, { timeout: 60000 })
   },
 

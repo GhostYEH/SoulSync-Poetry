@@ -1,252 +1,363 @@
 <template>
   <div class="challenge-map-page">
-    <div class="ambient-ink ambient-ink-left" aria-hidden="true"></div>
-    <div class="ambient-ink ambient-ink-right" aria-hidden="true"></div>
-
-    <header class="challenge-intro">
-      <div class="intro-copy">
-        <p class="eyebrow"><span class="eyebrow-mark"></span> POETRY TRAIL · 诗词修习长卷</p>
-        <h1>诗词闯关</h1>
-        <p class="intro-subtitle">以诗为径，步步闯关，解锁千年诗意之旅。</p>
+    <section class="challenge-head">
+      <div class="title-block">
+        <span class="title-rule"></span>
+        <div>
+          <span class="eyebrow">POETRY QUEST · 200 LEVELS</span>
+          <h1>诗词闯关</h1>
+          <p>以诗为径，步步闯关，解锁千年诗意之旅</p>
+        </div>
       </div>
-      <div class="intro-actions">
-        <router-link to="/challenge/rank" class="quiet-action"><span class="action-glyph">榜</span><span>排行榜</span></router-link>
-        <router-link to="/challenge/error-book" class="quiet-action"><span class="action-glyph">册</span><span>错题本</span></router-link>
-        <router-link to="/challenge/review" class="quiet-action"><span class="action-glyph">阅</span><span>错题复习</span></router-link>
-        <router-link to="/challenge/battle" class="quiet-action quiet-action-accent"><span class="action-glyph">弈</span><span>闯关对战</span></router-link>
-      </div>
-    </header>
 
-    <section class="progress-strip" aria-label="闯关摘要">
-      <div class="progress-stat progress-stat-primary"><div class="stat-icon">卷</div><div><span class="stat-label">已解锁关卡</span><strong><em>{{ completedThrough }}</em> <small>/ 120</small></strong></div></div>
-      <div class="stat-divider"></div>
-      <div class="progress-stat"><div class="stat-icon medal-icon">阶</div><div><span class="stat-label">当前段位</span><strong>青竹学士</strong></div></div>
-      <div class="stat-divider"></div>
-      <div class="progress-stat"><div class="stat-icon">日</div><div><span class="stat-label">今日挑战</span><strong>3 <small>/ 5 关</small></strong></div></div>
-      <div class="stat-divider"></div>
-      <div class="progress-stat"><div class="stat-icon medal-icon">续</div><div><span class="stat-label">连续闯关天数</span><strong>7 <small>天</small></strong></div></div>
-      <div class="strip-progress"><span>修习进度</span><div class="strip-progress-track"><span :style="{ width: `${(completedThrough / 120) * 100}%` }"></span></div><b>{{ Math.round((completedThrough / 120) * 100) }}%</b></div>
+      <div class="progress-summary" aria-label="闯关学习摘要">
+        <div v-for="item in summary" :key="item.label" class="summary-item">
+          <span class="summary-icon" :class="item.tone"><component :is="item.icon" :size="20" weight="duotone" /></span>
+          <div>
+            <small>{{ item.label }}</small>
+            <strong>{{ item.value }} <em>{{ item.suffix }}</em></strong>
+          </div>
+        </div>
+      </div>
+
+      <nav class="challenge-tools" aria-label="闯关工具">
+        <router-link to="/challenge/rank"><PhChartBar :size="19" weight="duotone" />排行榜</router-link>
+        <router-link to="/challenge/error-book"><PhBookOpenText :size="19" weight="duotone" />错题本</router-link>
+        <router-link to="/challenge/review"><PhArrowClockwise :size="19" weight="duotone" />错题复习</router-link>
+        <router-link to="/challenge/battle"><PhSword :size="19" weight="duotone" />闯关对战</router-link>
+      </nav>
     </section>
 
-    <main class="challenge-content">
-      <section class="world-card world-atlas" aria-label="诗词闯关山水地图">
-        <div class="world-card-header">
-          <div><p class="section-kicker">THE POETRY LANDSCAPE</p><h2>山河长卷 <span>· 可游历的 120 关</span></h2><p class="world-description">沿着水脉与山路，去遇见下一首诗。</p></div>
-          <div class="world-meta"><span class="meta-chip"><i class="legend-dot done"></i>已通关</span><span class="meta-chip"><i class="legend-dot current"></i>当前</span><span class="meta-chip"><i class="legend-dot locked"></i>未解锁</span></div>
+    <section class="challenge-stage">
+      <div class="map-panel" aria-label="诗词闯关山水地图">
+        <img class="map-art" src="../assets/challenge-map-landscape.png" alt="水墨群山、亭台与长城组成的诗词闯关地图" draggable="false" />
+        <div class="map-wash" aria-hidden="true"></div>
+        <div class="map-copy">
+          <span>当前诗境</span>
+          <h2>{{ currentChapter.name }}</h2>
+          <p>{{ currentChapter.description }}</p>
         </div>
 
-        <div ref="mapViewport" class="map-viewport" :class="{ dragging: isDragging }">
-          <div class="map-stage" :style="{ height: `${mapHeight}px` }">
-            <div class="map-paper" aria-hidden="true"></div>
-            <div v-for="chapter in chapters" :key="`scene-${chapter.id}`" class="scene-band" :class="`scene-${chapter.id}`" :style="{ top: `${chapter.top}px`, height: `${chapter.height}px` }">
-              <div class="scene-wash"></div>
-              <div class="scene-heading" :class="{ focused: chapter.id === activeChapterId }"><span class="scene-number">{{ String(chapter.id).padStart(2, '0') }}</span><div><strong>{{ chapter.name }}</strong><small>{{ chapter.scene }}</small></div></div>
-            </div>
+        <div class="map-route" aria-hidden="true">
+          <span v-for="step in 5" :key="step" :class="{ active: step <= currentChapterIndex + 1 }"></span>
+        </div>
 
-            <svg class="route-layer" viewBox="0 0 1000 3200" preserveAspectRatio="none" aria-hidden="true">
-              <defs><filter id="routeGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-              <path :d="routePath" class="route-shadow"></path>
-              <path :d="routePath" class="route-base"></path>
-              <path :d="completedRoutePath" class="route-completed"></path>
-              <path :d="currentRoutePath" class="route-current" filter="url(#routeGlow)"></path>
-            </svg>
+        <div class="chapter-stops" aria-label="章节选择">
+          <button
+            v-for="(chapter, index) in chapters"
+            :key="chapter.id"
+            class="chapter-stop"
+            :class="{ active: index === currentChapterIndex, locked: chapter.start > unlockedThrough }"
+            :style="{ '--stop-x': `${chapter.x}%`, '--stop-y': `${chapter.y}%` }"
+            :aria-label="`${chapter.name}，第 ${chapter.start} 至 ${chapter.end} 关`"
+            @click="selectChapter(index)"
+          >
+            <span class="stop-orbit"><component :is="chapter.icon" :size="18" weight="duotone" /></span>
+            <strong>{{ chapter.name }}</strong>
+            <small>{{ chapter.start }}－{{ chapter.end }}关</small>
+          </button>
+        </div>
 
-            <button v-for="level in levels" :key="level.number" class="map-node" :class="[`node-${level.status}`, `node-${level.variant}`, { selected: level.number === selectedLevel }]" :style="{ left: `${level.x}%`, top: `${level.y}px` }" :aria-label="`第 ${level.number} 关：${level.title}`" @click.stop="selectLevel(level.number)">
-              <span class="node-halo"></span><span class="node-pin"><span v-if="level.variant === 'special'" class="node-special-mark">◆</span><span v-else-if="level.variant === 'reward'" class="node-reward-mark">＋</span><span v-else>{{ level.number }}</span></span><span v-if="level.status === 'done'" class="node-check">✓</span><span v-if="level.status === 'locked'" class="node-lock"></span>
-              <span class="node-label"><strong>{{ level.number }} · {{ level.shortTitle }}</strong><small><span v-for="star in 3" :key="star" :class="{ filled: star <= level.stars }">★</span></small></span>
-              <span class="node-tooltip"><b>第 {{ level.number }} 关</b><span>{{ level.title }}</span><small>{{ level.chapterName }} · {{ level.type }}</small></span>
-            </button>
+        <div class="map-legend">
+          <span><i class="legend-dot done"></i>已完成</span>
+          <span><i class="legend-dot current"></i>可挑战</span>
+          <span><i class="legend-dot locked"></i>未解锁</span>
+        </div>
+      </div>
 
-            <div class="map-end-mark"><span>120</span><small>终章 · 诗道</small></div>
+      <aside class="quest-card" :class="{ locked: currentLevel.status === 'locked' }">
+        <div class="quest-landscape">
+          <div>
+            <small>{{ currentLevel.status === 'locked' ? '尚未解锁' : '当前关卡' }}</small>
+            <h2>第{{ currentLevel.level }}关 · {{ currentLevel.poemTitle }}</h2>
+            <span>{{ currentLevel.difficultyLabel }}｜{{ currentLevel.description }}</span>
+          </div>
+          <span class="moon-number">{{ currentLevel.level }}</span>
+        </div>
+
+        <div v-if="currentLevel.status === 'locked'" class="locked-copy">
+          <span><PhLockKey :size="25" weight="duotone" /></span>
+          <div>
+            <strong>前方诗境尚未开启</strong>
+            <p>完成第 {{ currentLevel.level - 1 }} 关后即可继续前行。</p>
           </div>
         </div>
 
-        <div class="map-footer"><span class="drag-hint"><i></i>沿河而行 · 诗境自此展开</span><span>当前 · {{ activeChapterName }}</span><span class="map-footer-line"></span></div>
-      </section>
+        <template v-else>
+          <div class="quest-section mission-copy">
+            <strong>本关目标</strong>
+            <p>{{ currentLevel.goal }}</p>
+          </div>
 
-      <aside class="challenge-sidebar">
-        <section class="current-card" :class="{ 'current-card-locked': selectedLevelData.status === 'locked' }">
-          <div class="card-landscape"><span class="card-moon"></span><span class="card-branch">梅</span></div>
-          <div class="current-card-top"><div><p class="section-kicker">CURRENT QUEST</p><p class="current-label">{{ selectedLevelData.status === 'locked' ? '尚未解锁' : '当前关卡' }}</p><h2>第 {{ selectedLevelData.number }} 关 · {{ selectedLevelData.title }}</h2><div class="current-tags"><span>{{ selectedLevelData.difficulty }}</span><span>{{ selectedLevelData.type }}</span><span>{{ selectedLevelData.chapterName }}</span></div></div><div class="seal-mark"><span>{{ selectedLevelData.number }}</span><small>关</small></div></div>
-          <div class="card-divider"></div>
-          <div v-if="selectedLevelData.status === 'locked'" class="locked-message"><div class="lock-emblem">封</div><div><strong>前方山路尚隐于雾</strong><p>完成第 {{ Math.max(1, selectedLevelData.number - 1) }} 关后，开启这处诗境。</p></div></div>
-          <template v-else><div class="mission-block"><p class="detail-label">本关目标</p><p>{{ selectedLevelData.goal }}</p></div><div class="verse-preview"><div class="verse-header"><span>本关诗句</span><span>{{ selectedLevelData.dynasty }}</span></div><p>{{ selectedLevelData.verse[0] }}</p><p>{{ selectedLevelData.verse[1] }}</p><span class="verse-seal">{{ selectedLevelData.mood }}</span></div><div class="quest-progress"><div class="progress-heading"><span>关卡进度</span><b>{{ selectedLevelData.progress }} / 5 题完成</b></div><div class="quest-track"><span v-for="step in 5" :key="step" :class="{ filled: step <= selectedLevelData.progress }" class="quest-step">{{ step <= selectedLevelData.progress ? '✓' : '' }}</span><i :style="{ width: `${(selectedLevelData.progress / 5) * 100}%` }"></i></div></div><div class="reward-row"><div class="reward-copy"><span class="reward-icon">藏</span><span><small>通关可得</small><strong>{{ selectedLevelData.reward }} · {{ selectedLevelData.rewardLabel }}</strong></span></div><div class="stars"><span v-for="star in 3" :key="star" :class="{ filled: star <= selectedLevelData.stars }">★</span></div></div></template>
-          <div class="card-actions"><button class="primary-cta" :disabled="selectedLevelData.status === 'locked'" @click="startChallenge"><span>{{ selectedLevelData.status === 'done' ? '重新修习' : '继续闯关' }}</span><span class="cta-arrow">↗</span></button><button class="secondary-cta" @click="showToast('已为你保留本关进度')">保存进度</button></div><p class="last-played"><span class="pulse-dot"></span>{{ selectedLevelData.status === 'done' ? '已完成本关 · 可随时复习' : '上次修习于今天 08:42' }}</p>
-        </section>
-        <section class="side-note"><div class="note-quote">“</div><div><p class="section-kicker">今日小贴士</p><p>多读多想多练，诗词之美在于理解与感悟。每一步，都算数。</p></div><span class="note-stamp">心</span></section>
+          <div class="quest-section verse-box">
+            <strong>本关诗句</strong>
+            <blockquote>{{ currentLevel.verse }}</blockquote>
+            <cite>{{ currentLevel.poemAuthor }} · {{ currentLevel.poemTitle }}</cite>
+          </div>
+
+          <div class="quest-section quest-progress">
+            <div><strong>答题进度</strong><span>{{ currentLevel.questionCount }} 道题</span></div>
+            <div class="progress-track">
+              <span v-for="step in 5" :key="step" :class="{ filled: step <= currentLevel.questionCount }"></span>
+            </div>
+          </div>
+        </template>
+
+        <div class="quest-actions">
+          <button class="continue-button" :disabled="!nextPlayableLevel" @click="continueLast">
+            继续上次进度 <PhArrowRight :size="18" weight="bold" />
+          </button>
+          <button class="start-button" :disabled="currentLevel.status === 'locked'" @click="startSelected">
+            {{ currentLevel.status === 'done' ? '再次闯关' : '开始闯关' }}
+          </button>
+        </div>
       </aside>
-    </main>
+    </section>
 
-    <section class="support-grid"><article class="support-card leaderboard-card"><div class="support-heading"><div><p class="section-kicker">THIS WEEK</p><h3>好友排行榜</h3></div><router-link to="/challenge/rank">查看全部 →</router-link></div><div class="rank-list"><div v-for="(friend, index) in leaderboard" :key="friend.name" class="rank-item"><span class="rank-number">{{ String(index + 1).padStart(2, '0') }}</span><span class="friend-avatar" :class="`avatar-${index + 1}`">{{ friend.avatar }}</span><span class="friend-name">{{ friend.name }}<small>{{ friend.title }}</small></span><strong>{{ friend.score }}<small>分</small></strong></div></div></article><article class="support-card reward-card"><div class="support-heading"><div><p class="section-kicker">COLLECT & GROW</p><h3>闯关奖励</h3></div><span class="reward-total">累计 {{ totalStars }} <i>★</i></span></div><div class="reward-road"><div v-for="reward in rewards" :key="reward.threshold" class="reward-step" :class="{ claimed: totalStars >= reward.threshold }"><span class="reward-medallion">{{ reward.symbol }}</span><strong>{{ reward.threshold }}<small>星可领</small></strong></div></div></article><article class="support-card reflection-card"><div class="reflection-mark">山</div><div><p class="section-kicker">修习一语</p><p class="reflection-copy">“登高必自卑，行远必自迩。”<br><span>不疾不徐，走好眼前这一关。</span></p></div><button class="reflection-button" @click="showToast('已收藏今日小贴士')">藏入书签</button></article></section>
+    <section class="level-browser" aria-labelledby="level-browser-title">
+      <div class="browser-heading">
+        <div>
+          <span class="eyebrow">LEARNING PATH</span>
+          <h2 id="level-browser-title">200 关学习路径</h2>
+          <p>按章节浏览关卡，进入作答页后可专注完成本关题目。</p>
+        </div>
+        <label class="level-jump">
+          <span>跳转关卡</span>
+          <input v-model.number="jumpLevel" type="number" min="1" max="200" @keyup.enter="jumpToLevel" />
+          <button type="button" @click="jumpToLevel"><PhArrowRight :size="16" /></button>
+        </label>
+      </div>
 
-    <transition name="fade"><div v-if="toast" class="toast-message" role="status">{{ toast }}</div></transition>
-    <transition name="modal-fade"><div v-if="quizOpen" class="quiz-backdrop" @click.self="closeQuiz"><section class="quiz-modal" role="dialog" aria-modal="true" aria-labelledby="quiz-title"><button class="quiz-close" aria-label="关闭闯关" @click="closeQuiz">×</button><p class="section-kicker">第 {{ selectedLevelData.number }} 关 · {{ selectedLevelData.chapterName }}</p><h2 id="quiz-title">{{ selectedLevelData.title }}</h2><p class="quiz-prompt">“{{ selectedLevelData.quizPrompt }}”</p><div class="quiz-options"><button v-for="(option, index) in quizOptions" :key="option" class="quiz-option" :class="{ chosen: selectedAnswer === index, right: answerState === 'right' && index === 0, wrong: answerState === 'wrong' && selectedAnswer === index }" @click="chooseAnswer(index)"><span>{{ String.fromCharCode(65 + index) }}</span>{{ option }}</button></div><div v-if="answerState" class="answer-feedback" :class="answerState"><strong>{{ answerState === 'right' ? '答对了，诗意又向前一步。' : '再想一想，正确答案是 A。' }}</strong><span>{{ answerState === 'right' ? '获得 10 点修习值与 1 枚星章。' : '答案已为你标注，下次会记得更牢。' }}</span></div><button class="quiz-submit" :disabled="selectedAnswer === null" @click="submitAnswer">{{ answerState ? '继续前行' : '确认答案' }} <span>→</span></button></section></div></transition>
+      <div class="chapter-tabs" role="tablist" aria-label="诗词章节">
+        <button
+          v-for="(chapter, index) in chapters"
+          :key="chapter.id"
+          type="button"
+          role="tab"
+          :aria-selected="index === currentChapterIndex"
+          :class="{ active: index === currentChapterIndex }"
+          @click="selectChapter(index)"
+        >
+          <span>{{ chapter.index }}</span>
+          <strong>{{ chapter.name }}</strong>
+          <small>{{ chapter.start }}－{{ chapter.end }}</small>
+        </button>
+      </div>
+
+      <div class="level-grid">
+        <button
+          v-for="level in visibleLevels"
+          :key="level.level"
+          type="button"
+          class="level-card"
+          :class="[`is-${level.status}`, { selected: selectedLevel === level.level }]"
+          :disabled="level.status === 'locked'"
+          @click="selectLevel(level)"
+        >
+          <span class="level-number">
+            <PhLockKey v-if="level.status === 'locked'" :size="15" weight="fill" />
+            <PhCheck v-else-if="level.status === 'done'" :size="16" weight="bold" />
+            <span v-else>{{ level.level }}</span>
+          </span>
+          <span class="level-info">
+            <strong>{{ level.poemTitle }}</strong>
+            <small>第 {{ level.level }} 关 · {{ level.difficultyLabel }}</small>
+          </span>
+          <span class="level-stars" :aria-label="`${level.stars} 星`">
+            <PhStar v-for="star in 3" :key="star" :size="12" :weight="star <= level.stars ? 'fill' : 'regular'" />
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <section class="challenge-dock">
+      <article class="leaderboard-block">
+        <div class="dock-heading"><strong>好友排行榜 <PhInfo :size="14" /></strong><router-link to="/challenge/rank">查看全部排行 →</router-link></div>
+        <div class="friend-row">
+          <div v-for="(friend, index) in leaderboard" :key="friend.name" class="friend-item">
+            <span class="rank-badge">{{ index + 1 }}</span>
+            <span class="friend-seal" :class="`seal-${index + 1}`">{{ friend.name.slice(0, 1) }}</span>
+            <div><strong>{{ friend.name }}</strong><small>{{ friend.score }} 分</small></div>
+          </div>
+        </div>
+      </article>
+      <article class="rewards-block">
+        <div class="dock-heading"><strong>闯关奖励</strong><span>累计星级：<b>{{ totalStars }}</b> <PhStar :size="14" weight="fill" /></span></div>
+        <div class="reward-road">
+          <div v-for="reward in rewards" :key="reward.threshold" class="reward-item" :class="{ claimed: totalStars >= reward.threshold }">
+            <span><component :is="reward.icon" :size="23" weight="duotone" /></span>
+            <small>{{ reward.threshold }} 星可领</small>
+          </div>
+        </div>
+      </article>
+      <article class="tip-block">
+        <PhQuotes :size="25" weight="fill" />
+        <div><strong>学习小贴士</strong><p>多读多想多练，诗词之美在于理解与感悟。</p></div>
+      </article>
+    </section>
+
+    <transition name="toast"><div v-if="toast" class="toast-message" role="status">{{ toast }}</div></transition>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import {
+  PhArrowClockwise,
+  PhArrowRight,
+  PhBookOpenText,
+  PhChartBar,
+  PhCheck,
+  PhFire,
+  PhFlagBanner,
+  PhFlowerLotus,
+  PhInfo,
+  PhLockKey,
+  PhMedal,
+  PhQuotes,
+  PhScroll,
+  PhStar,
+  PhSword,
+  PhTree
+} from '@phosphor-icons/vue'
+import levelsData from '../data/poetryLevels.json'
+import api from '../services/api'
 
-const completedThrough = ref(12)
-const selectedLevel = ref(13)
-const activeChapterId = ref(2)
-const quizOpen = ref(false)
-const selectedAnswer = ref(null)
-const answerState = ref('')
+const router = useRouter()
+const TOTAL_LEVELS = 200
+const completedThrough = ref(readStoredProgress())
+const selectedLevel = ref(Math.min(completedThrough.value + 1, TOTAL_LEVELS))
+const jumpLevel = ref(selectedLevel.value)
 const toast = ref('')
-const mapViewport = ref(null)
-const isDragging = ref(false)
-const dragStartY = ref(0)
-const dragScrollTop = ref(0)
 let toastTimer
 
-const chapterSeed = [
-  ['初识诗词', '一笔一画 · 识风雅', '初入诗门', '亭、桃花、白鹭', '启'], ['山水诗境', '山高水长 · 听天籁', '群山瀑布，溪流入画', '瀑布、飞舟、石桥', '溪'], ['边塞长歌', '关山万里 · 壮志凌云', '荒漠尽头，烽火照关山', '城楼、烽火、长风', '关'], ['咏物抒怀', '见物见心 · 托意于形', '竹影深处，梅香自来', '竹林、梅枝、兰草', '物'], ['名句擂台', '字字珠玑 · 一句封神', '拾级登台，名句交锋', '高台、碑刻、卷轴', '擂'], ['送别怀人', '一别经年 · 情长纸短', '江岸长亭，孤舟向晚', '长亭、孤舟、落日', '别'], ['四时风物', '春花秋月 · 四时入诗', '花开花落，皆可入诗', '桃花、夏荷、秋枫、冬雪', '时'], ['田园闲趣', '柴门日落 · 自在心安', '一畦烟雨，半卷闲云', '村落、稻田、柴门', '隐'], ['家国情怀', '心系苍生 · 诗写山河', '风雨山河，字字有心', '古道、烽烟、家书', '国'], ['豪放词境', '大江东去 · 气吞万里', '江流奔涌，胸中丘壑', '大江、赤壁、风浪', '豪'], ['婉约词境', '小桥流水 · 低吟浅唱', '月落庭院，烟雨轻笼', '月夜、庭院、烟雨', '婉'], ['巅峰诗境', '登临绝顶 · 回望来路', '一卷读尽，终见诗道', '山巅、云海、长卷', '峰']
-]
-const sceneLandmarks = ['亭', '泉', '关', '竹', '碑', '舟', '荷', '村', '城', '江', '月', '峰']
-const chapters = chapterSeed.map((item, index) => ({ id: index + 1, name: item[0], subtitle: item[1], scene: item[2], landmark: item[3], symbol: item[4], top: 30 + index * 250, height: 292 }))
-const mapHeight = 30 + chapters.length * 250 + 140
-const chapterGoals = ['识记名句与作者，建立诗词语感', '辨析山水意象，读出诗中画境', '理解边塞意象与家国情怀', '掌握托物言志的表达方式', '熟练运用名句，做到出口成章', '读懂送别诗中的情绪转折', '按季节与意象归纳诗词脉络', '在诗句中感受家国大义', '体会田园诗的自然与从容', '识别豪放词的气象与胸襟', '辨析婉约词的细腻情绪', '综合运用，完成诗道进阶']
-const dynasties = ['唐 · 李白', '唐 · 王维', '唐 · 王昌龄', '宋 · 王安石', '唐 · 王之涣', '宋 · 苏轼']
-const verses = [['床前明月光，疑是地上霜。', '举头望明月，低头思故乡。'], ['飞流直下三千尺，', '疑是银河落九天。'], ['黄沙百战穿金甲，', '不破楼兰终不还。'], ['墙角数枝梅，凌寒独自开。', '遥知不是雪，为有暗香来。'], ['海内存知己，天涯若比邻。', '无为在歧路，儿女共沾巾。'], ['但愿人长久，千里共婵娟。', '此事古难全。']]
-const names = ['静夜思', '春晓', '咏鹅', '登鹳雀楼', '相思', '村居', '池上', '悯农', '江雪', '寻隐者不遇', '望庐山瀑布', '早发白帝城', '望天门山', '饮湖上初晴后雨', '山行', '题西林壁', '独坐敬亭山', '鹿柴', '鸟鸣涧', '宿建德江', '出塞', '凉州词', '从军行', '使至塞上', '燕歌行', '夜上受降城闻笛', '塞下曲', '白雪歌送武判官', '雁门太守行', '渔家傲', '梅花', '竹石', '墨梅', '石灰吟', '菊花', '咏柳', '蝉', '马诗', '青松', '卜算子·咏梅', '名句初试', '对仗之美', '千古绝唱', '飞花令', '诗眼寻踪', '炼字高手', '上下句接龙', '典故识别', '名篇串联', '名句王者', '送元二使安西', '黄鹤楼送孟浩然', '赠汪伦', '赋得古原草送别', '芙蓉楼送辛渐', '送友人', '别董大', '雨霖铃', '水调歌头', '离亭燕', '春日', '惠崇春江晚景', '小池', '晓出净慈寺', '秋夕', '山居秋暝', '枫桥夜泊', '江南春', '初冬夜饮', '四时田园杂兴', '春望', '示儿', '秋夜将晓出篱门', '过零丁洋', '己亥杂诗', '满江红', '永遇乐·京口北固亭', '书愤', '闻官军收河南河北', '少年中国说', '归园田居', '过故人庄', '山居即事', '游山西村', '村晚', '清平乐·村居', '雨过山村', '渔歌子', '饮酒', '归去来兮辞', '念奴娇·赤壁怀古', '江城子·密州出猎', '破阵子', '永遇乐·京口北固亭', '水龙吟', '南乡子', '沁园春·雪', '六州歌头', '贺新郎', '满江红·怒发冲冠', '如梦令', '一剪梅', '声声慢', '蝶恋花', '浣溪沙', '相见欢', '醉花阴', '鹧鸪天', '临江仙', '虞美人', '诗史长河', '诸子百家', '唐音宋韵', '诗中有画', '词中有境', '一字千金', '诗心相通', '千古风流', '百家争鸣', '终章·诗道']
-const routeXs = [
-  [18, 22, 27, 31, 36, 42, 48, 54, 60, 66],
-  [66, 62, 58, 53, 48, 44, 40, 36, 33, 29],
-  [29, 34, 39, 45, 51, 56, 61, 67, 73, 79],
-  [79, 74, 69, 63, 58, 53, 48, 43, 38, 33],
-  [33, 38, 44, 50, 56, 61, 67, 73, 79, 85],
-  [85, 80, 75, 69, 63, 57, 52, 47, 42, 37],
-  [37, 42, 47, 53, 59, 65, 71, 76, 81, 86],
-  [86, 81, 76, 70, 64, 58, 52, 47, 42, 36],
-  [36, 42, 48, 54, 60, 66, 72, 78, 84, 89],
-  [89, 83, 77, 71, 65, 59, 53, 47, 40, 34],
-  [34, 40, 46, 52, 58, 64, 70, 76, 82, 88],
-  [88, 82, 76, 70, 64, 58, 52, 46, 40, 34]
-]
-const nodeOffsets = [
-  [18, 36, 60, 87, 111, 143, 166, 201, 228, 270],
-  [14, 46, 69, 101, 125, 159, 181, 207, 246, 279],
-  [22, 37, 72, 93, 132, 151, 190, 216, 240, 275],
-  [12, 42, 64, 106, 119, 157, 184, 214, 251, 286],
-  [19, 54, 78, 96, 137, 160, 197, 223, 260, 283],
-  [15, 35, 71, 91, 128, 150, 187, 220, 248, 278],
-  [24, 47, 63, 102, 124, 168, 184, 219, 246, 288],
-  [17, 43, 75, 98, 133, 162, 193, 225, 258, 281],
-  [11, 52, 68, 109, 140, 156, 201, 218, 254, 289],
-  [23, 39, 79, 104, 126, 171, 188, 231, 252, 276],
-  [16, 44, 66, 99, 134, 152, 194, 221, 258, 287],
-  [20, 50, 74, 111, 130, 164, 202, 227, 258, 284]
+const chapterMetas = [
+  ['初识诗词', '五言绝句入门', PhFlowerLotus],
+  ['山水诗境', '山河与清景', PhTree],
+  ['思乡怀人', '月色寄相思', PhScroll],
+  ['咏物抒怀', '托物寓志', PhFlowerLotus],
+  ['边塞长歌', '壮志与豪情', PhSword],
+  ['田园清音', '归隐与闲适', PhTree],
+  ['咏史怀古', '风云与兴亡', PhScroll],
+  ['宋词风华', '长短句里的情怀', PhFlowerLotus],
+  ['名家名篇', '诗心与人生', PhMedal],
+  ['名句擂台', '巅峰对决', PhFlagBanner]
 ]
 
-const levels = computed(() => chapters.flatMap((chapter, chapterIndex) => Array.from({ length: 10 }, (_, index) => {
-  const number = chapterIndex * 10 + index + 1
-  const status = number <= completedThrough.value ? 'done' : number === completedThrough.value + 1 ? 'current' : 'locked'
-  const variant = index === 9 ? 'special' : index === 6 ? 'reward' : index === 4 ? 'elite' : 'normal'
-  return { number, title: names[number - 1], shortTitle: names[number - 1].slice(0, 5), chapterId: chapter.id, chapterName: chapter.name, chapterTop: chapter.top, x: routeXs[chapterIndex][index] + ((chapterIndex % 3) - 1) * 1.1, y: chapter.top + nodeOffsets[chapterIndex][index], status, variant, difficulty: index > 6 ? '进阶' : index > 3 ? '中阶' : '入门', type: variant === 'special' ? '章末关' : variant === 'reward' ? '奖励关' : variant === 'elite' ? '重点关' : '名句识记', goal: chapterGoals[chapterIndex], dynasty: dynasties[(chapterIndex + index) % dynasties.length], verse: verses[(chapterIndex + index) % verses.length], mood: ['月', '山', '关', '梅', '别', '心'][(chapterIndex + index) % 6], progress: status === 'done' ? 5 : status === 'current' ? 4 : 0, stars: status === 'done' ? (index % 3 === 0 ? 2 : 3) : status === 'current' ? 2 : 0, reward: variant === 'special' ? '章印' : variant === 'reward' ? '诗笺' : '10 XP', rewardLabel: variant === 'special' ? '解锁章节徽章' : variant === 'reward' ? '随机诗词卡' : '修习值', quizPrompt: index % 2 === 0 ? '“举头望明月，________。”下一句是什么？' : '“飞流直下三千尺”出自哪一首诗？' }
-})))
-const selectedLevelData = computed(() => levels.value.find(level => level.number === selectedLevel.value) || levels.value[0])
+const normalizedLevels = levelsData.slice(0, TOTAL_LEVELS).map((level, index) => {
+  const poem = level.poems?.[0]
+  const firstQuestion = level.questions?.[0]
+  return {
+    ...level,
+    level: Number(level.level || index + 1),
+    poemTitle: poem?.title || level.title || '未命名诗篇',
+    poemAuthor: poem?.author || '佚名',
+    verse: poem?.content || firstQuestion?.question || '静心读诗，感受文字里的风景。',
+    goal: level.description || '理解诗句大意，掌握诗词中的意象与情感。',
+    questionCount: Math.max(level.questions?.length || 0, 1),
+    difficultyLabel: getDifficultyLabel(level.difficulty)
+  }
+})
+
+const chapters = computed(() => chapterMetas.map(([name, description, icon], index) => {
+  const start = index * 20 + 1
+  const end = Math.min(start + 19, TOTAL_LEVELS)
+  return { id: index + 1, index: String(index + 1).padStart(2, '0'), name, description, icon, start, end, x: [10,21,33,45,57,68,77,84,90,95][index], y: [72,54,64,45,56,39,59,31,47,28][index] }
+}))
+
+const currentChapterIndex = computed(() => Math.floor((selectedLevel.value - 1) / 20))
+const currentChapter = computed(() => chapters.value[currentChapterIndex.value] || chapters.value[0])
+const unlockedThrough = computed(() => Math.min(completedThrough.value + 1, TOTAL_LEVELS))
+const levels = computed(() => normalizedLevels.map(level => ({ ...level, status: level.level <= completedThrough.value ? 'done' : level.level <= unlockedThrough.value ? 'current' : 'locked', stars: level.level <= completedThrough.value ? 3 : 0 })))
+const currentLevel = computed(() => levels.value.find(level => level.level === selectedLevel.value) || levels.value[0])
+const visibleLevels = computed(() => levels.value.slice(currentChapter.value.start - 1, currentChapter.value.end))
+const nextPlayableLevel = computed(() => levels.value.find(level => level.level === unlockedThrough.value))
 const totalStars = computed(() => levels.value.reduce((total, level) => total + level.stars, 0))
-const activeChapterName = computed(() => chapters.find(chapter => chapter.id === activeChapterId.value)?.name || '山水诗境')
-const routePoints = computed(() => levels.value.map(level => ({ x: level.x * 10, y: level.y })))
-const routePath = computed(() => buildSmoothPath(routePoints.value))
-const completedRoutePath = computed(() => buildSmoothPath(routePoints.value.slice(0, Math.min(completedThrough.value + 1, routePoints.value.length))))
-const currentRoutePath = computed(() => buildSmoothPath(routePoints.value.slice(Math.max(0, completedThrough.value - 1), Math.min(completedThrough.value + 2, routePoints.value.length))))
+const summary = computed(() => [
+  { label: '已解锁关卡', value: unlockedThrough.value, suffix: '/ 200', icon: PhFlagBanner, tone: 'green' },
+  { label: '当前段位', value: getRankName(completedThrough.value), suffix: '', icon: PhMedal, tone: 'gold' },
+  { label: '本章进度', value: visibleLevels.value.filter(level => level.status === 'done').length, suffix: `/ ${visibleLevels.value.length} 关`, icon: PhScroll, tone: 'blue' },
+  { label: '连续闯关天数', value: 7, suffix: '天', icon: PhFire, tone: 'green' }
+])
 
-const quizOptions = ['低头思故乡', '疑是银河落九天', '不及汪伦送我情', '举杯邀明月']
-const leaderboard = [{ name: '墨染清风', title: '青竹学士', score: 1280, avatar: '墨' }, { name: '书山有路', title: '青竹学士', score: 1160, avatar: '书' }, { name: '云中客', title: '松风秀才', score: 1040, avatar: '云' }]
-const rewards = [{ threshold: 5, symbol: '笺' }, { threshold: 15, symbol: '卷' }, { threshold: 30, symbol: '囊' }, { threshold: 50, symbol: '册' }]
+const leaderboard = [{ name: '墨染清风', score: 1280 }, { name: '书山有路', score: 1160 }, { name: '云中客', score: 1040 }]
+const rewards = [{ threshold: 5, icon: PhMedal }, { threshold: 15, icon: PhScroll }, { threshold: 30, icon: PhFlowerLotus }, { threshold: 50, icon: PhBookOpenText }]
 
-function buildSmoothPath(points) { if (!points.length) return ''; if (points.length === 1) return `M ${points[0].x} ${points[0].y}`; let d = `M ${points[0].x} ${points[0].y}`; for (let i = 1; i < points.length; i += 1) { const previous = points[i - 1]; const point = points[i]; const dy = point.y - previous.y; d += ` C ${previous.x} ${previous.y + dy * .38}, ${point.x} ${point.y - dy * .38}, ${point.x} ${point.y}` } return d }
-function selectLevel(number) { selectedLevel.value = number; const level = levels.value.find(item => item.number === number); if (level) { activeChapterId.value = level.chapterId; nextTick(() => scrollToLevel(level)) }; if (number > completedThrough.value + 1) showToast(`第 ${number} 关暂未解锁，先完成眼前这一关吧`) }
-function jumpToChapter(id) { activeChapterId.value = id }
-function scrollToLevel(level) { if (!mapViewport.value) return; const targetTop = mapViewport.value.getBoundingClientRect().top + window.scrollY + level.y - 260; window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' }) }
-function beginDrag(event) { if (event.pointerType === 'mouse' && event.button !== 0) return; isDragging.value = true; dragStartY.value = event.clientY; dragScrollTop.value = mapViewport.value?.scrollTop || 0; mapViewport.value?.setPointerCapture(event.pointerId) }
-function dragMap(event) { if (isDragging.value && mapViewport.value) mapViewport.value.scrollTop = dragScrollTop.value - (event.clientY - dragStartY.value) }
-function endDrag() { isDragging.value = false }
-function startChallenge() { if (selectedLevelData.value.status === 'locked') return; selectedAnswer.value = null; answerState.value = ''; quizOpen.value = true }
-function chooseAnswer(index) { if (!answerState.value) selectedAnswer.value = index }
-function submitAnswer() { if (answerState.value) { if (answerState.value === 'right' && selectedLevel.value === completedThrough.value + 1) completedThrough.value = selectedLevel.value; quizOpen.value = false; if (selectedLevel.value < 120) selectedLevel.value += 1; showToast(answerState.value === 'right' ? '通关成功，下一处诗境已为你点亮' : '已记录本次修习，继续加油'); nextTick(() => { const nextLevel = levels.value.find(item => item.number === selectedLevel.value); if (nextLevel) { activeChapterId.value = nextLevel.chapterId; scrollToLevel(nextLevel) } }); return } answerState.value = selectedAnswer.value === 0 ? 'right' : 'wrong' }
-function closeQuiz() { quizOpen.value = false; answerState.value = ''; selectedAnswer.value = null }
-function showToast(message) { toast.value = message; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.value = '' }, 2600) }
-onMounted(() => nextTick(() => jumpToChapter(2, false)))
+function readStoredProgress() {
+  const value = Number(localStorage.getItem('challengeHighestLevel'))
+  return Number.isInteger(value) && value >= 0 ? Math.min(value, TOTAL_LEVELS) : 12
+}
+function getDifficultyLabel(difficulty) { return ({ easy: '启蒙', medium: '进阶', hard: '挑战', challenge: '擂台' })[difficulty] || '进阶' }
+function getRankName(level) { return level >= 160 ? '青云大士' : level >= 80 ? '金榜学士' : level >= 30 ? '砚田秀才' : '青竹学士' }
+function selectChapter(index) {
+  const chapter = chapters.value[index]
+  const firstAvailable = levels.value.slice(chapter.start - 1, chapter.end).find(level => level.status !== 'locked')
+  selectedLevel.value = firstAvailable?.level || chapter.start
+  jumpLevel.value = selectedLevel.value
+  if (!firstAvailable) showToast(`第 ${chapter.start} 关起的诗境尚未解锁`)
+}
+function selectLevel(level) {
+  if (level.status === 'locked') return showToast(`第 ${level.level} 关尚未解锁，先完成第 ${level.level - 1} 关吧`)
+  selectedLevel.value = level.level
+  jumpLevel.value = level.level
+}
+function jumpToLevel() {
+  const value = Math.min(Math.max(Number(jumpLevel.value) || 1, 1), TOTAL_LEVELS)
+  jumpLevel.value = value
+  selectedLevel.value = value
+  if (value > unlockedThrough.value) showToast(`第 ${value} 关尚未解锁，当前可挑战第 ${unlockedThrough.value} 关`)
+}
+function startSelected() {
+  if (currentLevel.value.status !== 'locked') router.push({ name: 'ChallengeLevel', params: { level: currentLevel.value.level } })
+}
+function continueLast() {
+  if (!nextPlayableLevel.value) return
+  selectedLevel.value = nextPlayableLevel.value.level
+  jumpLevel.value = selectedLevel.value
+  startSelected()
+}
+async function loadProgress() {
+  try {
+    const response = await api.challenge.getProgress()
+    const remoteProgress = Number(response?.data?.highest_level ?? response?.highest_level)
+    if (Number.isInteger(remoteProgress) && remoteProgress >= 0) {
+      completedThrough.value = Math.min(remoteProgress, TOTAL_LEVELS)
+      selectedLevel.value = Math.min(completedThrough.value + 1, TOTAL_LEVELS)
+      jumpLevel.value = selectedLevel.value
+      localStorage.setItem('challengeHighestLevel', String(completedThrough.value))
+    }
+  } catch { /* 离线或演示模式沿用本地进度 */ }
+}
+function showToast(message) { toast.value = message; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.value = '' }, 2800) }
+onMounted(loadProgress)
 </script>
 
 <style scoped>
-:global(body) { background: #e9eee7; }
-:global(.challenge-map-page) { font-family: var(--font-sans,'Noto Sans SC','Microsoft YaHei',sans-serif); }
-.challenge-map-page { --ink:#1f554e; --deep:#123d39; --jade:#2d8b79; --pale:#edf5ed; --gold:#c0924b; position:relative; isolation:isolate; overflow:hidden; padding:38px 0 72px; color:var(--deep); background:linear-gradient(135deg,#f5f7f0,#e8f0e9); }
-.challenge-map-page::before { content:''; position:absolute; inset:0; z-index:-3; background:radial-gradient(ellipse at 7% 25%,rgba(123,164,148,.2),transparent 34%),radial-gradient(ellipse at 91% 68%,rgba(202,175,111,.12),transparent 33%),url('../assets/jade-paper-ambient.png') center top/cover no-repeat; opacity:.48; }
-.ambient-ink { position:absolute; z-index:-1; width:380px; height:220px; border-radius:50%; filter:blur(18px); opacity:.14; pointer-events:none; }.ambient-ink-left { top:470px; left:-240px; background:#4e8879; transform:rotate(-14deg); }.ambient-ink-right { top:1380px; right:-210px; background:#b79661; transform:rotate(12deg); }
-.challenge-intro,.progress-strip,.challenge-content,.support-grid { position:relative; z-index:1; width:min(1480px,calc(100% - 42px)); margin:0 auto; }.challenge-intro { display:flex; align-items:flex-end; justify-content:space-between; gap:30px; margin-bottom:27px; }.eyebrow,.section-kicker { margin:0; color:#6a8e82; font-size:10px; font-weight:800; letter-spacing:.19em; line-height:1.4; }.eyebrow { display:flex; align-items:center; gap:9px; margin-bottom:10px; }.eyebrow-mark { width:20px; height:1px; background:var(--gold); }.intro-copy h1 { margin:0; color:var(--deep); font-family:var(--font-ancient,'Noto Serif SC',serif); font-size:clamp(30px,3vw,44px); font-weight:600; letter-spacing:.05em; }.intro-subtitle { margin:8px 0 0; color:#758d84; font-size:14px; letter-spacing:.05em; }.intro-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:9px; }.quiet-action { display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border:1px solid rgba(47,142,127,.12); border-radius:12px; color:#54766e; background:rgba(255,255,255,.55); box-shadow:0 8px 20px rgba(41,76,68,.04); text-decoration:none; font-size:12px; transition:.25s ease; }.quiet-action:hover { color:var(--ink); border-color:rgba(47,142,127,.35); background:#fff; transform:translateY(-2px); }.quiet-action-accent { color:#976b2f; border-color:rgba(185,138,72,.25); }.action-glyph { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:7px; color:var(--jade); background:#e3f2eb; font-family:var(--font-ancient,serif); font-size:12px; }.quiet-action-accent .action-glyph { color:#a3702c; background:#f5e9d0; }
-.progress-strip { display:flex; align-items:stretch; min-height:86px; margin-bottom:22px; padding:15px 20px; border:1px solid rgba(255,255,255,.85); border-radius:18px; background:rgba(255,255,255,.7); box-shadow:0 12px 40px rgba(47,92,80,.07),inset 0 1px rgba(255,255,255,.9); backdrop-filter:blur(18px); }.progress-stat { display:flex; align-items:center; gap:12px; min-width:172px; padding:0 20px; }.progress-stat-primary { padding-left:4px; }.stat-icon { display:flex; align-items:center; justify-content:center; width:38px; height:38px; border:1px solid rgba(47,142,127,.12); border-radius:50%; color:var(--jade); background:#edf7f1; font-family:var(--font-ancient,serif); font-size:14px; }.medal-icon { color:#9a6d2e; background:#f7efd9; }.stat-label { display:block; margin-bottom:2px; color:#81918c; font-size:11px; }.progress-stat strong { display:block; color:var(--ink); font-family:var(--font-ancient,serif); font-size:17px; font-weight:600; }.progress-stat strong em { color:var(--jade); font-size:25px; font-style:normal; }.progress-stat strong small { color:#8d9b96; font-family:var(--font-sans,sans-serif); font-size:11px; font-weight:500; }.stat-divider { width:1px; margin:14px 0; background:rgba(36,83,75,.11); }.strip-progress { display:flex; flex:1; align-items:center; justify-content:flex-end; gap:11px; min-width:200px; padding-left:20px; color:#7a918a; font-size:11px; }.strip-progress-track { width:min(160px,14vw); height:5px; overflow:hidden; border-radius:8px; background:#dce8e1; }.strip-progress-track span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#78ba9a,#2f8e7f); }.strip-progress b { color:var(--jade); font-size:12px; }
-.challenge-content { display:grid; grid-template-columns:minmax(0,1fr) 365px; align-items:start; gap:22px; }.world-card,.current-card,.side-note,.support-card { border:1px solid rgba(255,255,255,.82); background:rgba(255,255,255,.72); box-shadow:0 18px 50px rgba(42,86,73,.08),inset 0 1px rgba(255,255,255,.92); backdrop-filter:blur(18px); }.world-card { min-width:0; overflow:hidden; border-radius:22px; }.world-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; padding:24px 28px 14px; }.world-card-header h2 { margin:5px 0 3px; color:var(--deep); font-family:var(--font-ancient,serif); font-size:23px; font-weight:600; }.world-card-header h2 span { color:#7d9b90; font-family:var(--font-sans,sans-serif); font-size:12px; font-weight:500; }.world-description { margin:0; color:#849890; font-size:12px; }.world-meta { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; padding-top:8px; }.meta-chip { display:inline-flex; align-items:center; gap:5px; color:#80928c; font-size:10px; white-space:nowrap; }.legend-dot { width:7px; height:7px; border-radius:50%; background:#cbd9d2; }.legend-dot.done { background:#57a58c; box-shadow:0 0 0 3px rgba(87,165,140,.13); }.legend-dot.current { background:#c7954a; box-shadow:0 0 0 3px rgba(199,149,74,.16); }.chapter-nav { display:flex; gap:5px; overflow-x:auto; padding:0 28px 14px; scrollbar-width:none; }.chapter-nav::-webkit-scrollbar { display:none; }.chapter-nav-item { flex:0 0 auto; padding:6px 9px; border:1px solid transparent; border-radius:7px; color:#8a9c94; background:rgba(237,245,237,.52); cursor:pointer; font:inherit; font-size:10px; transition:.2s ease; }.chapter-nav-item span { margin-right:5px; color:#b1beb6; font-family:var(--font-sans,sans-serif); font-size:9px; }.chapter-nav-item:hover { color:var(--ink); background:#f4faf3; }.chapter-nav-item.active { color:#9b712f; border-color:rgba(192,146,75,.34); background:#fbf2de; box-shadow:0 0 0 3px rgba(192,146,75,.08); }.chapter-nav-item.active span { color:#c0924b; }
-.map-viewport { position:relative; height:min(720px,calc(100dvh - 300px)); min-height:570px; overflow-y:auto; overflow-x:hidden; border-top:1px solid rgba(47,115,98,.12); border-bottom:1px solid rgba(47,115,98,.12); cursor:grab; scrollbar-color:#9bbcaf rgba(216,230,220,.35); scrollbar-width:thin; }.map-viewport.dragging { cursor:grabbing; user-select:none; }.map-viewport::-webkit-scrollbar { width:7px; }.map-viewport::-webkit-scrollbar-track { background:rgba(216,230,220,.25); }.map-viewport::-webkit-scrollbar-thumb { border-radius:8px; background:#9bbcaf; }.map-stage { position:relative; width:100%; min-width:640px; overflow:hidden; background:#e8f0e8; }.map-paper { position:absolute; inset:0; z-index:0; background-image:linear-gradient(180deg,rgba(248,250,241,.28),rgba(232,241,232,.12) 44%,rgba(246,238,216,.24)),url('../assets/jade-paper-ambient.png'); background-size:cover; background-position:center top; opacity:.75; }.scene-band { position:absolute; left:0; right:0; z-index:1; overflow:hidden; background-image:linear-gradient(90deg,rgba(228,240,230,.82),rgba(245,248,239,.18) 49%,rgba(239,235,217,.38)),url('../assets/challenge-map-landscape.png'); background-size:cover; background-position:center; opacity:.72; mask-image:linear-gradient(180deg,transparent 0,#000 14%,#000 82%,transparent 100%); }.scene-band:nth-of-type(even) { background-position:65% center; }.scene-wash { position:absolute; inset:0; background:linear-gradient(180deg,rgba(250,250,239,.58),transparent 34%,rgba(255,255,255,.25)); }.scene-heading { position:absolute; left:36px; top:31px; display:flex; align-items:center; gap:10px; color:#6a8d80; opacity:.7; transition:.3s ease; }.scene-heading.focused { opacity:1; transform:translateX(3px); }.scene-number { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border:1px solid rgba(71,137,112,.34); border-radius:50%; color:#5c8f7e; background:rgba(241,249,238,.72); font-family:var(--font-sans,sans-serif); font-size:9px; }.scene-heading strong,.scene-heading small { display:block; }.scene-heading strong { color:#356c5d; font-family:var(--font-ancient,serif); font-size:15px; font-weight:600; }.scene-heading small { margin-top:2px; color:#849c91; font-size:9px; }.scene-landmark { position:absolute; right:8%; top:26px; color:rgba(44,110,87,.17); font-family:var(--font-ancient,serif); font-size:72px; writing-mode:vertical-rl; }.scene-caption { position:absolute; right:8%; bottom:37px; color:rgba(89,121,108,.46); font-family:var(--font-ancient,serif); font-size:10px; letter-spacing:.1em; }
-.route-layer { position:absolute; inset:0; z-index:3; width:100%; height:100%; overflow:visible; pointer-events:none; }.route-shadow { fill:none; stroke:rgba(39,89,73,.17); stroke-width:29; stroke-linecap:round; stroke-linejoin:round; }.route-base { fill:none; stroke:rgba(250,248,229,.95); stroke-width:18; stroke-linecap:round; stroke-linejoin:round; stroke-dasharray:1 31; }.route-completed { fill:none; stroke:#62a890; stroke-width:10; stroke-linecap:round; stroke-linejoin:round; opacity:.78; }.route-current { fill:none; stroke:#d3a258; stroke-width:8; stroke-linecap:round; opacity:.82; }
-.map-node { position:absolute; z-index:5; display:flex; align-items:center; justify-content:center; width:46px; height:60px; padding:0; border:0; background:transparent; cursor:pointer; transform:translate(-50%,-50%); font:inherit; }.node-halo { position:absolute; width:48px; height:48px; border:1px solid rgba(255,255,255,.78); border-radius:50%; background:rgba(239,248,237,.34); box-shadow:0 5px 12px rgba(35,81,64,.12); transition:.25s ease; }.node-pin { position:relative; display:flex; align-items:center; justify-content:center; width:36px; height:36px; border:1px solid #74ad95; border-radius:50%; color:#387f6c; background:#e5f4e8; box-shadow:0 2px 5px rgba(40,100,78,.16); font-family:var(--font-sans,sans-serif); font-size:11px; transition:.25s ease; }.node-check { position:absolute; top:5px; right:1px; display:flex; align-items:center; justify-content:center; width:14px; height:14px; border:2px solid #f6faf2; border-radius:50%; color:#fff; background:#4f9d80; font-size:8px; }.node-lock { position:absolute; width:10px; height:8px; margin-top:4px; border:1px solid #98aca3; border-radius:2px; background:rgba(245,248,241,.64); }.node-lock::before { content:''; position:absolute; left:2px; top:-6px; width:4px; height:6px; border:1px solid #98aca3; border-bottom:0; border-radius:5px 5px 0 0; }.node-label { position:absolute; top:47px; display:none; min-width:72px; padding:4px 7px; border:1px solid rgba(255,255,255,.7); border-radius:6px; color:#6d887d; background:rgba(252,253,247,.8); box-shadow:0 4px 11px rgba(45,85,71,.08); white-space:nowrap; text-align:center; }.node-label strong,.node-label small { display:block; }.node-label strong { font-family:var(--font-ancient,serif); font-size:10px; font-weight:600; }.node-label small { margin-top:2px; color:#c49a59; font-size:9px; }.node-label small span { color:#d9e0d7; }.node-label small span.filled { color:#c69b53; }.node-tooltip { position:absolute; left:25px; bottom:33px; z-index:10; display:grid; gap:3px; min-width:125px; padding:9px 11px; border:1px solid rgba(255,255,255,.82); border-radius:9px; color:#6f8980; background:rgba(250,252,245,.96); box-shadow:0 10px 20px rgba(41,78,66,.13); opacity:0; pointer-events:none; text-align:left; transform:translateY(4px); transition:.2s ease; }.node-tooltip b { color:var(--ink); font-size:10px; }.node-tooltip span { color:#9b7543; font-family:var(--font-ancient,serif); font-size:12px; }.node-tooltip small { color:#9aaba3; font-size:9px; }.map-node:hover .node-tooltip,.map-node:focus-visible .node-tooltip { opacity:1; transform:translateY(0); }.map-node:hover .node-pin { transform:translateY(-3px); border-color:#3e8e76; box-shadow:0 7px 15px rgba(42,111,82,.22); }.node-locked { opacity:.55; }.node-locked:hover { opacity:1; }.node-locked .node-pin { color:#849a91; border-color:#afc0b7; background:rgba(242,247,239,.72); }.node-current .node-pin { width:55px; height:55px; border:2px solid #c8954b; color:#986c2d; background:#fff5dd; box-shadow:0 0 0 7px rgba(203,156,75,.14),0 8px 18px rgba(165,117,42,.18); font-size:15px; }.node-current .node-halo { width:70px; height:70px; border-color:rgba(207,160,83,.72); animation:breath 2.4s ease-in-out infinite; }.node-current .node-label,.node-selected .node-label,.node-special .node-label,.node-reward .node-label { display:block; }.node-current .node-label { color:#936a31; border-color:rgba(203,156,75,.3); background:#fff7e6; }.node-elite .node-pin { border-radius:11px; transform:rotate(45deg); }.node-elite .node-pin > * { transform:rotate(-45deg); }.node-reward .node-pin { border-color:#9cc5ab; color:#39816c; background:#e0f3e9; }.node-reward-mark { font-size:18px; }.node-special .node-pin { width:52px; height:52px; border-radius:10px 10px 19px 19px; border-color:#d2a35d; color:#a77732; background:#fff0cf; box-shadow:0 0 0 5px rgba(209,161,86,.13),0 6px 13px rgba(163,111,37,.18); }.node-special-mark { font-size:17px; }.node-special .node-halo { width:64px; height:64px; border-radius:15px; border-color:rgba(205,158,80,.44); }.map-end-mark { position:absolute; z-index:4; right:6%; bottom:52px; display:grid; place-items:center; width:78px; height:78px; border:1px solid rgba(192,146,75,.44); border-radius:50%; color:#9b7238; background:rgba(253,243,215,.82); box-shadow:0 0 0 6px rgba(192,146,75,.08); font-family:var(--font-ancient,serif); transform:rotate(-7deg); }.map-end-mark span { font-size:23px; line-height:1; }.map-end-mark small { font-size:9px; }
-@keyframes breath { 0%,100% { transform:scale(.93); opacity:.68; } 50% { transform:scale(1.08); opacity:1; } }
-.map-footer { display:flex; align-items:center; gap:14px; padding:12px 26px 15px; color:#8ca097; font-size:10px; }.drag-hint { display:flex; align-items:center; gap:6px; }.drag-hint i { width:6px; height:6px; border:1px solid #71a58f; border-radius:50%; background:#8fc1a2; }.map-footer-line { flex:1; height:1px; background:linear-gradient(90deg,rgba(139,175,159,.35),transparent); }
-.challenge-sidebar { position:sticky; top:22px; display:flex; flex-direction:column; gap:16px; }.current-card { position:relative; overflow:hidden; border-radius:20px; }.card-landscape { position:relative; height:83px; overflow:hidden; border-bottom:1px solid rgba(49,113,91,.1); background:linear-gradient(130deg,#dfece1,#f8f6e9 58%,#dcebe1); }.card-landscape::before { content:''; position:absolute; inset:0; background-image:linear-gradient(180deg,rgba(240,247,235,.2),rgba(240,247,235,.8)),url('../assets/challenge-map-landscape.png'); background-position:center 53%; background-size:cover; opacity:.46; }.card-moon { position:absolute; right:54px; top:19px; width:39px; height:39px; border-radius:50%; background:#f7d995; box-shadow:0 0 0 8px rgba(247,217,149,.11); }.card-branch { position:absolute; right:7px; bottom:-20px; color:rgba(37,94,75,.25); font-family:var(--font-ancient,serif); font-size:86px; transform:rotate(-14deg); }.current-card::after { content:''; position:absolute; left:0; right:0; top:0; height:5px; background:linear-gradient(90deg,#2d8b79,#75b396 62%,#d2a45e); }.current-card-top { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:20px 22px 18px; }.current-label { margin:8px 0 5px; color:#83a097; font-size:11px; }.current-card h2 { margin:0; color:var(--deep); font-family:var(--font-ancient,serif); font-size:21px; font-weight:600; }.current-tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }.current-tags span { padding:4px 8px; border-radius:5px; color:#578278; background:#e4f1eb; font-size:10px; }.current-tags span:nth-child(2) { color:#a37a3d; background:#f7eedc; }.current-tags span:nth-child(3) { color:#80958d; background:#eef3ee; }.seal-mark { display:flex; flex:0 0 auto; flex-direction:column; align-items:center; justify-content:center; width:62px; height:72px; border:1px solid rgba(196,146,72,.46); border-radius:50% 50% 42% 42%; color:#a5762f; background:#fff4d9; box-shadow:0 6px 14px rgba(181,137,71,.11); font-family:var(--font-ancient,serif); transform:rotate(7deg); }.seal-mark span { font-size:24px; line-height:1; }.seal-mark small { margin-top:4px; font-size:10px; }.card-divider { height:1px; margin:0 22px; background:rgba(41,91,78,.1); }.mission-block { padding:18px 22px 15px; }.detail-label { margin:0 0 7px; color:#4a8479; font-size:11px; font-weight:700; }.mission-block p:last-child { margin:0; color:#759088; font-size:12px; line-height:1.8; }.verse-preview { position:relative; margin:0 22px 18px; padding:14px 16px; overflow:hidden; border:1px solid rgba(190,155,88,.23); border-radius:12px; background:linear-gradient(135deg,rgba(255,252,239,.82),rgba(250,248,237,.48)); }.verse-preview::after { content:'月'; position:absolute; right:11px; bottom:-16px; color:rgba(185,138,72,.08); font-family:var(--font-ancient,serif); font-size:74px; }.verse-header { display:flex; justify-content:space-between; color:#ac8a55; font-size:10px; }.verse-preview p { position:relative; z-index:1; margin:10px 0 0; color:#a07336; font-family:var(--font-ancient,serif); font-size:14px; letter-spacing:.06em; }.verse-preview p+p { margin-top:4px; }.verse-seal { position:absolute; right:13px; top:11px; color:rgba(181,136,67,.42); font-family:var(--font-ancient,serif); font-size:18px; }
-.quest-progress { padding:0 22px 16px; }.progress-heading { display:flex; justify-content:space-between; color:#789188; font-size:11px; }.progress-heading b { color:#a1814d; font-weight:500; }.quest-track { position:relative; display:flex; align-items:center; justify-content:space-between; margin-top:12px; }.quest-track::before { content:''; position:absolute; left:7px; right:7px; height:2px; background:#dce8e0; }.quest-track i { position:absolute; left:7px; height:2px; background:#75b39a; z-index:0; }.quest-step { position:relative; z-index:1; display:flex; align-items:center; justify-content:center; width:16px; height:16px; border:1px solid #d1dfd7; border-radius:50%; color:#fff; background:#f7faf5; font-size:8px; }.quest-step.filled { border-color:#83bca5; background:#74b297; }.reward-row { display:flex; align-items:center; justify-content:space-between; padding:13px 22px; border-top:1px solid rgba(41,91,78,.08); border-bottom:1px solid rgba(41,91,78,.08); }.reward-copy { display:flex; align-items:center; gap:9px; }.reward-icon { display:flex; align-items:center; justify-content:center; width:29px; height:29px; border:1px solid rgba(185,138,72,.3); border-radius:50%; color:#ad7d35; background:#fbf0dc; font-family:var(--font-ancient,serif); font-size:12px; }.reward-copy small,.reward-copy strong { display:block; }.reward-copy small { color:#9aa9a2; font-size:9px; }.reward-copy strong { margin-top:2px; color:#738d82; font-size:11px; font-weight:500; }.stars { display:flex; gap:2px; color:#d7dfd8; font-size:15px; }.stars .filled { color:#d3a75c; }.card-actions { display:grid; gap:9px; padding:18px 22px 11px; }.primary-cta,.secondary-cta { width:100%; padding:12px 15px; border-radius:10px; cursor:pointer; font:inherit; font-size:13px; transition:.22s ease; }.primary-cta { display:flex; align-items:center; justify-content:space-between; border:0; color:#fff; background:linear-gradient(100deg,#258678,#3c9e88); box-shadow:0 8px 16px rgba(47,142,127,.2); }.primary-cta:hover { transform:translateY(-2px); box-shadow:0 12px 19px rgba(47,142,127,.27); }.primary-cta:disabled { opacity:.55; cursor:not-allowed; transform:none; box-shadow:none; }.cta-arrow { font-size:18px; }.secondary-cta { border:1px solid rgba(47,142,127,.28); color:#47877b; background:rgba(255,255,255,.55); }.secondary-cta:hover { border-color:#63a995; background:#edf7f1; }.last-played { display:flex; align-items:center; gap:7px; padding:0 22px 19px; margin:0; color:#9caaa4; font-size:10px; }.pulse-dot { width:6px; height:6px; border-radius:50%; background:#64a98e; box-shadow:0 0 0 4px rgba(100,169,142,.11); }.locked-message { display:flex; align-items:center; gap:12px; padding:28px 22px; color:#81948d; }.lock-emblem { display:flex; align-items:center; justify-content:center; width:40px; height:40px; border:1px solid #c9d6ce; border-radius:50%; color:#93a79d; background:#eff4ef; font-family:var(--font-ancient,serif); }.locked-message strong { display:block; color:#6e8a80; font-size:12px; }.locked-message p { margin:5px 0 0; font-size:11px; }.side-note { position:relative; display:flex; align-items:flex-start; gap:12px; overflow:hidden; padding:18px 20px; border-radius:16px; background:linear-gradient(120deg,rgba(255,255,255,.67),rgba(227,241,231,.53)); }.note-quote { color:#c9a264; font-family:Georgia,serif; font-size:35px; line-height:.7; }.side-note p:last-child { max-width:245px; margin:7px 0 0; color:#789087; font-family:var(--font-ancient,serif); font-size:11px; line-height:1.8; }.note-stamp { position:absolute; right:15px; bottom:10px; color:rgba(72,139,116,.2); font-family:var(--font-ancient,serif); font-size:42px; transform:rotate(-13deg); }
-.support-grid { display:grid; grid-template-columns:1.05fr 1.12fr .85fr; gap:18px; margin-top:22px; }.support-card { min-height:196px; padding:22px; border-radius:18px; }.support-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }.support-heading h3 { margin:5px 0 0; color:var(--ink); font-family:var(--font-ancient,serif); font-size:18px; }.support-heading a { color:#5c9987; text-decoration:none; font-size:10px; }.rank-list { display:grid; gap:8px; margin-top:16px; }.rank-item { display:grid; grid-template-columns:23px 32px 1fr auto; align-items:center; gap:9px; }.rank-number { color:#a07a43; font-family:var(--font-sans,sans-serif); font-size:10px; }.friend-avatar { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:50%; color:white; background:#6b9b89; font-family:var(--font-ancient,serif); font-size:12px; }.avatar-2 { background:#b29260; }.avatar-3 { background:#7c9299; }.friend-name,.friend-name small { display:block; }.friend-name { color:#4d756c; font-size:11px; }.friend-name small { margin-top:1px; color:#a0aea8; font-size:9px; }.rank-item>strong { color:#6a8b80; font-size:12px; }.rank-item>strong small { margin-left:2px; color:#a8b4ae; font-size:9px; font-weight:400; }.reward-total { color:#9c7a42; font-size:10px; }.reward-total i { color:#d3a75c; font-style:normal; font-size:14px; }.reward-road { display:flex; align-items:flex-start; margin-top:26px; }.reward-step { position:relative; display:flex; flex:1; flex-direction:column; align-items:center; gap:6px; color:#a6b5ad; text-align:center; font-size:10px; }.reward-step:not(:last-child)::after { content:''; position:absolute; top:20px; left:50%; width:100%; border-top:1px dashed #c9dad1; z-index:-1; }.reward-medallion { display:flex; align-items:center; justify-content:center; width:39px; height:39px; border:1px solid #d5dfd7; border-radius:50%; color:#9caaa2; background:#f4f7f0; font-family:var(--font-ancient,serif); font-size:14px; }.reward-step.claimed .reward-medallion { color:#ab7d36; border-color:#e5c98e; background:#fbf1dc; }.reward-step strong { color:#91a39a; font-size:12px; }.reward-step strong small { display:block; margin-top:1px; color:#abb7b0; font-size:8px; font-weight:400; }.reflection-card { position:relative; display:flex; align-items:center; gap:13px; overflow:hidden; background:linear-gradient(130deg,rgba(255,255,255,.65),rgba(233,242,231,.59)); }.reflection-mark { position:absolute; right:-8px; bottom:-26px; color:rgba(56,126,105,.12); font-family:var(--font-ancient,serif); font-size:105px; }.reflection-copy { position:relative; margin:11px 0 0; color:#6e887e; font-family:var(--font-ancient,serif); font-size:13px; line-height:1.8; }.reflection-copy span { color:#9baa9f; font-family:var(--font-sans,sans-serif); font-size:10px; }.reflection-button { position:absolute; right:18px; bottom:19px; padding:5px 9px; border:1px solid rgba(47,142,127,.18); border-radius:7px; color:#6b9c8d; background:rgba(255,255,255,.53); cursor:pointer; font-size:9px; }
-.toast-message { position:fixed; z-index:20; left:50%; bottom:28px; padding:12px 18px; border:1px solid rgba(255,255,255,.7); border-radius:10px; color:#eff8f2; background:rgba(24,71,64,.91); box-shadow:0 12px 28px rgba(24,71,64,.18); transform:translateX(-50%); font-size:12px; }.fade-enter-active,.fade-leave-active { transition:.25s ease; }.fade-enter-from,.fade-leave-to { opacity:0; transform:translate(-50%,8px); }.quiz-backdrop { position:fixed; z-index:30; inset:0; display:grid; place-items:center; padding:20px; background:rgba(17,57,51,.38); backdrop-filter:blur(8px); }.quiz-modal { position:relative; width:min(500px,100%); padding:30px; border:1px solid rgba(255,255,255,.78); border-radius:22px; background:#f9fbf5; box-shadow:0 28px 75px rgba(17,57,51,.28); }.quiz-close { position:absolute; top:14px; right:17px; width:28px; height:28px; border:0; border-radius:50%; color:#789087; background:#edf4ed; cursor:pointer; font-size:20px; }.quiz-modal h2 { margin:8px 0 20px; color:var(--deep); font-family:var(--font-ancient,serif); font-size:25px; }.quiz-prompt { margin:0 0 19px; padding:15px; border-left:3px solid #d0a05a; color:#9a733c; background:#fbf4e4; font-family:var(--font-ancient,serif); font-size:15px; line-height:1.8; }.quiz-options { display:grid; gap:9px; }.quiz-option { display:flex; align-items:center; gap:11px; padding:12px 14px; border:1px solid #d8e5dc; border-radius:10px; color:#5e8175; background:#fff; cursor:pointer; text-align:left; font:inherit; font-size:12px; }.quiz-option span { display:flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; color:#7da490; background:#edf6ee; font-size:10px; }.quiz-option:hover,.quiz-option.chosen { border-color:#6eb097; background:#f0f8f1; }.quiz-option.right { border-color:#72b395; color:#3b7f67; background:#e8f5eb; }.quiz-option.wrong { border-color:#d5a373; color:#a4703c; background:#fff4e9; }.answer-feedback { display:grid; gap:3px; margin-top:15px; padding:11px 13px; border-radius:9px; font-size:11px; }.answer-feedback.right { color:#397e68; background:#e4f3e9; }.answer-feedback.wrong { color:#a06f3c; background:#fff0df; }.answer-feedback span { opacity:.76; }.quiz-submit { width:100%; margin-top:18px; padding:13px; border:0; border-radius:10px; color:#fff; background:#2f8e7f; cursor:pointer; font:inherit; font-size:13px; }.quiz-submit:disabled { cursor:not-allowed; opacity:.42; }.quiz-submit span { margin-left:7px; font-size:17px; }.modal-fade-enter-active,.modal-fade-leave-active { transition:.25s ease; }.modal-fade-enter-from,.modal-fade-leave-to { opacity:0; }
-@media (max-width:1180px) { .progress-stat { min-width:auto; padding:0 11px; }.progress-stat-primary { padding-left:0; }.strip-progress { display:none; }.challenge-content { grid-template-columns:minmax(0,1fr) 330px; } }
-@media (max-width:900px) { .challenge-intro { align-items:flex-start; flex-direction:column; }.intro-actions { justify-content:flex-start; }.progress-strip { overflow-x:auto; scrollbar-width:none; }.progress-strip::-webkit-scrollbar { display:none; }.progress-stat { flex:0 0 auto; }.stat-divider { flex:0 0 auto; }.challenge-content { grid-template-columns:1fr; }.challenge-sidebar { position:static; display:grid; grid-template-columns:minmax(0,1.15fr) minmax(250px,.85fr); }.support-grid { grid-template-columns:1fr 1fr; }.reflection-card { grid-column:1/-1; } }
-@media (max-width:660px) { .challenge-map-page { padding-top:24px; }.challenge-intro,.progress-strip,.challenge-content,.support-grid { width:min(100% - 24px,1480px); }.intro-actions { display:grid; grid-template-columns:repeat(2,1fr); width:100%; }.quiet-action { justify-content:center; }.progress-strip { padding:12px 13px; border-radius:14px; }.progress-stat { gap:8px; padding:0 12px; }.stat-icon { width:31px; height:31px; font-size:11px; }.stat-label { font-size:9px; }.progress-stat strong { font-size:13px; }.progress-stat strong em { font-size:18px; }.world-card-header { flex-direction:column; padding:22px 18px 14px; }.world-meta { justify-content:flex-start; padding-top:0; }.chapter-nav { padding:0 18px 12px; }.map-viewport { height:650px; min-height:560px; }.map-stage { width:100%; min-width:100%; }.scene-heading { left:26px; }.scene-landmark { right:10%; }.map-node { transform:translate(-50%,-50%) scale(.9); }.node-tooltip { display:none; }.map-footer { padding-left:18px; padding-right:18px; }.challenge-sidebar { display:flex; }.support-grid { grid-template-columns:1fr; }.reflection-card { grid-column:auto; }.support-card { min-height:auto; }.current-card-top { padding:19px 17px 15px; }.current-card h2 { font-size:19px; }.card-divider { margin:0 17px; }.mission-block { padding:18px 17px 15px; }.verse-preview { margin-left:17px; margin-right:17px; }.quest-progress { padding-left:17px; padding-right:17px; }.reward-row { padding-left:17px; padding-right:17px; }.card-actions { padding-left:17px; padding-right:17px; }.last-played { padding-left:17px; padding-right:17px; }.quiz-modal { padding:24px 18px; } }
-@media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.001ms !important; animation-iteration-count:1 !important; scroll-behavior:auto !important; transition-duration:.001ms !important; } }
+.challenge-map-page { --ink:#234f49; --jade:#238f7c; min-height:calc(100dvh - 84px); padding:28px clamp(22px,3.2vw,56px) 42px; overflow:hidden; color:var(--ink); font-family:'Noto Sans SC','Microsoft YaHei',sans-serif; background:linear-gradient(180deg,rgba(248,250,246,.82),rgba(239,247,242,.92)),url('../assets/jade-paper-ambient.png') center top/cover; }
+.challenge-map-page * { box-sizing:border-box; } button,a { -webkit-tap-highlight-color:transparent; }
+.eyebrow { display:block; margin-bottom:6px; color:#84a399; font-size:9px; letter-spacing:.18em; }
+.challenge-head { display:grid; grid-template-columns:minmax(250px,.72fr) minmax(500px,1.32fr) minmax(380px,.84fr); align-items:center; gap:24px; width:min(100%,1580px); margin:0 auto 26px; }
+.title-block { display:flex; align-items:center; gap:17px; }.title-rule { width:4px; height:56px; border-radius:4px; background:linear-gradient(180deg,#237e70,#a8c9bd); }.title-block h1 { margin:0 0 5px; color:var(--ink)!important; font:600 clamp(26px,2.1vw,36px)/1.1 'Noto Serif SC','Songti SC',serif; letter-spacing:.08em; }.title-block p { margin:0; color:#7f938d; font-size:12px; letter-spacing:.04em; }
+.progress-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); min-height:70px; padding:12px 16px; border:1px solid rgba(89,134,123,.15); border-radius:17px; background:rgba(255,255,255,.68); box-shadow:0 9px 26px rgba(49,91,80,.05),inset 0 1px 0 rgba(255,255,255,.9); backdrop-filter:blur(10px); }.summary-item { display:flex; align-items:center; gap:10px; min-width:0; padding:0 10px; border-right:1px solid rgba(57,103,91,.09); }.summary-item:last-child { border-right:0; }.summary-icon { display:grid; place-items:center; flex:0 0 34px; width:34px; height:34px; border-radius:50%; }.summary-icon.green { color:#298e78; background:#e8f4ed; }.summary-icon.gold { color:#b9802f; background:#f7edd7; }.summary-icon.blue { color:#3e8e86; background:#e4f2f1; }.summary-item small { display:block; overflow:hidden; margin-bottom:2px; color:#879992; font-size:9px; white-space:nowrap; }.summary-item strong { display:block; overflow:hidden; color:#2b6860; font:600 16px 'Noto Serif SC',serif; text-overflow:ellipsis; white-space:nowrap; }.summary-item em { color:#8fa099; font:normal 10px 'Noto Sans SC',sans-serif; }
+.challenge-tools { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }.challenge-tools a { display:flex; align-items:center; justify-content:center; gap:6px; min-height:48px; padding:0 8px; border:1px solid rgba(101,142,130,.1); border-radius:12px; color:#477a70; background:rgba(255,255,255,.58); text-decoration:none; font-size:12px; white-space:nowrap; transition:.22s ease; }.challenge-tools a:hover { border-color:rgba(48,145,124,.28); color:#176f61; background:rgba(244,251,247,.95); transform:translateY(-2px); }
+.challenge-stage { display:grid; grid-template-columns:minmax(0,1fr) clamp(350px,27vw,430px); width:min(100%,1580px); min-height:552px; margin:0 auto; border:1px solid rgba(96,139,128,.18); border-radius:28px; background:rgba(245,248,242,.58); box-shadow:0 22px 58px rgba(42,84,73,.1); }.map-panel { position:relative; min-height:552px; overflow:hidden; border-radius:27px 0 0 27px; isolation:isolate; background:#dcebe1; user-select:none; }.map-art { position:absolute; inset:0; z-index:-3; width:100%; height:100%; object-fit:cover; object-position:50% 50%; filter:saturate(.9) contrast(.94) brightness(1.04); pointer-events:none; }.map-wash { position:absolute; inset:0; z-index:-2; pointer-events:none; background:linear-gradient(90deg,rgba(244,248,238,.1),rgba(255,250,238,.08) 60%,rgba(245,248,241,.45)),linear-gradient(180deg,rgba(255,255,255,.22),transparent 35%,rgba(248,244,225,.06)); }
+.map-copy { position:absolute; top:30px; left:34px; z-index:2; padding:14px 17px; border-left:3px solid rgba(35,126,112,.68); border-radius:0 12px 12px 0; background:rgba(255,255,250,.64); backdrop-filter:blur(8px); }.map-copy span { color:#6e9085; font-size:10px; }.map-copy h2 { margin:4px 0 3px; color:#285e56; font:600 24px 'Noto Serif SC',serif; }.map-copy p { margin:0; color:#759087; font-size:11px; }
+.chapter-stops { position:absolute; inset:0; z-index:3; }.chapter-stop { position:absolute; top:var(--stop-y); left:var(--stop-x); display:grid; justify-items:center; width:96px; padding:0; border:0; color:#416e64; background:transparent; cursor:pointer; transform:translate(-50%,-50%); transition:transform .2s ease; }.chapter-stop:hover,.chapter-stop.active { transform:translate(-50%,-50%) translateY(-4px); }.stop-orbit { display:grid; place-items:center; width:52px; height:52px; border:4px solid rgba(255,255,255,.87); border-radius:50%; color:#fff; background:linear-gradient(145deg,#68ae96,#2b8b75); box-shadow:0 0 0 1px rgba(47,127,104,.18),0 10px 22px rgba(35,88,71,.18); }.chapter-stop.active .stop-orbit { color:#9d6f2b; background:linear-gradient(145deg,#fff5cf,#e5bc61); box-shadow:0 0 0 8px rgba(255,246,196,.34),0 12px 28px rgba(94,78,34,.18); }.chapter-stop.locked .stop-orbit { color:#9d9d96; background:linear-gradient(145deg,#f0eee8,#cfcac0); }.chapter-stop strong { margin-top:7px; padding:4px 9px; border:1px solid rgba(255,255,255,.72); border-radius:8px; color:#54736a; background:rgba(250,249,240,.84); font:500 10px 'Noto Serif SC',serif; white-space:nowrap; }.chapter-stop small { margin-top:3px; color:#758b82; font-size:8px; }.map-route { position:absolute; right:9%; bottom:15%; left:12%; z-index:1; display:flex; align-items:center; justify-content:space-between; }.map-route::before { content:''; position:absolute; right:20px; left:20px; height:4px; border-radius:4px; background:rgba(255,255,255,.75); }.map-route span { position:relative; z-index:1; width:14px; height:14px; border:3px solid rgba(255,255,255,.82); border-radius:50%; background:#d3ded4; }.map-route span.active { background:#36947e; }.map-legend { position:absolute; right:24px; bottom:20px; z-index:4; display:flex; gap:12px; padding:8px 11px; border-radius:9px; color:#71867d; background:rgba(255,255,250,.7); font-size:9px; backdrop-filter:blur(7px); }.map-legend span { display:flex; align-items:center; gap:4px; }.legend-dot { width:7px; height:7px; border-radius:50%; background:#d3ded4; }.legend-dot.done { background:#4aa084; }.legend-dot.current { background:#d4a548; }
+.quest-card { position:relative; z-index:6; display:flex; flex-direction:column; min-height:552px; overflow:hidden; border-left:1px solid rgba(87,132,119,.15); border-radius:0 27px 27px 0; background:rgba(252,253,249,.91); box-shadow:-14px 0 34px rgba(64,99,87,.07); backdrop-filter:blur(13px); }.quest-landscape { position:relative; display:flex; align-items:center; justify-content:space-between; min-height:125px; padding:23px 25px; overflow:hidden; border-bottom:1px solid rgba(95,135,123,.14); background:linear-gradient(90deg,rgba(252,253,249,.94),rgba(243,248,240,.7)),url('../assets/challenge-map-landscape.png') 87% 7%/160% auto; }.quest-landscape::after { content:''; position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg,rgba(252,253,249,.98) 18%,rgba(252,253,249,.42) 66%,rgba(255,250,223,.05)); }.quest-landscape > * { position:relative; z-index:1; }.quest-landscape small { display:block; margin-bottom:5px; color:#81948e; font-size:10px; }.quest-landscape h2 { margin:0 0 7px; color:var(--ink)!important; font:600 24px/1.2 'Noto Serif SC',serif; letter-spacing:.03em; }.quest-landscape div > span { display:inline-flex; max-width:215px; overflow:hidden; padding:3px 9px; border-radius:7px; color:#368775; background:#e4f2eb; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }.moon-number { display:grid; place-items:center; width:62px; height:62px; border-radius:50%; color:#a1702b; background:radial-gradient(circle at 36% 34%,#fff6c4,#f5d77f); box-shadow:0 0 0 9px rgba(255,237,167,.16); font:500 23px 'Noto Serif SC',serif; }.quest-section { padding-right:25px; padding-left:25px; }.mission-copy { padding-top:18px; }.mission-copy strong,.verse-box > strong,.quest-progress strong { color:#317767; font-size:11px; }.mission-copy p { margin:7px 0 0; color:#6f837d; font-size:11px; line-height:1.7; }.verse-box { margin:16px 25px 0; padding:13px 15px 12px; border:1px solid rgba(198,157,88,.27); border-radius:11px; background:linear-gradient(135deg,rgba(255,252,241,.9),rgba(251,248,235,.58)); }.verse-box blockquote { margin:8px 0 5px; color:#8f6631; font:500 14px/1.8 'Noto Serif SC',serif; }.verse-box cite { color:#a98b5e; font-size:9px; font-style:normal; }.quest-progress { padding-top:17px; }.quest-progress > div:first-child { display:flex; align-items:center; justify-content:space-between; }.quest-progress > div:first-child span { color:#86968f; font-size:10px; }.progress-track { position:relative; display:flex; align-items:center; justify-content:space-between; margin-top:12px; }.progress-track::before { content:''; position:absolute; right:5px; left:5px; height:3px; border-radius:3px; background:#e3dec9; }.progress-track span { position:relative; z-index:1; width:12px; height:12px; border:2px solid #d8e2dc; border-radius:50%; background:#f7f8f3; }.progress-track span.filled { border-color:#81bea9; background:#5ba88f; }.locked-copy { display:flex; align-items:center; gap:14px; margin:auto 25px; padding:22px; border:1px solid rgba(94,132,121,.15); border-radius:15px; color:#71867f; background:rgba(242,246,241,.7); }.locked-copy > span { display:grid; place-items:center; width:48px; height:48px; border-radius:50%; color:#7c918a; background:#e4ebe6; }.locked-copy strong { color:#57766d; font-size:13px; }.locked-copy p { margin:5px 0 0; color:#899993; font-size:10px; }.quest-actions { display:grid; gap:10px; margin-top:auto; padding:18px 25px 23px; }.quest-actions button { min-height:43px; border-radius:10px; cursor:pointer; font-size:13px; transition:.2s ease; }.continue-button { display:flex; align-items:center; justify-content:center; gap:9px; border:0; color:#fff; background:linear-gradient(100deg,#1d846f,#2a9d87); box-shadow:0 9px 20px rgba(33,135,113,.2); }.start-button { border:1px solid rgba(36,138,117,.38); color:#278471; background:rgba(255,255,255,.55); }.quest-actions button:hover:not(:disabled) { transform:translateY(-2px); }.quest-actions button:disabled { opacity:.48; cursor:not-allowed; }
+.level-browser { width:min(100%,1580px); margin:22px auto 0; padding:28px; border:1px solid rgba(93,137,124,.15); border-radius:22px; background:rgba(255,255,255,.74); box-shadow:0 15px 40px rgba(42,84,73,.06); backdrop-filter:blur(12px); }.browser-heading { display:flex; align-items:end; justify-content:space-between; gap:24px; }.browser-heading h2 { margin:0 0 5px; color:#285e56!important; font:600 25px 'Noto Serif SC',serif; }.browser-heading p { margin:0; color:#80948c; font-size:11px; }.level-jump { display:flex; align-items:center; gap:7px; color:#789087; font-size:11px; }.level-jump input { width:66px; padding:8px 7px; border:1px solid #d8e5dd; border-radius:8px; color:#2d6b60; background:#fbfdf9; text-align:center; }.level-jump button { display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:8px; color:#fff; background:#268c77; cursor:pointer; }.chapter-tabs { display:grid; grid-template-columns:repeat(10,minmax(0,1fr)); gap:8px; margin-top:24px; padding-bottom:13px; border-bottom:1px solid #e3ece6; }.chapter-tabs button { display:grid; justify-items:start; gap:3px; min-height:68px; padding:10px 11px; border:1px solid #e1ebe5; border-radius:11px; color:#739087; background:rgba(249,252,248,.72); cursor:pointer; text-align:left; transition:.2s ease; }.chapter-tabs button:hover,.chapter-tabs button.active { border-color:rgba(46,145,123,.42); color:#277c6c; background:#eaf5ee; transform:translateY(-2px); }.chapter-tabs span { color:#a8b8b0; font-size:9px; letter-spacing:.12em; }.chapter-tabs strong { color:inherit; font:500 12px 'Noto Serif SC',serif; }.chapter-tabs small { font-size:9px; }.level-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; padding-top:18px; }.level-card { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:9px; min-height:58px; padding:8px 10px 8px 8px; border:1px solid #e1ebe5; border-radius:11px; color:#52746a; background:rgba(252,254,250,.86); cursor:pointer; text-align:left; transition:.2s ease; }.level-card:hover,.level-card.selected { border-color:rgba(43,145,121,.52); background:#eef8f2; transform:translateY(-2px); }.level-card.is-locked { color:#abb7b0; background:rgba(244,247,243,.76); cursor:not-allowed; }.level-number { display:grid; place-items:center; width:32px; height:32px; border-radius:50%; color:#fff; background:#68ae96; font-size:11px; }.is-done .level-number { color:#377968; background:#dcefe5; }.is-current .level-number { color:#996e2e; background:#f4d580; }.is-locked .level-number { color:#aab3ac; background:#e4e9e4; }.level-info { min-width:0; }.level-info strong,.level-info small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.level-info strong { color:inherit; font:500 12px 'Noto Serif SC',serif; }.level-info small { margin-top:3px; color:#93a49d; font-size:9px; }.level-stars { display:flex; gap:1px; color:#d9c8a3; }.is-done .level-stars { color:#bf9049; }
+.challenge-dock { display:grid; grid-template-columns:1.05fr 1.15fr .9fr; width:min(100%,1480px); min-height:138px; margin:22px auto 0; border:1px solid rgba(93,137,124,.15); border-radius:18px; background:rgba(255,255,255,.74); box-shadow:0 15px 40px rgba(42,84,73,.06); backdrop-filter:blur(12px); }.challenge-dock article { padding:18px 24px; border-right:1px solid rgba(90,133,121,.13); }.challenge-dock article:last-child { border-right:0; }.dock-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }.dock-heading > strong { display:flex; align-items:center; gap:6px; color:#386e63; font-size:12px; }.dock-heading a { color:#569284; font-size:9px; text-decoration:none; }.dock-heading > span { display:flex; align-items:center; gap:3px; color:#85978f; font-size:9px; }.dock-heading b { color:#a77932; font-size:13px; }.friend-row { display:flex; align-items:center; gap:24px; margin-top:15px; }.friend-item { position:relative; display:grid; grid-template-columns:36px auto; align-items:center; gap:8px; }.rank-badge { position:absolute; top:-6px; left:-5px; z-index:1; display:grid; place-items:center; width:18px; height:18px; border-radius:50%; color:#fff; background:#bf8a37; font-size:9px; }.friend-seal { display:grid; place-items:center; width:36px; height:36px; border:2px solid #fff; border-radius:50%; color:#f1e4be; background:#436d63; font:500 14px 'Noto Serif SC',serif; }.seal-2 { color:#edf2dd; background:#668677; }.seal-3 { color:#f2dfd0; background:#82665d; }.friend-item div strong,.friend-item div small { display:block; white-space:nowrap; }.friend-item div strong { color:#5d756e; font-size:10px; }.friend-item div small { margin-top:2px; color:#92a099; font-size:9px; }.reward-road { position:relative; display:flex; justify-content:space-between; margin-top:18px; }.reward-road::before { content:''; position:absolute; top:20px; right:10%; left:10%; border-top:2px dotted #cbdcd4; }.reward-item { position:relative; z-index:1; display:grid; justify-items:center; gap:4px; color:#8a9d95; }.reward-item > span { display:grid; place-items:center; width:40px; height:40px; border:1px solid #d7dfda; border-radius:50%; color:#8fa199; background:#f4f6f2; }.reward-item.claimed > span { color:#b37e30; border-color:#e7ca91; background:#fbf1db; }.reward-item small { font-size:8px; }.tip-block { display:flex; align-items:center; gap:15px; background:linear-gradient(115deg,rgba(250,252,248,.74),rgba(231,242,236,.68)); }.tip-block > svg { flex:0 0 auto; color:#84a69a; }.tip-block strong { color:#58736b; font-size:11px; }.tip-block p { margin:7px 0 0; color:#81928b; font:11px/1.75 'Noto Serif SC',serif; }
+.toast-message { position:fixed; z-index:80; left:50%; bottom:32px; padding:11px 18px; border:1px solid rgba(255,255,255,.55); border-radius:10px; color:#fff; background:rgba(26,83,72,.92); box-shadow:0 12px 30px rgba(25,76,66,.22); transform:translateX(-50%); font-size:12px; }.toast-enter-active,.toast-leave-active { transition:.22s ease; }.toast-enter-from,.toast-leave-to { opacity:0; transform:translate(-50%,8px); }
+@media (max-width:1320px) { .challenge-head { grid-template-columns:minmax(230px,.6fr) minmax(500px,1fr); }.challenge-tools { grid-column:1 / -1; justify-self:end; width:min(620px,100%); }.challenge-stage { grid-template-columns:minmax(0,1fr) 370px; }.chapter-tabs { grid-template-columns:repeat(5,minmax(0,1fr)); }.friend-row { gap:14px; } }
+@media (max-width:980px) { .challenge-map-page { padding-right:20px; padding-left:20px; }.challenge-head { grid-template-columns:1fr; }.progress-summary { order:3; }.challenge-tools { grid-column:auto; justify-self:stretch; width:100%; }.challenge-stage { grid-template-columns:1fr; }.map-panel { min-height:570px; border-radius:27px 27px 0 0; }.quest-card { min-height:auto; border-top:1px solid rgba(87,132,119,.15); border-left:0; border-radius:0 0 27px 27px; }.quest-actions { margin-top:12px; }.level-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }.challenge-dock { grid-template-columns:1fr 1fr; }.tip-block { grid-column:1 / -1; border-top:1px solid rgba(90,133,121,.13); } }
+@media (max-width:680px) { .challenge-map-page { padding:20px 12px 30px; }.title-block h1 { font-size:28px; }.progress-summary { grid-template-columns:repeat(2,1fr); gap:10px 0; }.summary-item:nth-child(2) { border-right:0; }.challenge-tools { grid-template-columns:repeat(2,1fr); }.map-panel { min-height:520px; }.map-copy { top:20px; left:20px; }.chapter-stop { transform:translate(-50%,-50%) scale(.84); }.chapter-stop:hover,.chapter-stop.active { transform:translate(-50%,-50%) translateY(-4px) scale(.84); }.map-legend { right:12px; bottom:12px; }.quest-landscape { padding:20px 18px; }.quest-landscape h2 { font-size:21px; }.quest-section { padding-right:18px; padding-left:18px; }.verse-box { margin-right:18px; margin-left:18px; }.quest-actions { padding-right:18px; padding-left:18px; }.browser-heading { display:block; }.level-jump { margin-top:16px; }.level-browser { padding:20px 14px; }.chapter-tabs { grid-template-columns:repeat(2,minmax(0,1fr)); }.level-grid { grid-template-columns:1fr; }.challenge-dock { grid-template-columns:1fr; }.challenge-dock article { border-right:0; border-bottom:1px solid rgba(90,133,121,.13); }.challenge-dock article:last-child { border-bottom:0; }.tip-block { grid-column:auto; } }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:.001ms!important; animation-duration:.001ms!important; } }
 </style>
 
-<style scoped>
-/* 山河长卷重构：地图是场景本体，UI 只做轻量引导。 */
-.challenge-map-page::before { background:radial-gradient(ellipse at 7% 25%,rgba(123,164,148,.16),transparent 34%),radial-gradient(ellipse at 91% 68%,rgba(202,175,111,.09),transparent 33%); opacity:.34; }
-.world-atlas { overflow:visible; border:0; background:transparent; box-shadow:none; backdrop-filter:none; }
-.world-atlas .world-card-header { padding:20px 8px 18px; }
-.world-atlas .world-card-header h2 { font-size:26px; letter-spacing:.04em; }
-.world-atlas .world-meta { padding-right:8px; }
-.world-atlas .map-viewport { height:auto; min-height:0; overflow:visible; border:0; background:transparent; cursor:default; scrollbar-width:none; }
-.world-atlas .map-viewport::-webkit-scrollbar { display:none; }
-.world-atlas .map-stage { width:100%; min-width:0; overflow:hidden; isolation:isolate; background:#dce8dd; box-shadow:none; }
-.world-atlas .map-paper { opacity:1; background-image:linear-gradient(180deg,rgba(245,249,239,.08),rgba(228,239,228,.02) 38%,rgba(250,237,204,.12) 73%,rgba(247,231,198,.18)),url('../assets/poetry-landscape-scroll-v2.png'); background-size:100% 100%; background-position:center; background-repeat:no-repeat; }
-.world-atlas .map-paper::before { content:''; position:absolute; inset:0; background:radial-gradient(ellipse at 12% 8%,rgba(255,255,255,.46),transparent 28%),radial-gradient(ellipse at 87% 37%,rgba(255,255,255,.3),transparent 31%),linear-gradient(90deg,rgba(230,243,230,.27),transparent 20%,transparent 78%,rgba(217,233,220,.2)); mix-blend-mode:screen; pointer-events:none; }
-.world-atlas .map-paper::after { content:''; position:absolute; inset:0; background:linear-gradient(180deg,transparent 3%,rgba(244,246,235,.17) 20%,transparent 31%,rgba(245,249,239,.17) 50%,transparent 61%,rgba(251,237,207,.16) 82%,transparent 96%); opacity:.9; pointer-events:none; }
-.world-atlas .scene-band { background:linear-gradient(90deg,rgba(209,230,213,.2),transparent 34%,rgba(255,255,255,.1) 66%,rgba(225,214,183,.14)); opacity:.55; mask-image:linear-gradient(180deg,transparent 0,#000 18%,#000 78%,transparent 100%); pointer-events:none; }
-.world-atlas .scene-wash { background:linear-gradient(180deg,rgba(247,249,238,.14),transparent 30%,rgba(255,250,231,.12)); }
-.world-atlas .scene-heading { left:5%; top:36px; display:flex; align-items:flex-start; gap:9px; padding:6px 13px 8px 0; border-left:1px solid rgba(169,126,70,.52); color:#5b7d70; background:linear-gradient(90deg,rgba(250,248,232,.64),transparent); opacity:.82; transform:none; }
-.world-atlas .scene-heading.focused { opacity:1; transform:translateX(5px); }
-.world-atlas .scene-number { width:24px; height:36px; margin-left:-13px; border:1px solid rgba(184,137,74,.5); border-radius:3px 3px 10px 10px; color:#a27337; background:rgba(252,244,218,.88); font-size:9px; box-shadow:0 4px 10px rgba(101,89,54,.08); }
-.world-atlas .scene-heading strong { color:#3f6e60; font-size:16px; }
-.world-atlas .scene-heading small { color:#809a8b; font-size:9px; }
-.world-atlas .route-shadow { stroke:rgba(54,91,72,.12); stroke-width:12; }
-.world-atlas .route-base { stroke:rgba(249,244,220,.86); stroke-width:5.5; stroke-dasharray:none; }
-.world-atlas .route-completed { stroke:#5c9a7f; stroke-width:3.5; opacity:.72; }
-.world-atlas .route-current { stroke:#d6a35a; stroke-width:3.2; opacity:.88; }
-.world-atlas .map-node { width:40px; height:48px; }
-.world-atlas .node-halo { width:33px; height:33px; border-color:rgba(250,249,229,.55); background:rgba(239,246,232,.2); box-shadow:0 3px 8px rgba(35,81,64,.1); }
-.world-atlas .node-pin { width:27px; height:27px; border-color:rgba(87,133,111,.66); color:#467d6b; background:rgba(234,245,231,.82); box-shadow:0 2px 5px rgba(40,100,78,.11); font-size:9px; }
-.world-atlas .node-done { opacity:.74; }
-.world-atlas .node-locked { opacity:.42; }
-.world-atlas .node-current { z-index:8; }
-.world-atlas .node-current .node-pin { width:52px; height:52px; box-shadow:0 0 0 7px rgba(203,156,75,.12),0 8px 18px rgba(165,117,42,.16); }
-.world-atlas .node-current .node-halo { width:68px; height:68px; }
-.world-atlas .node-special .node-pin { width:48px; height:48px; }
-.world-atlas .node-special .node-halo { width:60px; height:60px; }
-.world-atlas .map-end-mark { right:7%; bottom:52px; opacity:.86; }
-.world-atlas .map-footer { padding:15px 8px 17px; color:#879b90; background:transparent; }
-.world-atlas .map-footer-line { background:linear-gradient(90deg,rgba(139,175,159,.26),transparent); }
-
-@media (max-width:900px) {
-  .world-atlas .world-card-header { padding-left:0; padding-right:0; }
-}
-@media (max-width:660px) {
-  .world-atlas .world-card-header { padding:20px 0 16px; }
-  .world-atlas .world-card-header h2 { font-size:23px; }
-  .world-atlas .world-meta { padding-right:0; }
-  .world-atlas .map-stage { min-width:0; }
-  .world-atlas .scene-heading { left:7%; transform:scale(.88); transform-origin:left top; }
-  .world-atlas .scene-heading.focused { transform:translateX(3px) scale(.9); }
-  .world-atlas .map-node { transform:translate(-50%,-50%) scale(.86); }
-  .world-atlas .node-current { transform:translate(-50%,-50%) scale(.9); }
-  .world-atlas .node-tooltip { display:none; }
-  .world-atlas .map-footer { padding-left:0; padding-right:0; }
-}
+<style>
+#app.challenge-shell main.container { min-height:calc(100dvh - 84px); padding:0!important; }
+#app.challenge-shell main.container > .challenge-map-page { width:100%; max-width:none!important; margin:0!important; border:0!important; border-radius:0!important; background-color:#f2f7f2!important; box-shadow:none!important; backdrop-filter:none!important; }
+#app.challenge-shell main.container > .challenge-map-page::before { display:none!important; }
+#app.challenge-shell::before { display:none; }
+#app.challenge-shell .dynamic-elements { opacity:.28; }
 </style>

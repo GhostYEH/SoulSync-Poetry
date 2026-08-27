@@ -108,6 +108,8 @@
 </template>
 
 <script>
+import { askConfirm, notify } from '../../services/appFeedback'
+
 export default {
   name: 'CreationRecords',
   data() {
@@ -144,7 +146,7 @@ export default {
         }
       } catch (error) {
         console.error('加载作品列表失败:', error);
-        alert('加载作品列表失败，请重试');
+        notify('加载作品列表失败，请重试', 'error');
       }
     },
     
@@ -168,11 +170,11 @@ export default {
         if (data.success && data.data) {
           this.selectedWork = data.data;
         } else {
-          alert(data.message || '加载作品详情失败');
+          notify(data.message || '加载作品详情失败', 'error');
         }
       } catch (error) {
         console.error('加载作品详情失败:', error);
-        alert('加载作品详情失败，请重试');
+        notify('加载作品详情失败，请重试', 'error');
       }
     },
     
@@ -181,7 +183,7 @@ export default {
     },
     
     async deleteWork(id) {
-      if (confirm('确定要删除这篇作品吗？')) {
+      if (await askConfirm('确定要删除这篇作品吗？', { title: '删除作品', confirmText: '删除', danger: true })) {
         try {
           const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
           const response = await fetch(`${baseUrl}/creation/works/${id}`, {
@@ -193,14 +195,14 @@ export default {
           
           const data = await response.json();
           if (data.success && data.message === '作品删除成功') {
-            alert('作品删除成功');
+            notify('作品删除成功', 'success');
             this.loadWorks();
           } else {
-            alert('作品删除失败，请重试');
+            notify('作品删除失败，请重试', 'error');
           }
         } catch (error) {
           console.error('删除作品失败:', error);
-          alert('删除作品失败，请重试');
+          notify('删除作品失败，请重试', 'error');
         }
       }
     },

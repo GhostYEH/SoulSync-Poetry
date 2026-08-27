@@ -136,6 +136,15 @@ const routes = [
     }
   },
   {
+    path: '/challenge/level/:level',
+    name: 'ChallengeLevel',
+    component: () => import('../views/ChallengeQuiz.vue'),
+    meta: {
+      title: '诗词闯关作答 - 古诗词学习系统',
+      requiresAuth: true
+    }
+  },
+  {
     path: '/challenge/battle',
     name: 'ChallengeBattle',
     component: () => import('../views/ChallengeBattle.vue'),
@@ -253,10 +262,68 @@ const router = createRouter({
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
-      return { ...savedPosition, behavior: 'instant' }
+      return { ...savedPosition, behavior: 'auto' }
     } else {
-      return { top: 0, behavior: 'instant' }
+      // 导航时立即定位，避免 html 的平滑滚动把“回到顶部”展示成一段动画。
+      return { left: 0, top: 0, behavior: 'auto' }
     }
+  }
+})
+
+// 仅在用户即将访问或浏览器空闲时预取页面模块。这样不改变路由与界面，
+// 但能消除首次进入常用页面时等待异步组件下载、解析的空档。
+const prefetchedLoaders = new Map()
+
+export function prefetchRoute(path) {
+  const record = router.resolve(path).matched.at(-1)
+  const loader = record?.components?.default
+
+  if (typeof loader !== 'function') return Promise.resolve()
+  if (prefetchedLoaders.has(loader)) return prefetchedLoaders.get(loader)
+
+  const loadPromise = Promise.resolve(loader()).catch((error) => {
+    // 预取失败时允许真正导航再次尝试加载，而不影响原有路由行为。
+    prefetchedLoaders.delete(loader)
+    throw error
+  })
+  prefetchedLoaders.set(loader, loadPromise)
+  return loadPromise
+}
+
+function warmUpCommonRoutes() {
+  const commonRoutes = [
+    '/search',
+    '/dashboard',
+    '/feihualing/single',
+    '/challenge',
+    '/creation',
+    '/profile',
+    '/learning-path',
+    '/parkour',
+    '/card-catch'
+  ]
+  let index = 0
+  const requestIdle = window.requestIdleCallback
+    ? (callback) => window.requestIdleCallback(callback, { timeout: 1200 })
+    : (callback) => window.setTimeout(callback, 180)
+
+  const warmNext = () => {
+    if (index >= commonRoutes.length) return
+    requestIdle(() => {
+      // 预取是尽力而为的后台工作；真正导航仍由 Vue Router 管理错误。
+      prefetchRoute(commonRoutes[index++]).catch(() => {})
+      window.setTimeout(warmNext, 120)
+    })
+  }
+
+  warmNext()
+}
+
+router.isReady().then(() => {
+  if (document.readyState === 'complete') {
+    warmUpCommonRoutes()
+  } else {
+    window.addEventListener('load', warmUpCommonRoutes, { once: true })
   }
 })
 

@@ -189,6 +189,7 @@
 
 <script>
 import { ref, watch, onMounted } from 'vue';
+import { api } from '../../../services/api.js';
 
 const GENRE_CONFIG = {
   '五言绝句': { lines: 4, charactersPerLine: 5 },
@@ -592,13 +593,33 @@ export default {
     const structure = ref(null);
     const localLoading = ref(false);
 
-    const loadStructure = () => {
+    const loadStructure = async () => {
       localLoading.value = true;
-      
-      setTimeout(() => {
+      try {
+        const response = await api.creationWorkbench.getStructureGuide({
+          genre: props.genre,
+          theme: props.theme,
+          keywords: props.keywords,
+          mood: props.mood
+        });
+        const result = response.data || response;
+        if (!result?.structure?.length) throw new Error('结构引导数据不完整');
+        structure.value = {
+          ...buildStructureData(props.genre, props.theme, props.keywords, props.mood),
+          ...result,
+          // 后端结构字段与本地展示字段兼容，避免 AI 未返回示例时出现空内容。
+          structure: result.structure.map((item, index) => ({
+            ...item,
+            role: item.role || ['起', '承', '转', '合'][index] || '续',
+            example: item.example || ''
+          }))
+        };
+      } catch (error) {
+        console.warn('获取 AI 结构引导失败，已使用本地结构模板：', error);
         structure.value = buildStructureData(props.genre, props.theme, props.keywords, props.mood);
+      } finally {
         localLoading.value = false;
-      }, 100);
+      }
     };
 
     watch([() => props.genre, () => props.theme], () => {

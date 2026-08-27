@@ -28,7 +28,8 @@ export default defineConfig(({ mode }) => {
     hmr: true,
     // 提高服务器响应速度
     port: 5173,
-    open: true
+    // 避免开发服务启动或重启时强行唤起已经最小化的浏览器。
+    open: false
   },
     // 构建优化
     build: {

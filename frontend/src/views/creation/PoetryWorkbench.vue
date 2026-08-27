@@ -79,7 +79,17 @@
       <div class="workspace">
         <div class="workspace-topline">
           <div><span class="workbench-eyebrow">NOW CREATING</span><strong>{{ activeMode?.title }}</strong></div>
-          <span class="workspace-status">{{ currentMode === 'guided' ? `步骤 ${currentStep} / 3` : '自由创作模式' }}</span>
+          <span class="workspace-status">{{ currentMode === 'guided' ? `步骤 ${currentStep} / 3` : activeMode?.flow }}</span>
+        </div>
+        <div class="workflow-brief">
+          <div class="workflow-brief-copy">
+            <span>当前任务</span>
+            <strong>{{ modeGuide.title }}</strong>
+            <p>{{ modeGuide.description }}</p>
+          </div>
+          <div class="workflow-brief-pills" aria-label="本环节支持的 AI 能力">
+            <span v-for="item in modeGuide.tools" :key="item">{{ item }}</span>
+          </div>
         </div>
 
         <transition name="slide-fade" mode="out-in">
@@ -135,11 +145,13 @@
               :is-loading="isLoading"
               :score="currentScore"
               :keyword="feihuaDraft.keyword"
+              :keyword-info="feihuaKeywordInfo"
               :is-polishing="isPolishing"
               :polish-result="polishResult"
               @update:title="feihuaDraft.title = $event"
               @update:content="feihuaDraft.content = $event"
               @score="handleFeihuaScore"
+              @request-keyword="handleFeihuaKeyword"
               @change:keyword="feihuaDraft.keyword = $event"
               @polish="handleFeihuaPolish"
               @apply="handleFeihuaApplyPolish"
@@ -202,6 +214,7 @@ import PoemScorer from './components/PoemScorer.vue';
 import FeihuaMode from './components/FeihuaMode.vue';
 import ChainMode from './components/ChainMode.vue';
 import { api } from '../../services/api.js';
+import { notify } from '../../services/appFeedback.js';
 import sceneArt from '../../assets/poetry-workbench-loop.png';
 
 export default {
@@ -223,21 +236,24 @@ export default {
       {
         id: 'guided',
         title: '引导创作',
-        desc: '三步走，轻松学会诗词创作',
+        desc: '从主题到成诗，一步步写出自己的作品',
         icon: '📜',
-        badge: '推荐'
+        badge: '推荐',
+        flow: '灵感 · 结构 · 落笔'
       },
       {
         id: 'feihua',
         title: '飞花令创作',
-        desc: '指定关键字，创意无限',
-        icon: '🌸'
+        desc: 'AI 出题，以一字写出你的诗意',
+        icon: '🌸',
+        flow: '抽题 · 创作 · 评审'
       },
       {
         id: 'chain',
         title: '接龙创作',
-        desc: '与AI轮流，句句相扣',
-        icon: '🔗'
+        desc: '与 AI 一人一句，把意境接下去',
+        icon: '🔗',
+        flow: '定题 · 轮写 · 成篇'
       }
     ];
 
@@ -253,6 +269,20 @@ export default {
     const currentStepCopy = computed(() => {
       if (currentMode.value !== 'guided') return activeMode.value?.desc || '用另一种方式写下心中所想';
       return ['先把想写的事说清楚', '让意象和情绪彼此照应', '把灵感落成可以保存的句子'][currentStep.value - 1];
+    });
+    const modeGuide = computed(() => {
+      if (currentMode.value === 'feihua') {
+        return { title: '以一字起意', description: '抽取关键字后自然入诗，完成后获得关键字、意境与韵律评审。', tools: ['AI 抽题', '意象联想', '多维评审'] };
+      }
+      if (currentMode.value === 'chain') {
+        return { title: '与 AI 对写', description: '设定主题和体裁后轮流落句，系统会持续守住字数、节奏与上下句衔接。', tools: ['AI 续句', '字数校验', '进度留存'] };
+      }
+      const guides = [
+        { title: '先找到这一首诗的心意', description: '告诉 AI 想写的场景或情绪，获得可选择的意象与起笔方向。', tools: ['灵感发散', '关键词', '情绪基调'] },
+        { title: '让句子有清晰的去处', description: '用起承转合组织画面和情感，落笔前先知道每一句该承担什么。', tools: ['结构引导', '韵律提示', '避坑建议'] },
+        { title: '把灵感写成自己的作品', description: '逐句写作、随时请求续写，再用 AI 润色与评分完成最后打磨。', tools: ['续写建议', '润色', '作品评分'] }
+      ];
+      return guides[currentStep.value - 1];
     });
 
     // 诗词草稿数据
@@ -272,6 +302,7 @@ export default {
       title: '',
       content: ''
     });
+    const feihuaKeywordInfo = ref(null);
 
     // 状态
     const isLoading = ref(false);
@@ -308,6 +339,7 @@ export default {
       feihuaDraft.keyword = '';
       feihuaDraft.title = '';
       feihuaDraft.content = '';
+      feihuaKeywordInfo.value = null;
       currentScore.value = null;
       polishResult.value = null;
     };
@@ -386,9 +418,9 @@ export default {
           const result = response.data || response;
 
           if (result && result.suggestions) {
-            const recs = result.suggestions.map((line, i) => ({
-              line,
-              reason: result.reasons?.[i] || 'AI推荐'
+          const recs = result.suggestions.map((item, i) => ({
+              line: typeof item === 'string' ? item : item?.line,
+              reason: typeof item === 'string' ? (result.reasons?.[i] || 'AI推荐') : (item?.reason || 'AI推荐')
             }));
             poemEditor.value.setRecommendations(recs);
           }
@@ -415,7 +447,8 @@ export default {
           theme,
           genre,
           keywords,
-          structure: ''
+          structure: '',
+          existingLines: existingLines?.filter(line => line?.trim()) || []
         });
         const result = response.data || response;
 
@@ -547,6 +580,26 @@ export default {
       hideTypewriterEffect();
     };
 
+    // 飞花令关键字由后端生成，同时返回与该字匹配的意象，避免前端与 AI 结果脱节。
+    const handleFeihuaKeyword = async (difficulty) => {
+      isLoading.value = true;
+      try {
+        const response = await api.creationWorkbench.getFeihuaKeyword(difficulty);
+        const result = response.data || response;
+        if (!result?.keyword) throw new Error('未获取到关键字');
+        feihuaKeywordInfo.value = result;
+        feihuaDraft.keyword = result.keyword;
+      } catch (error) {
+        console.error('获取飞花令关键字失败:', error);
+        // 保持可继续创作；失败提示和兜底仅用于网络不可用时。
+        const fallback = { keyword: '月', relatedWords: ['清辉', '孤舟', '归雁', '寒江', '乡关'] };
+        feihuaKeywordInfo.value = fallback;
+        feihuaDraft.keyword = fallback.keyword;
+      } finally {
+        isLoading.value = false;
+      }
+    };
+
     // 飞花令评分
     const handleFeihuaScore = async () => {
       if (!feihuaDraft.content) return;
@@ -563,7 +616,7 @@ export default {
         const result = response.data || response;
 
         currentScore.value = result;
-        showScorePanel.value = true;
+        showScorePanel.value = false;
       } catch (error) {
         console.error('飞花令评分失败:', error);
         // 模拟评分
@@ -587,7 +640,7 @@ export default {
           },
           suggestions: '关键字使用出色，可进一步提升韵律美感'
         };
-        showScorePanel.value = true;
+        showScorePanel.value = false;
       }
 
       isLoading.value = false;
@@ -732,7 +785,7 @@ export default {
         await api.creationWorkbench.saveWork(workData);
 
         showScorePanel.value = false;
-        alert('作品保存成功！');
+        notify('作品保存成功！', 'success');
 
         // 重置状态
         resetDraft();
@@ -742,7 +795,7 @@ export default {
         router.push('/creation/records');
       } catch (error) {
         console.error('保存失败:', error);
-        alert('保存失败，请重试');
+        notify('保存失败，请重试', 'error');
       }
     };
 
@@ -754,11 +807,13 @@ export default {
       steps,
       activeMode,
       currentStepCopy,
+      modeGuide,
       sceneArt,
 
       // 数据
       poemDraft,
       feihuaDraft,
+      feihuaKeywordInfo,
 
       // 状态
       isLoading,
@@ -786,6 +841,7 @@ export default {
       handleApplyPolish,
       handleScore,
       handleFeihuaScore,
+      handleFeihuaKeyword,
       handleFeihuaPolish,
       handleFeihuaApplyPolish,
       handleChainStart,
@@ -1043,6 +1099,54 @@ export default {
   position: relative;
   z-index: 1;
 }
+
+.workspace-topline {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 4px 14px;
+}
+
+.workspace-topline > div {
+  display: grid;
+  gap: 5px;
+}
+
+.workspace-topline strong {
+  color: #473b2b;
+  font: 700 24px/1.1 'Noto Serif SC', serif;
+}
+
+.workspace-status {
+  padding: 7px 12px;
+  border: 1px solid rgba(92, 126, 111, 0.22);
+  border-radius: 999px;
+  background: rgba(245, 251, 247, 0.9);
+  color: #477463;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.workflow-brief {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 0 16px;
+  padding: 16px 20px;
+  border: 1px solid rgba(152, 123, 82, 0.16);
+  border-left: 3px solid #b58a52;
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(255, 250, 241, 0.92), rgba(247, 252, 249, 0.76));
+}
+
+.workflow-brief-copy { display: grid; gap: 4px; }
+.workflow-brief-copy > span { color: #a17b4b; font-size: 11px; letter-spacing: 0.14em; }
+.workflow-brief-copy strong { color: #503f2c; font: 700 17px/1.25 'Noto Serif SC', serif; }
+.workflow-brief-copy p { margin: 0; color: #806f5c; font-size: 13px; line-height: 1.65; }
+.workflow-brief-pills { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.workflow-brief-pills span { padding: 6px 9px; border-radius: 999px; background: rgba(82, 128, 108, 0.11); color: #477463; font-size: 12px; white-space: nowrap; }
 
 /* 引导工作区 */
 .guided-workspace {
@@ -1309,9 +1413,15 @@ export default {
     margin: 0 8px;
     margin-bottom: 28px;
   }
+
+  .workflow-brief { align-items: flex-start; flex-direction: column; }
+  .workflow-brief-pills { justify-content: flex-start; }
 }
 
 @media (max-width: 600px) {
+  .workspace-topline { align-items: flex-start; flex-direction: column; }
+  .workflow-brief { padding: 14px 15px; }
+  .workspace-topline strong { font-size: 21px; }
   .title-section {
     margin-bottom: 28px;
   }

@@ -1142,7 +1142,7 @@ router.post('/tts', aiRateLimiter, async function(req, res) {
     }
 
     const audioData = await aiService.generateTTS(text);
-    res.set('Content-Type', 'audio/mp3');
+    res.set('Content-Type', 'audio/wav');
     res.send(audioData);
   } catch (error) {
     console.error('语音合成失败:', error);

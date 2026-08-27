@@ -1,310 +1,234 @@
+
 <template>
-  <div class="error-book-page">
-    <!-- 页眉 -->
-    <div class="page-header">
-      <div class="header-left">
-        <router-link to="/challenge" class="back-btn">
-          <span class="back-icon">←</span>
-          <span>返回闯关</span>
-        </router-link>
-      </div>
-      <div class="header-center">
-        <div class="page-title-wrap">
-          <span class="title-icon">错</span>
-          <h1 class="page-title">诗词错题本</h1>
-        </div>
-        <p class="page-subtitle">把错过的，再读一遍</p>
-      </div>
-      <div class="header-right">
-        <button class="header-action-btn" @click="startSmartReview" :disabled="errors.length === 0">
-          <span class="btn-icon">✦</span>
-          <span>智能复习</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 加载状态 -->
-    <div v-if="loading" class="loading-section">
-      <div class="loading-cards">
-        <div v-for="i in 3" :key="i" class="skeleton-card">
-          <div class="skeleton-line wide"></div>
-          <div class="skeleton-line medium"></div>
-          <div class="skeleton-line narrow"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 空状态 -->
-    <div v-else-if="errors.length === 0" class="empty-state">
-      <div class="empty-illustration">
-        <svg width="120" height="120" viewBox="0 0 120 120" fill="none">
-          <circle cx="60" cy="60" r="55" fill="rgba(205,133,63,0.08)" stroke="rgba(205,133,63,0.2)" stroke-width="2"></circle>
-          <path d="M40 55C40 55 48 45 60 45C72 45 80 55 80 55" stroke="#cd853f" stroke-width="2.5" stroke-linecap="round"></path>
-          <path d="M38 68C38 68 48 78 60 78C72 78 82 68 82 68" stroke="#cd853f" stroke-width="2.5" stroke-linecap="round"></path>
-          <circle cx="45" cy="50" r="3" fill="#cd853f"></circle>
-          <circle cx="75" cy="50" r="3" fill="#cd853f"></circle>
-        </svg>
-      </div>
-      <h3>暂无错题记录</h3>
-      <p>继续保持，诗词之路任重道远</p>
-      <router-link to="/challenge" class="action-link-btn">
-        去闯关练兵
-      </router-link>
-    </div>
-
-    <!-- 主内容 -->
-    <div v-else class="main-content">
-
-      <!-- 第一行：统计数据 + 图表 -->
-      <div class="stats-row">
-        <!-- 统计卡片组 -->
-        <div class="stats-cards">
-          <div class="stat-card glass-card">
-            <div class="stat-card-inner">
-              <div class="stat-icon total-icon">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-                </svg>
-              </div>
-              <div class="stat-info">
-                <span class="stat-value">{{ stats.total }}</span>
-                <span class="stat-label">总错题数</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="stat-card glass-card">
-            <div class="stat-card-inner">
-              <div class="stat-icon mastered-icon">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
-                </svg>
-              </div>
-              <div class="stat-info">
-                <span class="stat-value mastered">{{ stats.mastered }}</span>
-                <span class="stat-label">已掌握</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="stat-card glass-card">
-            <div class="stat-card-inner">
-              <div class="stat-icon week-icon">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-                </svg>
-              </div>
-              <div class="stat-info">
-                <span class="stat-value week">{{ stats.weekCount }}</span>
-                <span class="stat-label">本周新增</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="stat-card glass-card">
-            <div class="stat-card-inner">
-              <div class="stat-icon rate-icon">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
-                </svg>
-              </div>
-              <div class="stat-info">
-                <span class="stat-value rate">{{ masteryRate }}%</span>
-                <span class="stat-label">掌握率</span>
-              </div>
-            </div>
+  <div class="error-book-page review-study-page">
+    <section class="review-workspace" aria-labelledby="review-title">
+      <header class="review-hero">
+        <div class="review-title-block">
+          <span class="review-title-mark" aria-hidden="true"></span>
+          <div>
+            <h1 id="review-title">诗词错题本</h1>
+            <p>回顾错因，温故知新</p>
           </div>
         </div>
-
-        <!-- 错题趋势图表 -->
-        <div class="chart-panel glass-card">
-          <div class="chart-header">
-            <span class="chart-title">掌握趋势</span>
-            <div class="chart-legend">
-              <span class="legend-item"><span class="dot total-dot"></span>错题数</span>
-              <span class="legend-item"><span class="dot mastered-dot"></span>掌握数</span>
-            </div>
-          </div>
-          <div ref="trendChartRef" class="chart-area"></div>
-        </div>
-      </div>
-
-      <!-- 第二行：筛选 + 操作 -->
-      <div class="control-row glass-card">
-        <div class="filter-group">
-          <div class="filter-item">
-            <label>筛选类型</label>
-            <select v-model="filterType" class="filter-select">
-              <option value="all">全部 ({{ stats.total }})</option>
-              <option value="unmastered">未掌握 ({{ stats.total - stats.mastered }})</option>
-              <option value="mastered">已掌握 ({{ stats.mastered }})</option>
-            </select>
-          </div>
-          <div class="filter-item">
-            <label>来源</label>
-            <select v-model="filterSource" class="filter-select">
-              <option value="all">全部来源</option>
-              <option value="challenge">诗词闯关</option>
-              <option value="battle">闯关对战</option>
-              <option value="feihualing_answer">飞花令作答</option>
-              <option value="feihualing_hint">飞花令提示</option>
-            </select>
-          </div>
-          <div class="filter-item">
-            <label>排序</label>
-            <select v-model="sortType" class="filter-select">
-              <option value="recent">按最近添加</option>
-              <option value="mostwrong">按错题次数</option>
-              <option value="difficulty">按难度</option>
-            </select>
-          </div>
-        </div>
-        <div class="control-actions">
-          <button class="ctrl-btn primary" @click="startSmartReview">
-            <span>开始复习</span>
-            <span class="badge" v-if="filteredErrors.length > 0">{{ filteredErrors.length }}</span>
-          </button>
-          <button class="ctrl-btn danger" @click="confirmClearAll" :disabled="errors.length === 0">
-            清空全部
+        <div class="review-hero-actions">
+          <router-link to="/challenge" class="quiet-action">
+            <PhArrowLeft :size="17" />返回闯关
+          </router-link>
+          <button type="button" class="primary-action" :disabled="errors.length === 0" @click="startSmartReview">
+            <PhBookOpenText :size="18" />开始复习
           </button>
         </div>
+      </header>
+
+      <div v-if="loading" class="review-loading" aria-live="polite">
+        <div class="loading-summary"></div>
+        <div v-for="index in 4" :key="index" class="loading-row"></div>
       </div>
 
-      <!-- 错题列表 -->
-      <div class="error-list">
-        <TransitionGroup name="list">
-          <div
-            v-for="item in paginatedErrors"
-            :key="item.id"
-            class="error-card glass-card"
-            :class="{ mastered: item.mastered === 1 || item.mastered === true }"
-          >
-            <!-- 卡片顶部：诗词信息 -->
-            <div class="error-card-header">
-              <div class="poem-badge" v-if="item.title">
-                <span class="poem-title-text">{{ item.title }}</span>
-                <span class="poem-author-text">{{ item.author || '佚名' }}</span>
-              </div>
-              <div class="error-meta">
-                <span class="meta-tag source-tag" v-if="item.source">
-                  {{ sourceLabel(item.source) }}
-                </span>
-                <span class="meta-tag level-tag" v-if="item.level">
-                  Lv.{{ item.level }}
-                </span>
-                <span class="meta-tag wrong-count-tag">
-                  错 {{ item.wrong_count || item.wrongTimes || 1 }} 次
-                </span>
-                <span class="meta-tag mastered-tag" v-if="item.mastered === 1 || item.mastered === true">
-                  已掌握
-                </span>
-              </div>
-            </div>
+      <div v-else-if="errors.length === 0" class="review-empty">
+        <PhCheckCircle :size="58" weight="thin" aria-hidden="true" />
+        <h2>错题已经温习完毕</h2>
+        <p>继续闯关积累新的练习记录，错题会自动归入这里。</p>
+        <router-link to="/challenge">去诗词闯关<PhArrowRight :size="17" /></router-link>
+      </div>
 
-            <!-- 题目区域 -->
-            <div class="error-question-block">
-              <div class="question-label">题目</div>
-              <div class="question-content">{{ item.question_content || item.question || item.q }}</div>
-            </div>
-
-            <!-- 答案对比 -->
-            <div class="answer-comparison">
-              <div class="answer-row wrong-row">
-                <span class="answer-label">你的答案</span>
-                <span class="answer-text wrong-text">
-                  {{ item.user_answer || item.userAnswer || '未作答' }}
-                </span>
-              </div>
-              <div class="answer-arrow">→</div>
-              <div class="answer-row correct-row">
-                <span class="answer-label">正确答案</span>
-                <span class="answer-text correct-text">
-                  {{ item.correct_answer || item.correctAnswer || item.answer }}
-                </span>
-              </div>
-            </div>
-
-            <!-- 解析 -->
-            <div class="error-explanation" v-if="item.explanation">
-              <div class="explanation-label">解析</div>
-              <div class="explanation-text">{{ item.explanation }}</div>
-            </div>
-
-            <!-- 诗词全文（如果有） -->
-            <div class="full-poem-preview" v-if="item.full_poem" @click="togglePoem(item.id)">
-              <span class="poem-label">查看诗词全文</span>
-              <span class="poem-toggle">{{ expandedPoems[item.id] ? '▲' : '▼' }}</span>
-              <div v-if="expandedPoems[item.id]" class="full-poem-text">
-                {{ item.full_poem }}
-              </div>
-            </div>
-
-            <!-- 底部操作栏 -->
-            <div class="error-card-footer">
-              <div class="footer-info">
-                <span class="add-time">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-                  </svg>
-                  {{ formatDate(item.added_at || item.addedAt || item.created_at) }}
-                </span>
-                <span class="last-review" v-if="item.last_reviewed_at">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
-                  </svg>
-                  {{ formatDate(item.last_reviewed_at) }}
-                </span>
-              </div>
-              <div class="footer-actions">
-                <button class="footer-btn review-btn" @click="reviewSingle(item)">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
-                  </svg>
-                  复习
-                </button>
-                <button class="footer-btn delete-btn" @click="removeSingle(item.id)">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
-                  </svg>
-                  删除
-                </button>
-              </div>
+      <div v-else class="review-content">
+        <section class="mastery-overview" aria-label="掌握概览">
+          <div class="mastery-ring" :style="{ '--mastery': `${masteryRate * 3.6}deg` }">
+            <div>
+              <strong>{{ masteryRate }}%</strong>
+              <span>掌握进度</span>
             </div>
           </div>
-        </TransitionGroup>
+          <div class="mastery-stat">
+            <PhWarningCircle :size="21" weight="duotone" />
+            <span>待巩固</span>
+            <strong>{{ stats.total - stats.mastered }}</strong>
+          </div>
+          <div class="mastery-stat">
+            <PhCheckCircle :size="21" weight="duotone" />
+            <span>已掌握</span>
+            <strong>{{ stats.mastered }}</strong>
+          </div>
+          <div class="mastery-stat">
+            <PhCalendarBlank :size="21" weight="duotone" />
+            <span>本周新增</span>
+            <strong>{{ stats.weekCount }}</strong>
+          </div>
+          <button type="button" class="overview-review" @click="startSmartReview">
+            继续巩固<PhArrowRight :size="17" />
+          </button>
+        </section>
 
-        <!-- 分页 -->
-        <div class="pagination" v-if="totalPages > 1">
-          <button class="page-btn" @click="currentPage--" :disabled="currentPage === 1">
-            ‹
-          </button>
-          <button
-            v-for="page in visiblePages"
-            :key="page"
-            class="page-btn"
-            :class="{ active: page === currentPage }"
-            @click="currentPage = page"
-          >
-            {{ page }}
-          </button>
-          <button class="page-btn" @click="currentPage++" :disabled="currentPage === totalPages">
-            ›
-          </button>
-        </div>
+        <nav class="review-tabs" aria-label="错题状态筛选">
+          <button type="button" :class="{ active: filterType === 'all' }" @click="filterType = 'all'">全部 <span>{{ stats.total }}</span></button>
+          <button type="button" :class="{ active: filterType === 'unmastered' }" @click="filterType = 'unmastered'">待复习 <span>{{ stats.total - stats.mastered }}</span></button>
+          <button type="button" :class="{ active: filterType === 'mastered' }" @click="filterType = 'mastered'">已掌握 <span>{{ stats.mastered }}</span></button>
+        </nav>
+
+        <section class="rhythm-section" aria-labelledby="rhythm-title">
+          <div class="section-heading">
+            <div>
+              <small>近七日</small>
+              <h2 id="rhythm-title">掌握节律</h2>
+            </div>
+            <div class="rhythm-legend">
+              <span><i class="pending-dot"></i>新增错题</span>
+              <span><i class="mastered-dot"></i>已掌握</span>
+            </div>
+          </div>
+          <div class="rhythm-track">
+            <div v-for="day in reviewRhythm" :key="day.key" class="rhythm-day" :class="{ today: day.today }">
+              <span>{{ day.weekday }}</span>
+              <div class="day-bars">
+                <i class="wrong-bar" :style="{ height: `${Math.max(4, day.wrong * 7)}px` }"></i>
+                <i class="done-bar" :style="{ height: `${Math.max(4, day.mastered * 7)}px` }"></i>
+              </div>
+              <strong>{{ day.date }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="question-section" aria-labelledby="question-list-title">
+          <div class="question-toolbar">
+            <div>
+              <small>错题清单</small>
+              <h2 id="question-list-title">共 {{ filteredErrors.length }} 道</h2>
+            </div>
+            <div class="toolbar-controls">
+              <label>
+                <PhFunnel :size="16" aria-hidden="true" />
+                <select v-model="filterSource" aria-label="按来源筛选">
+                  <option value="all">全部来源</option>
+                  <option value="challenge">诗词闯关</option>
+                  <option value="battle">闯关对战</option>
+                  <option value="parkour">诗词跑酷</option>
+                  <option value="card-catch">诗词大富翁</option>
+                  <option value="feihualing_answer">飞花令作答</option>
+                  <option value="feihualing_hint">飞花令提示</option>
+                </select>
+              </label>
+              <label>
+                <PhArrowsDownUp :size="16" aria-hidden="true" />
+                <select v-model="sortType" aria-label="错题排序">
+                  <option value="recent">按时间排序</option>
+                  <option value="mostwrong">按错误次数</option>
+                  <option value="difficulty">按难度排序</option>
+                </select>
+              </label>
+              <button type="button" class="clear-all" @click="confirmClearAll"><PhTrash :size="16" />清空</button>
+            </div>
+          </div>
+
+          <div class="question-list">
+            <article
+              v-for="item in paginatedErrors"
+              :key="item.id"
+              class="question-row"
+              :class="{ mastered: item.mastered === 1 || item.mastered === true, expanded: expandedPoems[item.id] }"
+            >
+              <button type="button" class="question-summary" :aria-expanded="Boolean(expandedPoems[item.id])" @click="togglePoem(item.id)">
+                <span class="question-status" :class="{ mastered: item.mastered === 1 || item.mastered === true }">
+                  {{ item.mastered === 1 || item.mastered === true ? '已掌握' : '待复习' }}
+                </span>
+                <span class="question-main">
+                  <strong>{{ item.question_content || item.question || item.q }}</strong>
+                  <small>
+                    {{ sourceLabel(item.source) }}
+                    <template v-if="item.title"> · 《{{ item.title }}》{{ item.author ? ` · ${item.author}` : '' }}</template>
+                  </small>
+                </span>
+                <span class="question-meta">
+                  <small>错误 {{ item.wrong_count || item.wrongTimes || 1 }} 次</small>
+                  <small>{{ formatDate(item.added_at || item.addedAt || item.created_at) }}</small>
+                </span>
+                <PhCaretDown :size="18" class="summary-caret" aria-hidden="true" />
+              </button>
+
+              <Transition name="answer-reveal">
+                <div v-if="expandedPoems[item.id]" class="question-detail">
+                  <div class="answer-compare">
+                    <div class="answer-block wrong-answer">
+                      <span>你的答案</span>
+                      <strong>{{ item.user_answer || item.userAnswer || '未作答' }}</strong>
+                    </div>
+                    <PhArrowRight :size="18" aria-hidden="true" />
+                    <div class="answer-block correct-answer">
+                      <span>正确答案</span>
+                      <strong>{{ item.correct_answer || item.correctAnswer || item.answer }}</strong>
+                    </div>
+                  </div>
+                  <div v-if="item.explanation" class="reason-block">
+                    <span>错因解析</span>
+                    <p>{{ item.explanation }}</p>
+                  </div>
+                  <div v-if="item.full_poem" class="poem-context">
+                    <span>诗词原文</span>
+                    <p>{{ item.full_poem }}</p>
+                  </div>
+                  <div class="detail-actions">
+                    <button type="button" class="review-single" @click="reviewSingle(item)"><PhBookOpenText :size="16" />专项复习</button>
+                    <button type="button" class="delete-single" @click="removeSingle(item.id)"><PhTrash :size="16" />移出错题本</button>
+                  </div>
+                </div>
+              </Transition>
+            </article>
+          </div>
+
+          <div v-if="totalPages > 1" class="review-pagination" aria-label="错题分页">
+            <button type="button" :disabled="currentPage === 1" aria-label="上一页" @click="currentPage--"><PhCaretLeft :size="16" /></button>
+            <button
+              v-for="page in visiblePages"
+              :key="page"
+              type="button"
+              :disabled="page === '...'"
+              :class="{ active: page === currentPage }"
+              @click="page !== '...' && (currentPage = page)"
+            >{{ page }}</button>
+            <button type="button" :disabled="currentPage === totalPages" aria-label="下一页" @click="currentPage++"><PhCaretRight :size="16" /></button>
+          </div>
+        </section>
       </div>
-    </div>
-
+    </section>
   </div>
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import * as echarts from 'echarts';
 import api from '../services/api';
+import { askConfirm } from '../services/appFeedback';
+import {
+  PhArrowLeft,
+  PhArrowRight,
+  PhArrowsDownUp,
+  PhBookOpenText,
+  PhCalendarBlank,
+  PhCaretDown,
+  PhCaretLeft,
+  PhCaretRight,
+  PhCheckCircle,
+  PhFunnel,
+  PhTrash,
+  PhWarningCircle,
+} from '@phosphor-icons/vue';
 
 export default {
   name: 'ErrorBook',
+  components: {
+    PhArrowLeft,
+    PhArrowRight,
+    PhArrowsDownUp,
+    PhBookOpenText,
+    PhCalendarBlank,
+    PhCaretDown,
+    PhCaretLeft,
+    PhCaretRight,
+    PhCheckCircle,
+    PhFunnel,
+    PhTrash,
+    PhWarningCircle,
+  },
   setup() {
     const router = useRouter();
 
@@ -317,10 +241,6 @@ export default {
     const currentPage = ref(1);
     const pageSize = 10;
 
-    // 图表
-    const trendChartRef = ref(null);
-    let chartInstance = null;
-
     // 展开诗词全文
     const expandedPoems = ref({});
 
@@ -328,6 +248,8 @@ export default {
       challenge: '闯关',
       battle: '对战',
       parkour: '诗词跑酷',
+      'card-catch': '诗词大富翁',
+      card_catch: '诗词大富翁',
       feihualing_answer: '飞花令作答',
       feihualing_hint: '飞花令提示'
     }[source] || '学习练习');
@@ -400,6 +322,31 @@ export default {
       return pages;
     });
 
+    const reviewRhythm = computed(() => {
+      const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+      return Array.from({ length: 7 }, (_, index) => {
+        const date = new Date();
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() - (6 - index));
+        const nextDay = new Date(date);
+        nextDay.setDate(date.getDate() + 1);
+        const items = errors.value.filter((item) => {
+          const value = item.added_at || item.addedAt || item.last_wrong_time || item.created_at;
+          if (!value) return false;
+          const itemDate = new Date(value);
+          return itemDate >= date && itemDate < nextDay;
+        });
+        return {
+          key: date.toISOString(),
+          weekday: `周${weekdays[date.getDay()]}`,
+          date: date.getDate(),
+          today: index === 6,
+          wrong: items.length,
+          mastered: items.filter((item) => item.mastered === 1 || item.mastered === true).length,
+        };
+      });
+    });
+
     // ---- 数据加载 ----
     const loadErrors = async () => {
       try {
@@ -439,7 +386,8 @@ export default {
           if (!addedQuestions.has(questionKey)) {
             allErrors.push({
               ...item,
-              source: 'parkour'
+              // 新记录由后端写入来源；旧记录没有 source 时继续按跑酷兼容展示。
+              source: item.source || 'parkour'
             });
             addedQuestions.add(questionKey);
           }
@@ -454,8 +402,6 @@ export default {
 
         errors.value = allErrors;
 
-        await nextTick();
-        initTrendChart();
       } catch (error) {
         console.error('加载错题本失败:', error);
         errors.value = [];
@@ -464,126 +410,23 @@ export default {
       }
     };
 
-    // ---- 图表初始化 ----
-    const initTrendChart = () => {
-      // 延迟初始化，确保 DOM 渲染完成
-      setTimeout(() => {
-        try {
-          if (!trendChartRef.value) return;
-          if (chartInstance) {
-            chartInstance.dispose();
-            chartInstance = null;
-          }
-
-          chartInstance = echarts.init(trendChartRef.value);
-
-          // 生成最近14天的数据
-          const dates = [];
-          const errorCounts = [];
-          const masteredCounts = [];
-
-          for (let i = 13; i >= 0; i--) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
-            dates.push(dateStr);
-
-            const dayStart = new Date(d);
-            dayStart.setHours(0, 0, 0, 0);
-            const dayEnd = new Date(d);
-            dayEnd.setHours(23, 59, 59, 999);
-
-            const dayErrors = errors.value.filter(e => {
-              const t = new Date(e.added_at || e.addedAt || e.created_at);
-              return t >= dayStart && t <= dayEnd;
-            });
-
-            errorCounts.push(dayErrors.length);
-            masteredCounts.push(dayErrors.filter(e => e.mastered === 1 || e.mastered === true).length);
-          }
-
-          const option = {
-            tooltip: {
-              trigger: 'axis',
-              backgroundColor: 'rgba(255,252,240,0.95)',
-              borderColor: 'rgba(205,133,63,0.3)',
-              textStyle: { color: '#8b4513', fontFamily: 'SimSun' },
-              axisPointer: { type: 'shadow' }
-            },
-            legend: { show: false },
-            grid: { left: '3%', right: '4%', bottom: '3%', top: '10px', containLabel: true },
-            xAxis: {
-              type: 'category', data: dates,
-              axisLabel: { color: '#a0522d', fontSize: 11, fontFamily: 'SimSun' },
-              axisLine: { lineStyle: { color: 'rgba(205,133,63,0.2)' } },
-              splitLine: { show: false }
-            },
-            yAxis: {
-              type: 'value', minInterval: 1,
-              axisLabel: { color: '#a0522d', fontFamily: 'SimSun' },
-              splitLine: { lineStyle: { color: 'rgba(205,133,63,0.1)' } }
-            },
-            series: [
-              {
-                name: '错题数', type: 'bar',
-                data: errorCounts,
-                itemStyle: {
-                  color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: '#cd853f' }, { offset: 1, color: 'rgba(205,133,63,0.4)' }
-                  ]),
-                  borderRadius: [4, 4, 0, 0]
-                },
-                barMaxWidth: 20
-              },
-              {
-                name: '掌握数', type: 'bar',
-                data: masteredCounts,
-                itemStyle: {
-                  color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: '#6b8e23' }, { offset: 1, color: 'rgba(107,142,35,0.4)' }
-                  ]),
-                  borderRadius: [4, 4, 0, 0]
-                },
-                barMaxWidth: 20
-              }
-            ]
-          };
-
-          chartInstance.setOption(option);
-
-          // 只注册一次 resize 监听器（移除旧的）
-          window.removeEventListener('resize', handleChartResize);
-          window.addEventListener('resize', handleChartResize);
-        } catch (err) {
-          console.error('初始化趋势图表失败:', err);
-        }
-      }, 100);
-    };
-
-    const handleChartResize = () => {
-      if (chartInstance) chartInstance.resize();
-    };
 
     // ---- 错题操作 ----
     const removeSingle = async (id) => {
-      if (!confirm('确定要删除这道错题吗？')) return;
+      if (!await askConfirm('确定要删除这道错题吗？', { title: '删除错题', confirmText: '删除', danger: true })) return;
       try {
         await api.challenge.removeFromErrorBook(id);
         errors.value = errors.value.filter(e => e.id !== id);
-        await nextTick();
-        initTrendChart();
       } catch (error) {
         console.error('删除错题失败:', error);
       }
     };
 
     const confirmClearAll = async () => {
-      if (!confirm(`确定要清空所有 ${errors.value.length} 道错题吗？此操作不可恢复！`)) return;
+      if (!await askConfirm(`确定要清空所有 ${errors.value.length} 道错题吗？此操作不可恢复！`, { title: '清空错题本', confirmText: '全部清空', danger: true })) return;
       try {
         await Promise.all(errors.value.map(e => api.challenge.removeFromErrorBook(e.id).catch(() => {})));
         errors.value = [];
-        await nextTick();
-        initTrendChart();
       } catch (error) {
         console.error('清空错题失败:', error);
       }
@@ -621,11 +464,6 @@ export default {
       loadErrors();
     });
 
-    onUnmounted(() => {
-      if (chartInstance) { chartInstance.dispose(); chartInstance = null; }
-      window.removeEventListener('resize', handleChartResize);
-    });
-
     // 筛选变化时重置页码
     watch([filterType, filterSource, sortType], () => { currentPage.value = 1; });
 
@@ -633,8 +471,9 @@ export default {
       loading, errors, filterType, filterSource, sortType,
       currentPage, pageSize, totalPages, paginatedErrors, visiblePages,
       stats, masteryRate, filteredErrors,
+      reviewRhythm,
       sourceLabel,
-      trendChartRef, expandedPoems, reviewMode,
+      expandedPoems, reviewMode,
       removeSingle, confirmClearAll, togglePoem,
       startSmartReview, reviewSingle,
       formatDate
@@ -643,1194 +482,271 @@ export default {
 };
 </script>
 
+
 <style scoped>
-/* ===== 页面基础 ===== */
-.error-book-page {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 0 20px 60px;
-  min-height: 100vh;
-  background: linear-gradient(180deg, rgba(210,180,140,0.06) 0%, rgba(139,90,43,0.04) 100%);
+.review-study-page {
+  --review-ink: #194f49;
+  --review-deep: #236b61;
+  --review-jade: #2f9882;
+  --review-gold: #b9853e;
+  --review-paper: #f9fbf6;
+  --review-line: rgba(39, 103, 92, .14);
+  position: relative;
+  min-height: calc(100dvh - 104px);
+  padding: 26px clamp(18px, 3.2vw, 52px) 52px;
+  color: #365d58;
+  background: #eef5ef;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
 }
 
-/* ===== 页眉 ===== */
-.page-header {
+.review-study-page::before {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: url('@/assets/jade-paper-ambient.png') center top / cover no-repeat;
+  opacity: .34;
+  pointer-events: none;
+}
+
+.review-workspace {
+  position: relative;
+  z-index: 1;
+  width: min(1400px, 100%);
+  min-height: 720px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.84);
+  border-radius: 28px;
+  background: rgba(250, 252, 247, .91);
+  box-shadow: 0 24px 70px rgba(31, 77, 68, .12), inset 0 1px 0 #fff;
+  backdrop-filter: blur(18px);
+}
+
+.review-hero {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 28px 0 24px;
-  position: sticky;
+  min-height: 112px;
+  padding: 24px 30px;
+  border-bottom: 1px solid var(--review-line);
+  background: rgba(250,252,247,.72);
+}
+
+.review-hero::after {
+  position: absolute;
   top: 0;
-  background: linear-gradient(180deg, rgba(255,252,240,0.97) 0%, rgba(255,252,240,0) 100%);
-  z-index: 100;
-  backdrop-filter: blur(8px);
-}
-
-.header-left, .header-right {
-  min-width: 140px;
-}
-
-.back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 18px;
-  color: #8b4513;
-  text-decoration: none;
-  font-size: 14px;
-  font-family: 'SimSun', 'STSong', serif;
-  background: rgba(255,252,240,0.9);
-  border: 1px solid rgba(205,133,63,0.3);
-  border-radius: 20px;
-  transition: all 0.25s ease;
-  backdrop-filter: blur(8px);
-}
-.back-btn:hover {
-  background: rgba(255,252,240,1);
-  border-color: rgba(205,133,63,0.5);
-  transform: translateY(-1px);
-}
-.back-icon { font-size: 16px; }
-
-.header-center { text-align: center; }
-.page-title-wrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-.title-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, rgba(205,133,63,0.2), rgba(139,69,19,0.15));
-  border: 1px solid rgba(205,133,63,0.3);
-  border-radius: 8px;
-  font-family: 'SimSun', serif;
-  font-size: 18px;
-  color: #8b4513;
-}
-.page-title {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 24px;
-  color: #8b4513;
-  margin: 0;
-  font-weight: bold;
-}
-.page-subtitle {
-  font-family: 'SimSun', 'STSong', serif;
-  color: #a0522d;
-  font-size: 13px;
-  margin: 4px 0 0;
-}
-
-.header-action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 18px;
-  color: #fff;
-  background: linear-gradient(135deg, rgba(107,142,35,0.8), rgba(85,107,47,0.7));
-  border: 1px solid rgba(107,142,35,0.4);
-  border-radius: 20px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  margin-left: auto;
-}
-.header-action-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(107,142,35,0.3);
-}
-.header-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-icon { font-size: 14px; }
-
-/* ===== 加载状态 ===== */
-.loading-section { padding-top: 20px; }
-.loading-cards { display: flex; flex-direction: column; gap: 16px; }
-.skeleton-card {
-  padding: 24px;
-  background: rgba(255,252,240,0.7);
-  border-radius: 16px;
-  border: 1px solid rgba(205,133,63,0.15);
-}
-.skeleton-line {
-  background: linear-gradient(90deg, rgba(240,230,210,0.8) 25%, rgba(224,210,185,0.8) 50%, rgba(240,230,210,0.8) 75%);
-  background-size: 200% 100%;
-  animation: skeleton-loading 1.5s infinite;
-  border-radius: 6px;
-  margin-bottom: 14px;
-}
-.skeleton-line.wide { height: 24px; width: 80%; }
-.skeleton-line.medium { height: 18px; width: 60%; }
-.skeleton-line.narrow { height: 18px; width: 40%; margin-bottom: 0; }
-@keyframes skeleton-loading {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* ===== 空状态 ===== */
-.empty-state {
-  text-align: center;
-  padding: 80px 20px;
-}
-.empty-illustration { margin-bottom: 20px; }
-.empty-state h3 {
-  font-family: 'SimSun', 'STSong', serif;
-  color: #8b4513;
-  font-size: 22px;
-  margin: 0 0 10px;
-}
-.empty-state p {
-  font-family: 'SimSun', 'STSong', serif;
-  color: #a0522d;
-  margin: 0 0 30px;
-  font-size: 15px;
-}
-.action-link-btn {
-  display: inline-block;
-  padding: 12px 36px;
-  color: #fff;
-  background: linear-gradient(135deg, rgba(205,133,63,0.8), rgba(139,69,19,0.7));
-  border-radius: 20px;
-  text-decoration: none;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 15px;
-  transition: all 0.25s ease;
-}
-.action-link-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(139,69,19,0.3);
-}
-
-/* ===== Glass卡片通用 ===== */
-.glass-card {
-  background: rgba(255,252,240,0.88);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(205,133,63,0.25);
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(139,69,19,0.08);
-  position: relative;
-  overflow: hidden;
-}
-.glass-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
-}
-
-/* ===== 主内容 ===== */
-.main-content { display: flex; flex-direction: column; gap: 20px; }
-
-/* ===== 统计行 ===== */
-.stats-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 20px;
-  align-items: stretch;
-}
-
-.stats-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 160px;
-}
-
-.stat-card {
-  padding: 14px 18px;
-  transition: all 0.25s ease;
-}
-.stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(139,69,19,0.15); }
-.stat-card-inner { display: flex; align-items: center; gap: 12px; }
-.stat-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-.total-icon { background: rgba(205,133,63,0.15); color: #cd853f; }
-.mastered-icon { background: rgba(107,142,35,0.15); color: #6b8e23; }
-.week-icon { background: rgba(220,20,60,0.1); color: #dc143c; }
-.rate-icon { background: rgba(100,149,237,0.15); color: #6495ed; }
-
-.stat-info { display: flex; flex-direction: column; }
-.stat-value {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 22px;
-  font-weight: bold;
-  color: #8b4513;
-  line-height: 1.2;
-}
-.stat-value.mastered { color: #6b8e23; }
-.stat-value.week { color: #dc143c; }
-.stat-value.rate { color: #6495ed; }
-.stat-label {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 12px;
-  color: #a0522d;
-  margin-top: 2px;
-}
-
-/* 图表 */
-.chart-panel { padding: 20px; }
-.chart-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-.chart-title {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 15px;
-  color: #8b4513;
-  font-weight: bold;
-}
-.chart-legend { display: flex; gap: 16px; }
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 12px;
-  color: #a0522d;
-}
-.dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.total-dot { background: #cd853f; }
-.mastered-dot { background: #6b8e23; }
-.chart-area { width: 100%; height: 180px; }
-
-/* ===== 控制行 ===== */
-.control-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  gap: 20px;
-}
-.filter-group { display: flex; gap: 16px; flex-wrap: wrap; }
-.filter-item { display: flex; align-items: center; gap: 8px; }
-.filter-item label {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #a0522d;
-  white-space: nowrap;
-}
-.filter-select {
-  padding: 7px 14px;
-  border: 1px solid rgba(205,133,63,0.3);
-  border-radius: 10px;
-  background: rgba(255,252,240,0.8);
-  color: #8b4513;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  outline: none;
-  cursor: pointer;
-  transition: border-color 0.2s;
-}
-.filter-select:focus { border-color: rgba(205,133,63,0.6); }
-.control-actions { display: flex; gap: 10px; }
-.ctrl-btn {
-  padding: 8px 20px;
-  border-radius: 12px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  border: 1px solid;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-.ctrl-btn.primary {
-  background: linear-gradient(135deg, rgba(107,142,35,0.85), rgba(85,107,47,0.75));
-  color: #fff;
-  border-color: rgba(107,142,35,0.4);
-}
-.ctrl-btn.primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(107,142,35,0.3);
-}
-.ctrl-btn.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.ctrl-btn.danger {
-  background: rgba(220,20,60,0.08);
-  color: #dc143c;
-  border-color: rgba(220,20,60,0.3);
-}
-.ctrl-btn.danger:hover:not(:disabled) {
-  background: rgba(220,20,60,0.15);
-}
-.ctrl-btn.danger:disabled { opacity: 0.5; cursor: not-allowed; }
-.badge {
-  background: rgba(255,255,255,0.3);
-  border-radius: 10px;
-  padding: 1px 7px;
-  font-size: 12px;
-}
-
-/* ===== 错题卡片列表 ===== */
-.error-list { display: flex; flex-direction: column; gap: 16px; }
-
-.error-card {
-  padding: 22px 24px;
-  transition: all 0.25s ease;
-}
-.error-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 32px rgba(139,69,19,0.15);
-  border-color: rgba(205,133,63,0.4);
-}
-.error-card.mastered {
-  border-left: 3px solid rgba(107,142,35,0.5);
-}
-
-.error-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.poem-badge { display: flex; flex-direction: column; gap: 3px; }
-.poem-title-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 17px;
-  font-weight: bold;
-  color: #8b4513;
-}
-.poem-author-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #a0522d;
-}
-.error-meta { display: flex; gap: 8px; flex-wrap: wrap; }
-.meta-tag {
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 12px;
-}
-.source-tag { background: rgba(100,149,237,0.15); color: #6495ed; }
-.level-tag { background: rgba(205,133,63,0.15); color: #cd853f; }
-.wrong-count-tag { background: rgba(220,20,60,0.1); color: #dc143c; }
-.mastered-tag { background: rgba(107,142,35,0.15); color: #6b8e23; }
-
-.error-question-block {
-  background: linear-gradient(135deg, rgba(255,248,220,0.6), rgba(255,252,240,0.3));
-  border: 1px solid rgba(205,133,63,0.2);
-  border-radius: 12px;
-  padding: 14px 18px;
-  margin-bottom: 14px;
-}
-.question-label, .answer-label, .explanation-label {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 12px;
-  font-weight: bold;
-  color: #a0522d;
-  margin-bottom: 4px;
-}
-.question-content {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 16px;
-  color: #8b4513;
-  line-height: 1.7;
-}
-
-.answer-comparison {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-.answer-row { flex: 1; min-width: 200px; }
-.answer-arrow {
-  font-size: 20px;
-  color: rgba(139,69,19,0.3);
-  flex-shrink: 0;
-}
-.answer-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 15px;
-  padding: 6px 14px;
-  border-radius: 8px;
-  display: inline-block;
-  line-height: 1.5;
-}
-.wrong-text {
-  background: rgba(220,20,60,0.08);
-  color: #dc143c;
-  text-decoration: line-through;
-}
-.correct-text {
-  background: rgba(50,205,50,0.1);
-  color: #32cd32;
-}
-
-.error-explanation {
-  background: rgba(255,248,220,0.5);
-  border: 1px solid rgba(205,133,63,0.15);
-  border-radius: 10px;
-  padding: 12px 16px;
-  margin-bottom: 12px;
-}
-.explanation-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  color: #8b4513;
-  line-height: 1.7;
-}
-
-.full-poem-preview {
-  border: 1px dashed rgba(205,133,63,0.3);
-  border-radius: 10px;
-  padding: 10px 16px;
-  margin-bottom: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.full-poem-preview:hover { border-color: rgba(205,133,63,0.5); background: rgba(255,248,220,0.3); }
-.poem-label {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #a0522d;
-  flex: 1;
-}
-.poem-toggle { color: #a0522d; font-size: 12px; }
-.full-poem-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  color: #8b4513;
-  line-height: 2;
-  white-space: pre-wrap;
-  margin-top: 10px;
-  border-top: 1px dashed rgba(205,133,63,0.2);
-  padding-top: 10px;
-}
-
-.error-card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 14px;
-  border-top: 1px solid rgba(205,133,63,0.15);
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.footer-info { display: flex; gap: 16px; flex-wrap: wrap; }
-.add-time, .last-review {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 12px;
-  color: #a0522d;
-}
-.footer-actions { display: flex; gap: 8px; }
-.footer-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 14px;
-  border-radius: 10px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: 1px solid;
-}
-.footer-btn.review-btn {
-  background: rgba(107,142,35,0.1);
-  color: #6b8e23;
-  border-color: rgba(107,142,35,0.3);
-}
-.footer-btn.review-btn:hover {
-  background: rgba(107,142,35,0.2);
-  transform: translateY(-1px);
-}
-.footer-btn.delete-btn {
-  background: rgba(220,20,60,0.06);
-  color: #dc143c;
-  border-color: rgba(220,20,60,0.25);
-}
-.footer-btn.delete-btn:hover {
-  background: rgba(220,20,60,0.12);
-}
-
-/* ===== 分页 ===== */
-.pagination {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  padding: 20px 0;
-}
-.page-btn {
-  min-width: 36px;
-  height: 36px;
-  padding: 0 10px;
-  border-radius: 10px;
-  background: rgba(255,252,240,0.8);
-  border: 1px solid rgba(205,133,63,0.25);
-  color: #8b4513;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.page-btn:hover:not(:disabled) { background: rgba(205,133,63,0.15); }
-.page-btn.active {
-  background: linear-gradient(135deg, rgba(205,133,63,0.8), rgba(139,69,19,0.7));
-  color: #fff;
-  border-color: rgba(205,133,63,0.4);
-}
-.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* ===== 复习模式弹窗 ===== */
-.review-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 20px;
-}
-
-.review-modal-large {
-  width: 100%;
-  max-width: 680px;
-  max-height: 90vh;
-  overflow-y: auto;
-  padding: 28px 32px;
-}
-
-.review-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-.review-progress { flex: 1; max-width: 300px; }
-.review-progress-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #a0522d;
-  margin-bottom: 6px;
-  display: block;
-}
-.review-progress-bar {
-  height: 6px;
-  background: rgba(205,133,63,0.15);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.review-progress-fill {
+  right: 140px;
+  width: 340px;
   height: 100%;
-  background: linear-gradient(90deg, #cd853f, #6b8e23);
-  border-radius: 3px;
-  transition: width 0.4s ease;
+  content: '';
+  background: url('@/assets/review-inkwash.png') center / cover no-repeat;
+  opacity: .12;
+  pointer-events: none;
 }
-.review-header-actions { display: flex; gap: 10px; align-items: center; }
-.master-toggle-btn {
-  padding: 7px 16px;
+
+.review-title-block { position: relative; z-index: 1; display: flex; align-items: center; gap: 15px; }
+.review-title-mark { width: 4px; height: 52px; border-radius: 4px; background: var(--review-jade); }
+.review-title-block h1,
+.section-heading h2,
+.question-toolbar h2,
+.review-empty h2 {
+  margin: 0;
+  color: var(--review-ink);
+  font-family: 'Noto Serif SC', 'Songti SC', serif;
+  font-weight: 600;
+}
+.review-title-block h1 { font-size: 29px; letter-spacing: .08em; }
+.review-title-block p { margin: 5px 0 0; color: #7a928d; font-size: 12px; }
+.review-hero-actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 9px; }
+.quiet-action,
+.primary-action,
+.overview-review,
+.review-empty a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 15px;
   border-radius: 10px;
-  background: rgba(107,142,35,0.1);
-  border: 1px solid rgba(107,142,35,0.3);
-  color: #6b8e23;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
+  font-size: 12px;
+  text-decoration: none;
 }
-.master-toggle-btn:hover {
-  background: rgba(107,142,35,0.2);
-}
-.exit-review-btn {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  background: rgba(205,133,63,0.1);
-  border: 1px solid rgba(205,133,63,0.2);
-  color: #8b4513;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.exit-review-btn:hover { background: rgba(205,133,63,0.2); }
+.quiet-action { border: 1px solid var(--review-line); color: #577670; background: rgba(255,255,255,.48); }
+.primary-action,
+.overview-review,
+.review-empty a { border: 0; color: #fff; background: #258e79; box-shadow: 0 8px 18px rgba(32, 127, 108, .17); }
+.primary-action:disabled { cursor: not-allowed; opacity: .48; }
 
-.review-poem-info { text-align: center; margin-bottom: 16px; }
-.review-poem-title {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 20px;
-  font-weight: bold;
-  color: #8b4513;
-}
-.review-poem-author {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #a0522d;
-  margin-top: 4px;
-}
-
-.review-full-poem {
-  background: linear-gradient(135deg, rgba(255,248,220,0.5), rgba(255,252,240,0.3));
-  border: 1px solid rgba(205,133,63,0.2);
-  border-radius: 12px;
+.review-content { padding: 24px 28px 32px; }
+.mastery-overview {
+  display: grid;
+  grid-template-columns: 150px repeat(3, minmax(100px, 1fr)) minmax(150px, auto);
+  align-items: center;
+  min-height: 118px;
+  gap: 0;
   padding: 16px 20px;
-  margin-bottom: 20px;
-  text-align: center;
+  border: 1px solid var(--review-line);
+  border-radius: 16px;
+  background: rgba(255,255,252,.68);
+  box-shadow: 0 9px 24px rgba(37, 80, 72, .04);
 }
-.poem-text-display {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 15px;
-  color: #8b4513;
-  line-height: 2.2;
-  white-space: pre-wrap;
-  margin: 0;
-}
-
-.review-question-area { margin-bottom: 20px; }
-.review-question-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  font-weight: bold;
-  color: #a0522d;
-  margin-bottom: 10px;
-}
-.review-question-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 20px;
-  color: #8b4513;
-  text-align: center;
-  padding: 20px;
-  background: linear-gradient(135deg, rgba(255,248,220,0.6), rgba(255,252,240,0.3));
-  border: 1px solid rgba(205,133,63,0.2);
-  border-radius: 14px;
-  line-height: 1.7;
-}
-
-.review-answer-area { margin-bottom: 20px; }
-.review-answer-input {
-  width: 100%;
-  padding: 14px 18px;
-  border: 2px solid rgba(205,133,63,0.3);
-  border-radius: 14px;
-  background: rgba(255,252,240,0.9);
-  color: #8b4513;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 17px;
-  outline: none;
-  box-sizing: border-box;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  margin-bottom: 12px;
-}
-.review-answer-input:focus {
-  border-color: #cd853f;
-  box-shadow: 0 0 0 3px rgba(205,133,63,0.1);
-}
-
-.review-hint-row { display: flex; gap: 10px; justify-content: space-between; }
-.hint-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 18px;
-  border-radius: 12px;
-  background: rgba(100,149,237,0.1);
-  border: 1px solid rgba(100,149,237,0.3);
-  color: #6495ed;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.hint-btn:hover, .hint-btn.active {
-  background: rgba(100,149,237,0.2);
-}
-.submit-review-btn {
-  padding: 10px 28px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(205,133,63,0.85), rgba(139,69,19,0.75));
-  border: none;
-  color: #fff;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 15px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.submit-review-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(139,69,19,0.25);
-}
-.submit-review-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.ai-hints-panel {
-  margin-top: 14px;
-  background: rgba(100,149,237,0.06);
-  border: 1px solid rgba(100,149,237,0.2);
-  border-radius: 12px;
-  padding: 14px 16px;
-}
-.hints-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #6495ed;
-}
-.get-hints-btn {
-  padding: 4px 12px;
-  border-radius: 8px;
-  background: rgba(100,149,237,0.15);
-  border: 1px solid rgba(100,149,237,0.3);
-  color: #6495ed;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.get-hints-btn:hover { background: rgba(100,149,237,0.25); }
-.hints-list { display: flex; flex-direction: column; gap: 8px; }
-.hint-item-reveal {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  background: rgba(100,149,237,0.08);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.hint-item-reveal:hover { background: rgba(100,149,237,0.15); }
-.hint-item-reveal.revealed { background: rgba(100,149,237,0.15); }
-.hint-num {
-  width: 20px; height: 20px;
-  background: rgba(100,149,237,0.2);
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 11px;
-  color: #6495ed;
-  flex-shrink: 0;
-}
-.hint-content {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #6495ed;
-  line-height: 1.6;
-}
-.hint-hidden-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #6495ed;
-  opacity: 0.6;
-}
-.hints-loading {
-  text-align: center;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  color: #6495ed;
-  padding: 10px;
-}
-
-/* 答案结果 */
-.review-result-area { margin-top: 16px; }
-.result-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 20px;
-  border-radius: 14px;
-  margin-bottom: 16px;
-}
-.result-banner.correct {
-  background: rgba(50,205,50,0.08);
-  border: 1px solid rgba(50,205,50,0.25);
-}
-.result-banner.wrong {
-  background: rgba(220,20,60,0.08);
-  border: 1px solid rgba(220,20,60,0.25);
-}
-.result-icon-large { flex-shrink: 0; }
-.result-banner.correct .result-icon-large { color: #32cd32; }
-.result-banner.wrong .result-icon-large { color: #dc143c; }
-.result-message { flex: 1; }
-.result-title {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 18px;
-  font-weight: bold;
-  color: #8b4513;
-  margin: 0 0 8px;
-}
-.result-correct-answer {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 15px;
-  color: #32cd32;
-  margin: 0 0 4px;
-}
-.result-your-answer {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  color: #8b4513;
-  margin: 0;
-}
-.result-your-answer .wrong-text { background: none; text-decoration: line-through; color: #dc143c; }
-
-.ai-analysis-block {
-  background: linear-gradient(135deg, rgba(100,149,237,0.06), rgba(70,130,180,0.04));
-  border: 1px solid rgba(100,149,237,0.2);
-  border-radius: 12px;
-  padding: 14px 18px;
-  margin-bottom: 16px;
-}
-.ai-analysis-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 13px;
-  font-weight: bold;
-  color: #6495ed;
-  margin-bottom: 8px;
-}
-.ai-analysis-text {
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  color: #8b4513;
-  line-height: 1.8;
-}
-
-.result-nav-row {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-.result-nav-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 22px;
-  border-radius: 12px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 15px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: 1px solid;
-}
-.result-nav-btn.primary {
-  background: linear-gradient(135deg, rgba(107,142,35,0.85), rgba(85,107,47,0.75));
-  color: #fff;
-  border-color: rgba(107,142,35,0.4);
-}
-.result-nav-btn.primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(107,142,35,0.3);
-}
-.result-nav-btn.secondary {
-  background: rgba(205,133,63,0.1);
-  color: #8b4513;
-  border-color: rgba(205,133,63,0.3);
-}
-.result-nav-btn.secondary:hover {
-  background: rgba(205,133,63,0.2);
-}
-
-/* ===== 列表过渡动画 ===== */
-.list-enter-active, .list-leave-active { transition: all 0.3s ease; }
-.list-enter-from { opacity: 0; transform: translateY(10px); }
-.list-leave-to { opacity: 0; transform: translateX(-20px); }
-
-/* ===== 弹窗过渡 ===== */
-.modal-enter-active, .modal-leave-active { transition: opacity 0.3s ease; }
-.modal-enter-from, .modal-leave-to { opacity: 0; }
-.modal-enter-active .review-modal-large, .modal-leave-active .review-modal-large { transition: transform 0.3s ease; }
-.modal-enter-from .review-modal-large { transform: scale(0.95); }
-.modal-leave-to .review-modal-large { transform: scale(0.95); }
-
-/* ===== 响应式 ===== */
-@media (max-width: 900px) {
-  .stats-row { grid-template-columns: 1fr; }
-  .stats-cards { flex-direction: row; flex-wrap: wrap; }
-  .stat-card { flex: 1; min-width: 140px; }
-  .chart-panel { display: none; }
-}
-
-@media (max-width: 640px) {
-  .page-header { flex-direction: column; gap: 12px; align-items: stretch; }
-  .header-left, .header-right { min-width: 0; }
-  .back-btn { width: fit-content; }
-  .header-action-btn { width: 100%; justify-content: center; }
-  .header-center { text-align: left; }
-  .control-row { flex-direction: column; align-items: stretch; }
-  .filter-group { flex-direction: column; }
-  .control-actions { justify-content: flex-end; }
-  .review-modal-large { padding: 20px 16px; }
-  .result-nav-row { flex-direction: column; }
-  .result-nav-btn { justify-content: center; width: 100%; }
-  .review-hint-row { flex-direction: column; }
-  .stats-cards { display: grid; grid-template-columns: 1fr 1fr; }
-}
-
-/* ===== 首页同源重构：错题本书页舞台 ===== */
-.error-book-page {
-  --error-cinnabar: #b7695f;
-  --error-cinnabar-soft: rgba(183, 105, 95, .11);
-  max-width: none;
-  min-height: calc(100dvh - 70px);
-  padding: 18px clamp(18px, 3vw, 52px) 72px;
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  border: 0 !important;
-  border-radius: 28px !important;
-  background: linear-gradient(115deg, rgba(247, 252, 249, .98) 0%, rgba(247, 252, 249, .9) 54%, rgba(247, 252, 249, .74) 100%) !important;
-  box-shadow: none !important;
-}
-
-.error-book-page::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(47, 157, 138, .08), transparent 25%),
-    radial-gradient(circle at 80% 76%, rgba(222, 154, 115, .09), transparent 28%);
-}
-
-.error-book-page::after {
-  content: '';
-  position: absolute;
-  inset: 0 0 0 auto;
-  z-index: 0;
-  width: 68%;
-  pointer-events: none;
-  background: url('../assets/review-inkwash.png') center right / cover no-repeat;
-  opacity: .22;
-  mix-blend-mode: multiply;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .35) 22%, #000 58%, #000 100%);
-  mask-image: linear-gradient(90deg, transparent 0%, rgba(0, 0, 0, .35) 22%, #000 58%, #000 100%);
-}
-.error-book-page > * { position: relative; z-index: 1; }
-
-.error-book-page .page-header {
-  width: 100%;
-  max-width: 1440px;
+.mastery-ring {
+  display: grid;
+  width: 82px;
+  height: 82px;
   margin: 0 auto;
-  padding: 16px 0 26px;
-  display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto minmax(160px, 1fr);
-  align-items: center;
-  gap: 18px;
-  position: relative;
-  top: auto;
-  background: rgba(255, 255, 255, .52) !important;
-  border: 0 !important;
-  border-bottom: 1px solid rgba(74, 133, 121, .16) !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
+  place-items: center;
+  border: 7px solid rgba(47, 152, 130, .22);
+  border-top-color: #2f9882;
+  border-right-color: #2f9882;
+  border-radius: 50%;
+  background: #fbfcf8;
+}
+.mastery-ring div { display: flex; flex-direction: column; align-items: center; }
+.mastery-ring strong { color: var(--review-ink); font: 600 21px 'Noto Serif SC', serif; }
+.mastery-ring span { margin-top: 2px; color: #849b96; font-size: 9px; }
+.mastery-stat { display: grid; grid-template-columns: 32px 1fr; grid-template-rows: auto auto; align-items: center; padding: 8px 22px; border-left: 1px solid var(--review-line); color: #4b8278; }
+.mastery-stat svg { grid-row: 1 / span 2; }
+.mastery-stat span { color: #819792; font-size: 10px; }
+.mastery-stat strong { color: var(--review-ink); font: 600 21px 'Noto Serif SC', serif; }
+.overview-review { justify-self: end; min-width: 142px; }
+
+.review-tabs { display: flex; align-items: center; gap: 5px; margin: 22px 0 0; border-bottom: 1px solid var(--review-line); }
+.review-tabs button { position: relative; padding: 11px 17px 13px; border: 0; color: #6e8782; background: transparent; font-size: 12px; }
+.review-tabs button::after { position: absolute; right: 17px; bottom: -1px; left: 17px; height: 2px; content: ''; background: transparent; }
+.review-tabs button.active { color: var(--review-deep); font-weight: 600; }
+.review-tabs button.active::after { background: var(--review-jade); }
+.review-tabs span { display: inline-grid; min-width: 20px; height: 20px; margin-left: 5px; padding: 0 5px; place-items: center; border-radius: 10px; color: #638079; background: rgba(45, 130, 112, .08); font-size: 9px; }
+
+.rhythm-section { margin-top: 20px; padding: 19px 22px 16px; border: 1px solid var(--review-line); border-radius: 14px; background: rgba(255,255,252,.58); }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; }
+.section-heading small,
+.question-toolbar small { color: #94a6a2; font-size: 9px; }
+.section-heading h2 { margin-top: 2px; font-size: 17px; }
+.rhythm-legend { display: flex; gap: 13px; color: #7c918d; font-size: 9px; }
+.rhythm-legend span { display: flex; align-items: center; gap: 5px; }
+.rhythm-legend i { width: 7px; height: 7px; border-radius: 50%; }
+.pending-dot { background: #cf9850; }
+.mastered-dot { background: #3d9b87; }
+.rhythm-track { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); align-items: end; height: 96px; margin-top: 8px; }
+.rhythm-track::before { position: absolute; right: 4%; bottom: 23px; left: 4%; height: 1px; content: ''; background: rgba(45, 130, 112, .12); }
+.rhythm-day { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; color: #8aa09b; font-size: 9px; }
+.rhythm-day.today span { color: var(--review-deep); font-weight: 600; }
+.rhythm-day strong { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; color: #67817c; font-size: 9px; }
+.rhythm-day.today strong { color: #fff; background: #34917d; }
+.day-bars { display: flex; align-items: end; height: 42px; gap: 3px; }
+.day-bars i { display: block; width: 5px; max-height: 38px; border-radius: 4px 4px 1px 1px; }
+.wrong-bar { background: #cf9850; }
+.done-bar { background: #3d9b87; }
+
+.question-section { margin-top: 20px; }
+.question-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.question-toolbar h2 { margin-top: 3px; font-size: 18px; }
+.toolbar-controls { display: flex; align-items: center; gap: 8px; }
+.toolbar-controls label { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; border: 1px solid var(--review-line); border-radius: 9px; color: #65817b; background: rgba(255,255,255,.54); }
+.toolbar-controls select { min-width: 100px; border: 0; outline: 0; color: #57736d; background: transparent; font-size: 10px; }
+.clear-all { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 11px; border: 1px solid rgba(166, 91, 75, .16); border-radius: 9px; color: #a05f52; background: rgba(178, 96, 79, .045); font-size: 10px; }
+
+.question-list { overflow: hidden; border: 1px solid var(--review-line); border-radius: 14px; background: rgba(255,255,252,.66); }
+.question-row { border-bottom: 1px solid var(--review-line); }
+.question-row:last-child { border-bottom: 0; }
+.question-row.expanded { background: rgba(246, 250, 244, .75); }
+.question-summary { display: grid; grid-template-columns: 66px minmax(0, 1fr) 118px 24px; align-items: center; width: 100%; gap: 14px; padding: 16px 18px; border: 0; color: #3b5c57; background: transparent; text-align: left; }
+.question-summary:hover { background: rgba(44, 135, 116, .035); }
+.question-status { justify-self: start; padding: 5px 8px; border-radius: 7px; color: #a9732e; background: rgba(207, 152, 80, .11); font-size: 9px; }
+.question-status.mastered { color: #317c6d; background: rgba(61, 155, 135, .1); }
+.question-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.question-main strong { overflow: hidden; color: #2e5650; font: 500 13px 'Noto Serif SC', serif; text-overflow: ellipsis; white-space: nowrap; }
+.question-main small,
+.question-meta small { color: #8b9d99; font-size: 9px; }
+.question-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.summary-caret { color: #64837d; transition: transform .2s ease; }
+.question-row.expanded .summary-caret { transform: rotate(180deg); }
+
+.question-detail { padding: 4px 18px 18px 98px; }
+.answer-compare { display: grid; grid-template-columns: 1fr 24px 1fr; align-items: center; gap: 12px; }
+.answer-compare > svg { color: #9ca9a6; }
+.answer-block { display: flex; flex-direction: column; gap: 6px; padding: 13px 15px; border-radius: 10px; }
+.answer-block span,
+.reason-block > span,
+.poem-context > span { font-size: 9px; }
+.answer-block strong { font: 500 13px 'Noto Serif SC', serif; }
+.wrong-answer { color: #925f54; background: rgba(174, 94, 77, .055); }
+.correct-answer { color: #2e776a; background: rgba(44, 140, 119, .06); }
+.reason-block,
+.poem-context { margin-top: 11px; padding: 13px 15px; border-left: 2px solid rgba(47, 152, 130, .42); border-radius: 3px 9px 9px 3px; background: rgba(47, 152, 130, .035); }
+.reason-block > span,
+.poem-context > span { color: #2e776a; font-weight: 600; }
+.reason-block p,
+.poem-context p { margin: 6px 0 0; color: #627b76; font-size: 11px; line-height: 1.7; }
+.poem-context p { white-space: pre-line; font-family: 'Noto Serif SC', serif; }
+.detail-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.detail-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border-radius: 8px; font-size: 10px; }
+.review-single { border: 0; color: #fff; background: #2f907c; }
+.delete-single { border: 1px solid rgba(166,91,75,.17); color: #9c6257; background: transparent; }
+
+.review-pagination { display: flex; justify-content: center; gap: 6px; margin-top: 18px; }
+.review-pagination button { display: grid; min-width: 32px; height: 32px; padding: 0 8px; border: 1px solid var(--review-line); border-radius: 8px; place-items: center; color: #607c76; background: rgba(255,255,255,.52); font-size: 10px; }
+.review-pagination button.active { border-color: #2f907c; color: #fff; background: #2f907c; }
+.review-pagination button:disabled { opacity: .42; }
+
+.review-loading { padding: 26px 28px; }
+.loading-summary,
+.loading-row { border-radius: 14px; background: rgba(43, 124, 108, .065); animation: review-pulse 1.2s ease-in-out infinite alternate; }
+.loading-summary { height: 118px; margin-bottom: 22px; }
+.loading-row { height: 62px; margin-bottom: 9px; }
+@keyframes review-pulse { to { opacity: .45; } }
+.review-empty { display: grid; min-height: 560px; place-items: center; align-content: center; gap: 10px; color: #6f8b85; text-align: center; }
+.review-empty h2 { font-size: 23px; }
+.review-empty p { margin: 0 0 8px; font-size: 12px; }
+
+.answer-reveal-enter-active,
+.answer-reveal-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.answer-reveal-enter-from,
+.answer-reveal-leave-to { opacity: 0; transform: translateY(-5px); }
+
+@media (max-width: 980px) {
+  .mastery-overview { grid-template-columns: 120px repeat(3, 1fr); }
+  .overview-review { grid-column: 1 / -1; justify-self: stretch; margin-top: 12px; }
+  .mastery-stat { padding-inline: 14px; }
 }
 
-.error-book-page .header-left,
-.error-book-page .header-right { min-width: 0; }
-.error-book-page .header-right { display: flex; justify-content: flex-end; }
-.error-book-page .header-center { position: relative; }
-.error-book-page .page-title-wrap { gap: 12px; }
-.error-book-page .title-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  color: var(--jade-accent-strong) !important;
-  background: rgba(47, 157, 138, .12) !important;
-  border-color: rgba(47, 157, 138, .2) !important;
-  font-family: var(--font-calligraphy);
+@media (max-width: 720px) {
+  .review-study-page { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; min-width: 0; padding: 12px 8px 30px !important; overflow-x: hidden; }
+  .review-workspace { width: calc(100% - 12px); max-width: calc(100% - 12px); margin-right: 12px; border-radius: 18px; }
+  .review-hero { align-items: flex-start; flex-direction: column; gap: 18px; padding: 20px 16px; }
+  .review-hero-actions { width: 100%; }
+  .review-hero-actions > * { flex: 1; min-width: 0; padding-inline: 8px; white-space: nowrap; }
+  .review-content { padding: 16px 14px 24px; }
+  .mastery-overview { grid-template-columns: repeat(3, 1fr); }
+  .mastery-ring { grid-column: 1 / -1; margin-bottom: 14px; }
+  .mastery-stat { display: flex; flex-direction: column; gap: 4px; padding: 10px 4px; border-top: 1px solid var(--review-line); border-left: 0; text-align: center; }
+  .mastery-stat svg { grid-row: auto; }
+  .review-tabs { overflow-x: auto; }
+  .rhythm-legend { display: none; }
+  .question-toolbar { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .toolbar-controls { width: 100%; flex-wrap: wrap; }
+  .toolbar-controls label { flex: 1; }
+  .toolbar-controls select { width: 100%; }
+  .question-summary { grid-template-columns: 62px minmax(0,1fr) 20px; gap: 9px; padding: 14px 12px; }
+  .question-meta { display: none; }
+  .question-detail { padding: 4px 12px 16px; }
+  .answer-compare { grid-template-columns: 1fr; }
+  .answer-compare > svg { display: none; }
+  .review-hero,
+  .review-content,
+  .mastery-overview,
+  .rhythm-section,
+  .question-section { min-width: 0; }
 }
-.error-book-page .page-title {
-  margin: 0;
-  color: var(--jade-ink) !important;
-  font-family: var(--font-ancient);
-  font-size: clamp(22px, 2.2vw, 30px);
-  letter-spacing: .08em;
-}
-.error-book-page .page-subtitle {
-  margin: 6px 0 0;
-  color: var(--jade-muted) !important;
-  font-family: var(--font-sans);
-  font-size: 12px;
-  letter-spacing: .16em;
-}
-.error-book-page .back-btn,
-.error-book-page .header-action-btn {
-  border-radius: 10px;
-  font-family: var(--font-sans);
-  box-shadow: none;
-}
-.error-book-page .back-btn {
-  padding: 9px 14px;
-  color: var(--jade-accent-strong) !important;
-  background: rgba(255, 255, 255, .62) !important;
-  border-color: rgba(47, 157, 138, .24) !important;
-}
-.error-book-page .header-action-btn {
-  padding: 10px 16px;
-  color: #fff !important;
-  background: var(--jade-accent-strong) !important;
-  border-color: transparent !important;
-  box-shadow: 0 8px 20px rgba(25, 118, 102, .16);
-}
-.error-book-page .header-action-btn:hover:not(:disabled) { box-shadow: 0 12px 26px rgba(25, 118, 102, .22); }
 
-.error-book-page .main-content {
-  width: 100%;
-  max-width: 1440px;
-  margin: 22px auto 0;
-  gap: 20px;
-}
-.error-book-page .stats-row {
-  grid-template-columns: minmax(310px, .78fr) minmax(0, 1.22fr);
-  gap: 20px;
-}
-.error-book-page .stats-cards {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-.error-book-page .stat-card,
-.error-book-page .chart-panel,
-.error-book-page .control-row,
-.error-book-page .error-card {
-  border-radius: 18px;
-  background: rgba(255, 255, 255, .72) !important;
-  border-color: rgba(74, 133, 121, .18) !important;
-  box-shadow: 0 12px 32px rgba(30, 82, 73, .07) !important;
-}
-.error-book-page .stat-card { padding: 17px 18px; }
-.error-book-page .stat-card:hover,
-.error-book-page .error-card:hover { border-color: rgba(47, 157, 138, .34) !important; box-shadow: 0 16px 36px rgba(30, 82, 73, .11) !important; }
-.error-book-page .stat-icon { border-radius: 12px; }
-.error-book-page .total-icon { color: var(--jade-accent-strong); background: rgba(47, 157, 138, .1); }
-.error-book-page .mastered-icon { color: #5f856f; background: rgba(95, 133, 111, .12); }
-.error-book-page .week-icon { color: var(--error-cinnabar); background: var(--error-cinnabar-soft); }
-.error-book-page .rate-icon { color: #6f8e9c; background: rgba(111, 142, 156, .12); }
-.error-book-page .stat-value { color: var(--jade-ink) !important; font-family: var(--font-sans); font-size: 24px; }
-.error-book-page .stat-value.mastered { color: #5f856f !important; }
-.error-book-page .stat-value.week { color: var(--error-cinnabar) !important; }
-.error-book-page .stat-value.rate { color: #6f8e9c !important; }
-.error-book-page .stat-label,
-.error-book-page .chart-title,
-.error-book-page .legend-item { color: var(--jade-muted) !important; font-family: var(--font-sans); }
-.error-book-page .chart-panel { padding: 22px 24px 18px; min-height: 190px; }
-.error-book-page .chart-title { font-size: 15px; font-weight: 600; letter-spacing: .08em; }
-.error-book-page .chart-area { height: 158px; }
-.error-book-page .total-dot { background: var(--error-cinnabar); }
-.error-book-page .mastered-dot { background: var(--jade-accent); }
-
-.error-book-page .control-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  padding: 18px 22px;
-  gap: 20px;
-}
-.error-book-page .filter-group { gap: 14px 20px; }
-.error-book-page .filter-item { align-items: flex-start; flex-direction: column; gap: 5px; }
-.error-book-page .filter-item label { color: var(--jade-muted) !important; font-family: var(--font-sans); font-size: 11px; letter-spacing: .08em; }
-.error-book-page .filter-select {
-  min-width: 146px;
-  border-radius: 9px;
-  color: var(--jade-ink) !important;
-  background: rgba(247, 252, 249, .9) !important;
-  border-color: rgba(74, 133, 121, .22) !important;
-  font-family: var(--font-sans);
-}
-.error-book-page .control-actions { align-items: center; }
-.error-book-page .ctrl-btn { border-radius: 10px; font-family: var(--font-sans); }
-.error-book-page .ctrl-btn.primary { background: var(--jade-accent-strong) !important; border-color: transparent !important; }
-.error-book-page .ctrl-btn.danger { color: var(--error-cinnabar) !important; background: var(--error-cinnabar-soft) !important; border-color: rgba(183, 105, 95, .22) !important; }
-
-.error-book-page .error-list { gap: 14px; }
-.error-book-page .error-card { padding: 22px 24px 18px; }
-.error-book-page .poem-title-text,
-.error-book-page .question-content,
-.error-book-page .explanation-text,
-.error-book-page .full-poem-text { color: var(--jade-ink) !important; font-family: var(--font-ancient); }
-.error-book-page .poem-title-text { font-size: 19px; letter-spacing: .04em; }
-.error-book-page .poem-author-text,
-.error-book-page .question-label,
-.error-book-page .answer-label,
-.error-book-page .explanation-label,
-.error-book-page .add-time,
-.error-book-page .last-review,
-.error-book-page .poem-label { color: var(--jade-muted) !important; font-family: var(--font-sans); }
-.error-book-page .error-question-block,
-.error-book-page .error-explanation { background: rgba(239, 248, 244, .72) !important; border-color: rgba(74, 133, 121, .15) !important; }
-.error-book-page .error-question-block { border-radius: 14px; }
-.error-book-page .question-content { font-size: 17px; }
-.error-book-page .answer-arrow { color: var(--jade-accent); }
-.error-book-page .wrong-text { color: var(--error-cinnabar); background: var(--error-cinnabar-soft); }
-.error-book-page .correct-text { color: #4f8a72; background: rgba(79, 138, 114, .11); }
-.error-book-page .source-tag,
-.error-book-page .level-tag,
-.error-book-page .mastered-tag { color: var(--jade-accent-strong); background: rgba(47, 157, 138, .1); }
-.error-book-page .wrong-count-tag { color: var(--error-cinnabar); background: var(--error-cinnabar-soft); }
-.error-book-page .full-poem-preview { border-color: rgba(74, 133, 121, .24); }
-.error-book-page .error-card-footer { border-color: rgba(74, 133, 121, .14); }
-.error-book-page .footer-btn { border-radius: 9px; font-family: var(--font-sans); }
-.error-book-page .footer-btn.review-btn { color: var(--jade-accent-strong); background: rgba(47, 157, 138, .1); border-color: rgba(47, 157, 138, .22); }
-.error-book-page .footer-btn.delete-btn { color: var(--error-cinnabar); background: var(--error-cinnabar-soft); border-color: rgba(183, 105, 95, .2); }
-.error-book-page .pagination { padding: 12px 0 0; }
-.error-book-page .page-btn { border-radius: 9px; color: var(--jade-accent-strong); background: rgba(255, 255, 255, .64); border-color: rgba(74, 133, 121, .2); }
-.error-book-page .page-btn.active { background: var(--jade-accent-strong); border-color: transparent; }
-.error-book-page .empty-state { padding: 132px 20px 160px; }
-.error-book-page .empty-state h3 { color: var(--jade-ink) !important; font-family: var(--font-ancient); }
-.error-book-page .empty-state p { color: var(--jade-muted) !important; font-family: var(--font-sans); }
-.error-book-page .action-link-btn { border-radius: 10px; background: var(--jade-accent-strong); font-family: var(--font-sans); }
-
-@media (max-width: 900px) {
-  .error-book-page .stats-row { grid-template-columns: 1fr; }
-  .error-book-page .chart-panel { display: block; }
-}
-@media (max-width: 680px) {
-  .error-book-page { padding: 10px 12px 48px; }
-  .error-book-page::after { width: 92%; opacity: .16; }
-  .error-book-page .page-header { grid-template-columns: 1fr; gap: 12px; padding-bottom: 18px; }
-  .error-book-page .header-center { order: -1; text-align: left; }
-  .error-book-page .header-right { justify-content: stretch; }
-  .error-book-page .header-action-btn { width: 100%; justify-content: center; }
-  .error-book-page .control-row { grid-template-columns: 1fr; }
-  .error-book-page .filter-group { display: grid; grid-template-columns: 1fr 1fr; }
-  .error-book-page .filter-select { min-width: 0; width: 100%; }
-  .error-book-page .control-actions { justify-content: stretch; }
-  .error-book-page .control-actions > * { flex: 1; justify-content: center; }
-  .error-book-page .error-card { padding: 18px 16px 15px; }
-  .error-book-page .answer-comparison { align-items: stretch; }
-  .error-book-page .answer-row { min-width: 100%; }
-  .error-book-page .answer-arrow { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .summary-caret,
+  .answer-reveal-enter-active,
+  .answer-reveal-leave-active { transition: none; }
+  .loading-summary,
+  .loading-row { animation: none; }
 }
 </style>

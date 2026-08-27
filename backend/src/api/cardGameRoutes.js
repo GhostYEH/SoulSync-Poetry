@@ -164,7 +164,7 @@ router.post('/ai-explain', authenticateToken, asyncHandler(async (req, res) => {
 }));
 
 router.post('/add-to-review', authenticateToken, asyncHandler(async (req, res) => {
-  const { questionText, correctAnswer, userAnswer, recordId, errorId, level, full_poem, author, title, question_id } = req.body;
+  const { questionText, correctAnswer, userAnswer, recordId, errorId, level, full_poem, author, title, question_id, source } = req.body;
   const uid = req.user.userId;
 
   validate(req.body, {
@@ -185,20 +185,21 @@ router.post('/add-to-review', authenticateToken, asyncHandler(async (req, res) =
       `UPDATE wrong_questions
        SET user_answer = $1, answer = $2, wrong_count = wrong_count + 1,
            last_wrong_time = CURRENT_TIMESTAMP, mastered = 0, correct_streak = 0,
-           full_poem = COALESCE($3, full_poem), author = COALESCE($4, author), title = COALESCE($5, title)
-       WHERE id = $6`,
-      [userAnswer || '', correctAnswer, full_poem || null, author || null, title || null, existing.id]
+           full_poem = COALESCE($3, full_poem), author = COALESCE($4, author), title = COALESCE($5, title),
+           source = COALESCE($6, source)
+       WHERE id = $7`,
+      [userAnswer || '', correctAnswer, full_poem || null, author || null, title || null, source || null, existing.id]
     );
     wrongId = existing.id;
   } else {
     const result = await db.run(
       `INSERT INTO wrong_questions
        (user_id, question_id, question, answer, user_answer, level, wrong_count,
-        last_wrong_time, correct_streak, mastered, full_poem, author, title, added_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 1, CURRENT_TIMESTAMP, 0, 0, $7, $8, $9, CURRENT_TIMESTAMP)
+        last_wrong_time, correct_streak, mastered, full_poem, author, title, source, added_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 1, CURRENT_TIMESTAMP, 0, 0, $7, $8, $9, $10, CURRENT_TIMESTAMP)
        RETURNING id`,
       [String(uid), question_id || null, questionText, correctAnswer, userAnswer || '',
-       level || null, full_poem || null, author || null, title || null]
+       level || null, full_poem || null, author || null, title || null, source || 'card-catch']
     );
     wrongId = result.rows[0].id;
   }

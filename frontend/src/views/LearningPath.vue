@@ -114,7 +114,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import * as echarts from 'echarts'
+import { init as initChart } from '@/utils/echarts'
 import api from '../services/api'
 
 const router = useRouter()
@@ -198,7 +198,7 @@ const initRadarChart = () => {
   if (!radarChartRef.value || !abilityData.value) return
   if (radarChart) radarChart.dispose()
 
-  radarChart = echarts.init(radarChartRef.value)
+  radarChart = initChart(radarChartRef.value)
   const option = {
     radar: {
       indicator: [

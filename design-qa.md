@@ -1,32 +1,38 @@
-# Design QA
+**Comparison Target**
 
-- Source visual truth paths: `C:\Users\32883\AppData\Local\Temp\codex-clipboard-2063489c-1a94-4a32-96db-22eaf6361365.png` (homepage) and `C:\Users\32883\AppData\Local\Temp\codex-clipboard-b0e2d43d-1fd1-476a-b68d-ec2165ed08f5.png` (精选诗句 section).
-- Implementation screenshot: not captured.
-- Viewport: target desktop, 1440 × 900.
-- State: default, unauthenticated.
+- Source visual truth: `C:\Users\32883\AppData\Local\Temp\codex-clipboard-68c1de15-0de8-41e5-82da-851f395e7df1.png`
+- Supporting lower-page reference: `C:\Users\32883\AppData\Local\Temp\codex-clipboard-347cd9f9-da55-4a84-9ba6-d696083f35ff.png`
+- Implementation screenshot: `F:\File\gushici\poem-detail-qa.png`
+- Full-view comparison: `F:\File\gushici\poem-detail-comparison.png`
+- Viewport: 1920 x 1080, desktop, device scale factor 1
+- State: default poem detail view, AI assistant welcome state, analysis empty state
 
-## Full-view comparison evidence
+**Findings**
 
-Blocked. The current task has no user-selected browser, and product-design policy requires explicit permission before using a browser automation tool. A same-viewport capture of the homepage source and the refactored routes is therefore unavailable.
+- No actionable P0/P1/P2 mismatch remains in the implemented scope.
+- Fonts and typography: the serif poem hierarchy, compact sans-serif utility copy, button weights, and line spacing match the reference direction. Runtime poem content naturally differs from the reference poem.
+- Spacing and layout rhythm: the left poem stack, right assistant stack, learning overview, card radii, gaps, and first-screen density align with the reference composition. Both columns remain visually stable.
+- Colors and visual tokens: jade, warm amber, translucent paper cards, borders, and low-elevation shadows are consistently applied.
+- Image quality and asset fidelity: existing project watercolour assets are used. The digital-human iframe no longer uses CSS enlargement and the Unity canvas is forced to a 2x backing density.
+- Copy and content: labels, prompts, empty-state copy, and actions match the requested Chinese learning flow.
 
-## Focused region comparison evidence
+**Focused Region Comparison**
 
-Not performed because the full-view source and implementation captures are unavailable.
+- The full comparison keeps the assistant and analysis regions readable at 3840 x 1080, so a separate crop was not needed.
+- The assistant now uses a small companion stage plus a larger conversation area; the removed vertical action rail does not reappear elsewhere.
+- The analysis module reserves its output area before generation and preserves the same outer height afterward.
 
-## Findings
+**Patches Made**
 
-- [P1] Visual comparison pending
-  Location: all routes.
-  Evidence: the global glass system builds successfully, but no browser-rendered implementation capture has been made against the attached screenshot.
-  Impact: responsive and route-specific visual regressions cannot be assessed conclusively.
-  Fix: capture the existing homepage and representative student, game, creation, and teacher routes at matching viewports; compare and correct any actionable differences.
+- Moved personalized teaching below the poem content.
+- Merged the digital human, recommended questions, messages, composer, and send action into one assistant card.
+- Added fixed-height internal scrolling for chat and analysis output.
+- Removed the digital-human shortcut rail and CSS canvas scaling.
+- Unified jade primary, amber secondary, and light utility button treatments.
+- Set Unity WebGL device pixel ratio to 2 for a sharper canvas backing store.
 
-## Patches made since the previous QA pass
+**Follow-up Polish**
 
-- Added a shared jade-paper visual asset.
-- Added a generated jade poetry scroll asset and pointer-drag horizontal browsing for the精选诗句 section.
-- Added platform-wide jade frosted-glass design tokens, page surfaces, card/input/button/table treatments, navigation normalization, responsive behavior, reduced-motion fallback, and a shared `--page-gutter` boundary token.
+- P3: the generated runtime landscape is darker than the supplied render, but this is dynamic content rather than a component mismatch.
 
-## Final result
-
-blocked
+final result: passed

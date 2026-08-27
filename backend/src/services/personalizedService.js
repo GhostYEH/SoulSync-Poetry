@@ -1,6 +1,10 @@
 const db = require('../utils/db');
 const { getUserAbilityModel } = require('./abilityModelService');
 const { getLearningStats } = require('./learningService');
+const { getWrongQuestions: getWrongQuestionRows } = require('./wrongQuestionService');
+const learningEventService = require('./learningEventService');
+const { callZhipuGenerateJSON } = require('./aiService');
+const config = require('../config/config');
 
 async function getPersonalizedRecommendations(userId) {
   const abilityModel = await getUserAbilityModel(userId);
@@ -70,7 +74,7 @@ async function getUnlearnedPoems(learnedPoemIds, difficultyLevel) {
 }
 
 async function getReviewRecommendations(userId) {
-  return db.all(
+  const rows = await db.all(
     `SELECT lr.*, p.title as poem_title, p.author as poem_author, p.content as poem_content
      FROM learning_records lr
      JOIN poems p ON lr.poem_id = p.id
@@ -81,6 +85,361 @@ async function getReviewRecommendations(userId) {
      LIMIT 5`,
     [userId]
   );
+
+  return rows.map(row => ({
+    ...row,
+    title: row.poem_title,
+    author: row.poem_author,
+    content: row.poem_content,
+    reason: `上次背诵得分 ${row.best_score || 0} 分，建议及时复习`,
+    tag: '复习'
+  }));
+}
+
+/**
+ * 获取新的学习推荐。
+ * 这个接口只推荐当前用户还没有产生学习记录的诗词，避免和复习推荐重复。
+ */
+async function getLearnRecommendations(userId) {
+  const learnedRows = await getLearningStats(userId);
+  const learnedPoemIds = learnedRows.map(row => row.poem_id).filter(Boolean);
+
+  let sql = 'SELECT id, title, author, dynasty, content, tags FROM poems';
+  const params = [];
+
+  if (learnedPoemIds.length > 0) {
+    const placeholders = learnedPoemIds.map((_, index) => `$${index + 1}`).join(', ');
+    sql += ` WHERE id NOT IN (${placeholders})`;
+    params.push(...learnedPoemIds);
+  }
+
+  sql += ' ORDER BY RANDOM() LIMIT 5';
+
+  const rows = await db.all(sql, params);
+  return rows.map(row => ({
+    ...row,
+    poem_id: row.id,
+    reason: '这首诗词还没有学习记录，适合作为下一步学习内容',
+    tag: '新读'
+  }));
+}
+
+/** 获取挑战答题记录，表不存在时返回空数组以兼容旧数据库。 */
+async function getChallengeRecords(userId) {
+  return db.all(
+    `SELECT * FROM user_challenge_records
+     WHERE user_id = $1
+     ORDER BY answered_at DESC
+     LIMIT 50`,
+    [userId]
+  ).catch(() => []);
+}
+
+/** 获取飞花令学习记录，优先使用当前数据库中的高分记录表。 */
+async function getFeihuaRecords(userId) {
+  return db.all(
+    `SELECT * FROM feihua_high_records
+     WHERE user_id = $1
+     ORDER BY updated_at DESC
+     LIMIT 50`,
+    [userId]
+  ).catch(() => []);
+}
+
+/** 学习记录兼容别名，供个性化分析接口使用。 */
+async function getLearningRecords(userId) {
+  return getLearningStats(userId);
+}
+
+/**
+ * 生成个性化分析报告。
+ * 当前项目没有 generateAIAnalysisReport 实现，因此使用已有学习数据生成稳定的本地报告，
+ * 即使没有 AI Key，前端也能正常显示分析结果。
+ */
+async function generateAIAnalysisReport(userId, wrongQuestions = [], challengeRecords = [], feihuaRecords = [], learningRecords = []) {
+  const recitedRecords = learningRecords.filter(row => Number(row.recite_attempts) > 0);
+  const totalReciteAttempts = recitedRecords.reduce(
+    (sum, row) => sum + Number(row.recite_attempts || 0),
+    0
+  );
+  const totalScore = recitedRecords.reduce(
+    (sum, row) => sum + Number(row.total_score || 0),
+    0
+  );
+  const averageScore = totalReciteAttempts > 0
+    ? Math.round(totalScore / totalReciteAttempts)
+    : 0;
+  const masteredCount = recitedRecords.filter(row => Number(row.best_score || 0) >= 100).length;
+  const masteryRate = recitedRecords.length > 0
+    ? Math.round((masteredCount / recitedRecords.length) * 100)
+    : 0;
+
+  const challengeCorrectCount = challengeRecords.reduce(
+    (sum, row) => sum + (Number(row.is_correct) === 1 ? 1 : 0),
+    0
+  );
+  const challengeTotalCount = challengeRecords.length;
+
+  const dynastyRow = await db.get(
+    `SELECT p.dynasty, COUNT(*) AS count
+     FROM learning_records lr
+     JOIN poems p ON lr.poem_id = p.id
+     WHERE lr.user_id = $1
+     GROUP BY p.dynasty
+     ORDER BY count DESC
+     LIMIT 1`,
+    [userId]
+  ).catch(() => null);
+
+  const strength = [];
+  const weakness = [];
+  const suggestion = [];
+
+  if (learningRecords.length === 0) {
+    strength.push('学习记录还不多，但你已经开始建立自己的诗词学习轨迹');
+    weakness.push('暂无足够的学习数据判断薄弱环节');
+    suggestion.push('先学习一首新诗词，再完成一次背诵练习');
+  } else {
+    if (averageScore >= 80) strength.push(`平均背诵得分为 ${averageScore} 分，记忆基础较好`);
+    if (masteryRate >= 60) strength.push(`已有 ${masteryRate}% 的背诵诗词达到满分`);
+    if (challengeCorrectCount > 0) strength.push(`挑战答题已答对 ${challengeCorrectCount} 题`);
+    if (strength.length === 0) strength.push('已经形成了持续学习的记录，继续保持每天练习');
+
+    if (wrongQuestions.length > 0) weakness.push(`错题本中还有 ${wrongQuestions.length} 道题需要复习`);
+    if (averageScore < 80 && recitedRecords.length > 0) weakness.push('部分诗词背诵得分偏低，需要加强巩固');
+    if (recitedRecords.length === 0) weakness.push('已有阅读记录，但还缺少背诵练习');
+    if (weakness.length === 0) weakness.push('暂未发现明显薄弱环节，适合继续拓展新诗词');
+
+    if (wrongQuestions.length > 0) suggestion.push('优先复习错题本中最近出错的题目');
+    if (averageScore < 80 || recitedRecords.length === 0) suggestion.push('每天完成一次短时背诵，逐步提高熟练度');
+    suggestion.push('学习新诗词后，隔天再进行一次回顾');
+  }
+
+  const summary = learningRecords.length === 0
+    ? '欢迎来到古诗词学习系统，完成几次阅读和练习后，我会给出更准确的建议。'
+    : `你已学习 ${learningRecords.length} 首诗词，平均背诵得分 ${averageScore} 分，继续保持稳定练习。`;
+
+  return {
+    strength,
+    weakness,
+    suggestion,
+    summary,
+    stats: {
+      user_id: userId,
+      total_learned: learningRecords.length,
+      average_score: averageScore,
+      mastery_rate: masteryRate,
+      wrong_count: wrongQuestions.length,
+      total_recite_attempts: totalReciteAttempts,
+      top_dynasty: dynastyRow?.dynasty || '未知',
+      dynasty_distribution: {},
+      typical_wrong_questions: wrongQuestions.slice(0, 5),
+      challenge_correct_count: challengeCorrectCount,
+      challenge_total_count: challengeTotalCount,
+      feihua_record_count: feihuaRecords.length
+    }
+  };
+}
+
+function toDayKey(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function buildTrend(events = []) {
+  const now = new Date();
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(now.getDate() - (6 - index));
+    const key = toDayKey(date);
+    return {
+      date: key,
+      label: `${date.getMonth() + 1}/${date.getDate()}`,
+      activity: 0,
+      scores: [],
+    };
+  });
+  const byDate = new Map(days.map(day => [day.date, day]));
+
+  events.forEach(event => {
+    const day = byDate.get(toDayKey(event.created_at));
+    if (!day) return;
+    day.activity += 1;
+    if (Number(event.score) > 0) day.scores.push(Number(event.score));
+  });
+
+  return days.map(day => ({
+    date: day.date,
+    label: day.label,
+    activity: day.activity,
+    score: day.scores.length ? Math.round(day.scores.reduce((sum, item) => sum + item, 0) / day.scores.length) : null,
+  }));
+}
+
+function makeFallbackAdvice(profile) {
+  const focus = profile.focus;
+  const weakPoem = profile.weakPoems[0];
+  const route = [
+    {
+      phase: '今天',
+      title: `先补强${focus.label}`,
+      objective: focus.score < 60 ? '用短练习建立稳定的正确反馈。' : '把已有基础变成更稳的掌握。',
+      tasks: [
+        weakPoem ? `复习《${weakPoem.title}》，再完成一次背诵或默写。` : '从已学诗词中选择一首，完成一次背诵练习。',
+        '把错题本中最早的一道题重新做一遍。',
+      ],
+    },
+    {
+      phase: '未来 3 天',
+      title: '巩固与迁移',
+      objective: '隔天回顾，避免只会当下、不够牢固。',
+      tasks: ['每天 15 分钟：一首复习、一首新读。', '完成一次诗词闯关，检查理解和记忆。'],
+    },
+    {
+      phase: '本周',
+      title: '形成自己的节奏',
+      objective: `本周至少完成 ${Math.max(3, profile.weeklyActiveDays + 1)} 天学习记录。`,
+      tasks: ['周末回看本周错题，写下一个容易混淆的知识点。', '选择一首喜欢的诗，尝试用自己的话说出它的意境。'],
+    },
+  ];
+
+  return {
+    headline: `把注意力放在「${focus.label}」上，下一次练习会更有收获。`,
+    observation: profile.totalLearned
+      ? `你已留下 ${profile.totalLearned} 首诗词的学习记录，最近 7 天有 ${profile.weeklyActiveDays} 天在学习。`
+      : '先完成一次阅读和练习，我会用真实记录为你持续校准路线。',
+    focusTitle: `${focus.label}是当前优先项`,
+    focusDetail: focus.score < 60 ? `当前能力画像为 ${focus.score} 分，建议先用短回合练习积累正确反馈。` : `当前能力画像为 ${focus.score} 分，适合从巩固走向更深入的理解。`,
+    quickActions: [
+      { title: weakPoem ? `复习《${weakPoem.title}》` : '完成一首今日学习', detail: weakPoem ? `上次最高 ${weakPoem.best_score || 0} 分，先补这一处。` : '完成后，AI 才能给出更准确的建议。', path: weakPoem ? `/poem/${weakPoem.poem_id}` : '/', cta: '现在开始' },
+      { title: '整理一题错题', detail: profile.wrongCount ? `错题本还有 ${profile.wrongCount} 道待回顾。` : '用一次闯关检查刚学内容。', path: profile.wrongCount ? '/challenge/review' : '/challenge', cta: profile.wrongCount ? '去复习' : '去练习' },
+    ],
+    roadmap: route,
+    encouragement: '不求一次学很多，让每一次回顾都比上一次更笃定。',
+  };
+}
+
+function normaliseAdvice(result, fallback) {
+  if (!result || typeof result !== 'object') return fallback;
+  const text = (value, backup) => typeof value === 'string' && value.trim() ? value.trim().slice(0, 160) : backup;
+  const route = Array.isArray(result.roadmap) && result.roadmap.length
+    ? result.roadmap.slice(0, 3).map((item, index) => ({
+      phase: text(item?.phase, ['今天', '未来 3 天', '本周'][index]),
+      title: text(item?.title, fallback.roadmap[index].title),
+      objective: text(item?.objective, fallback.roadmap[index].objective),
+      tasks: Array.isArray(item?.tasks) && item.tasks.length
+        ? item.tasks.slice(0, 3).map(task => text(task, '')).filter(Boolean)
+        : fallback.roadmap[index].tasks,
+    }))
+    : fallback.roadmap;
+  return {
+    ...fallback,
+    headline: text(result.headline, fallback.headline),
+    observation: text(result.observation, fallback.observation),
+    focusTitle: text(result.focusTitle, fallback.focusTitle),
+    focusDetail: text(result.focusDetail, fallback.focusDetail),
+    encouragement: text(result.encouragement, fallback.encouragement),
+    roadmap: route,
+  };
+}
+
+/**
+ * 为 AI 建议区块构造隐私最小化的学习画像，并通过大模型返回可执行路线。
+ * 没有模型密钥或模型暂不可用时，保留同一数据口径的本地路线，不让页面降级为空白。
+ */
+async function getAISuggestionDashboard(userId) {
+  const [learningRecords, wrongQuestions, challengeRecords, feihuaRecords, ability, events] = await Promise.all([
+    getLearningStats(userId),
+    getWrongQuestionRows(userId).catch(() => []),
+    getChallengeRecords(userId),
+    getFeihuaRecords(userId),
+    getUserAbilityModel(userId),
+    learningEventService.getUserEvents(userId, { limit: 120 }).catch(() => []),
+  ]);
+  const recited = learningRecords.filter(row => Number(row.recite_attempts) > 0);
+  const totalAttempts = recited.reduce((sum, row) => sum + Number(row.recite_attempts || 0), 0);
+  const averageScore = totalAttempts
+    ? Math.round(recited.reduce((sum, row) => sum + Number(row.total_score || 0), 0) / totalAttempts)
+    : 0;
+  const mastered = recited.filter(row => Number(row.best_score) >= 100).length;
+  const trend = buildTrend(events);
+  const dimensions = [
+    { key: 'memory', label: '记忆', score: Number(ability.memory_score || 50) },
+    { key: 'comprehension', label: '理解', score: Number(ability.comprehension_score || 50) },
+    { key: 'expression', label: '表达', score: Number(ability.expression_score || 50) },
+    { key: 'appreciation', label: '鉴赏', score: Number(ability.appreciation_score || 50) },
+  ].sort((a, b) => a.score - b.score);
+  const weakPoems = recited
+    .filter(row => Number(row.best_score) < 80)
+    .sort((a, b) => Number(a.best_score || 0) - Number(b.best_score || 0))
+    .slice(0, 3)
+    .map(row => ({ poem_id: row.poem_id, title: row.poem_title || row.title, author: row.poem_author || row.author, best_score: Number(row.best_score || 0) }));
+  const profile = {
+    totalLearned: learningRecords.length,
+    averageScore,
+    masteryRate: recited.length ? Math.round((mastered / recited.length) * 100) : 0,
+    totalAttempts,
+    wrongCount: wrongQuestions.length,
+    weeklyActiveDays: trend.filter(day => day.activity > 0).length,
+    trend,
+    dimensions: [...dimensions].sort((a, b) => b.score - a.score),
+    focus: dimensions[0],
+    weakPoems,
+    challengeAccuracy: challengeRecords.length ? Math.round((challengeRecords.filter(row => Number(row.is_correct) === 1).length / challengeRecords.length) * 100) : 0,
+    feihuaSessions: feihuaRecords.length,
+  };
+  const fallback = makeFallbackAdvice(profile);
+  let advice = fallback;
+  let source = 'rule';
+
+  if (config.zhipu.apiKey) {
+    try {
+      const aiResult = await callZhipuGenerateJSON(
+        `学习画像（只用于生成建议，不要复述全部数字）：\n${JSON.stringify(profile)}\n\n请输出 JSON：{\"headline\":\"一句当前判断\",\"observation\":\"结合趋势的观察\",\"focusTitle\":\"薄弱项标题\",\"focusDetail\":\"不超过45字的原因\",\"roadmap\":[{\"phase\":\"今天\",\"title\":\"阶段标题\",\"objective\":\"阶段目标\",\"tasks\":[\"任务1\",\"任务2\"]},{\"phase\":\"未来3天\",\"title\":\"阶段标题\",\"objective\":\"阶段目标\",\"tasks\":[\"任务1\",\"任务2\"]},{\"phase\":\"本周\",\"title\":\"阶段标题\",\"objective\":\"阶段目标\",\"tasks\":[\"任务1\",\"任务2\"]}],\"encouragement\":\"温暖寄语\"}`,
+        '你是一位专业、克制且温暖的古诗词学习教练。依据真实学习数据给出具体、短句、可执行的建议。不要编造学习事实，不要使用空泛鼓励，不要输出 markdown。',
+        { temperature: 0.35, maxTokens: 1200, timeout: 35000 }
+      );
+      advice = normaliseAdvice(aiResult, fallback);
+      source = 'llm';
+    } catch (error) {
+      console.warn('[personalizedService] AI 建议生成失败，使用规则路线:', error.message);
+    }
+  }
+
+  return { profile, advice, source, generatedAt: new Date().toISOString() };
+}
+
+/** 获取完整的个性化数据。 */
+async function getPersonalizedData(userId) {
+  const [review, learn, wrongQuestions, challengeRecords, feihuaRecords, learningRecords] = await Promise.all([
+    getReviewRecommendations(userId),
+    getLearnRecommendations(userId),
+    getWrongQuestionRows(userId).catch(() => []),
+    getChallengeRecords(userId),
+    getFeihuaRecords(userId),
+    getLearningRecords(userId)
+  ]);
+
+  const analysis = await generateAIAnalysisReport(
+    userId,
+    wrongQuestions,
+    challengeRecords,
+    feihuaRecords,
+    learningRecords
+  );
+
+  return {
+    review,
+    learn,
+    analysis,
+    _meta: {
+      total_learned: learningRecords.length,
+      wrong_count: wrongQuestions.length,
+      has_data: learningRecords.length > 0
+    }
+  };
 }
 
 function getChallengeRecommendations(weakDimensions) {
@@ -213,6 +572,14 @@ function generateSchedule(abilityModel) {
 }
 
 module.exports = {
+  getPersonalizedData,
   getPersonalizedRecommendations,
-  getAdaptiveLearningPlan
+  getReviewRecommendations,
+  getLearnRecommendations,
+  getChallengeRecords,
+  getFeihuaRecords,
+  getLearningRecords,
+  generateAIAnalysisReport,
+  getAdaptiveLearningPlan,
+  getAISuggestionDashboard
 };

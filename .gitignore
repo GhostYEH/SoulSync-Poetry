@@ -1,5 +1,7 @@
-# Dependencies
+# Dependencies and local runtimes
 node_modules/
+node_portable/
+/nodejs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -7,16 +9,15 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # Build outputs
-dist/
-build/
+/dist/
+/build/
+/backend/public/
 *.exe
 
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Environment variables (keep example files tracked)
+.env*
+!.env.example
+!**/.env.example
 
 # IDE and editor files
 .vscode/
@@ -39,6 +40,8 @@ ehthumbs.db
 cache/
 .temp/
 backend/cache/
+.codegraph/
+.arts/
 
 # Log files
 logs/
@@ -93,19 +96,22 @@ jspm_packages/
 # Yarn Integrity file
 .yarn-integrity
 
-# Test files
-node_portable/
-
-# Backend compiled files
-backend/public/assets/*.js
-backend/public/assets/*.css
-backend/public/*.html
-
 # Logs
 *.log
 
-# Test scripts
+# Browser and QA artifacts
+playwright-report/
+test-results/
+screenshots/
+/*-desktop*.png
+/*-headless*.png
+/*-mobile*.png
+/*-page-turn*.png
+/*-qa*.png
+
+# Temporary files
 test-*.js
+/query
 
 # Test temporary databases
 tmp-*-*.db

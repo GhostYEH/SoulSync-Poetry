@@ -84,6 +84,8 @@
 </template>
 
 <script>
+import { askConfirm } from '../services/appFeedback'
+
 export default {
   name: 'Collection',
   data() {
@@ -171,8 +173,8 @@ export default {
     },
     
     // 从收藏中移除
-    removeFromCollection(id) {
-      if (confirm('确定要移除这首诗词吗？')) {
+    async removeFromCollection(id) {
+      if (await askConfirm('确定要移除这首诗词吗？', { title: '移出收藏', confirmText: '移除', danger: true })) {
         // 获取本地存储中的收藏数据
         const collectedData = JSON.parse(localStorage.getItem('collectedPoems') || '[]')
         
@@ -191,10 +193,10 @@ export default {
     },
     
     // 批量删除
-    batchDelete() {
+    async batchDelete() {
       if (this.selectedPoems.length === 0) return
       
-      if (confirm(`确定要删除选中的 ${this.selectedPoems.length} 首诗词吗？`)) {
+      if (await askConfirm(`确定要删除选中的 ${this.selectedPoems.length} 首诗词吗？`, { title: '批量移出收藏', confirmText: '全部移除', danger: true })) {
         // 获取本地存储中的收藏数据
         const collectedData = JSON.parse(localStorage.getItem('collectedPoems') || '[]')
         

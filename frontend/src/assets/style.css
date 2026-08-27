@@ -53,7 +53,6 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
-  background-image: url('../bk.png');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -86,9 +85,9 @@ body::before {
   }
 }
 
-/* 平滑滚动 */
+/* 路由切换由 Vue Router 统一控制，避免 hash 路由导航时出现回顶动画。 */
 html {
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 
 /* 选择文本样式 */
@@ -1664,6 +1663,51 @@ main.container :is(.modal,.modal-content,.dialog,.drawer,.popover,.dropdown-menu
   body::before, body::after, main.container > *, #app .ink-blob { animation: none !important; }
 }
 
+/* ===== 主导航页面共享首页的内容边界 =====
+   首页的正文从 28px 横向留白开始；导航页不再各自叠加一套页面级 padding、
+   max-width 或全宽溢出规则，内部卡片的间距仍由页面组件自行管理。 */
+:root {
+  --home-page-gutter: 28px;
+}
+
+#app main.container > :is(
+  .cockpit-home,
+  .search-page,
+  .learning-dashboard,
+  .feihua-rebuild,
+  .challenge-map-page,
+  .poetry-workbench,
+  .error-book-page,
+  .profile-page
+) {
+  width: 100% !important;
+  max-width: none !important;
+  margin-right: 0 !important;
+  margin-left: 0 !important;
+  padding-right: var(--home-page-gutter) !important;
+  padding-left: var(--home-page-gutter) !important;
+  box-sizing: border-box;
+}
+
+/* 页面内部的一级内容也沿用首页的可用宽度，避免外层统一后仍留下窄列。 */
+#app .feihua-rebuild .feihua-frame,
+#app .challenge-map-page :is(.challenge-head, .challenge-stage),
+#app .error-book-page :is(.page-header, .main-content),
+#app .profile-page .profile-shell {
+  width: 100% !important;
+  max-width: none !important;
+  margin-right: 0 !important;
+  margin-left: 0 !important;
+}
+
+@media (max-width: 980px) {
+  :root { --home-page-gutter: 20px; }
+}
+
+@media (max-width: 700px) {
+  :root { --home-page-gutter: 14px; }
+}
+
 /* ========================================================================
    创作工作台 v2：真正的空间重构
    不是给旧卡片换颜色，而是把“情绪入口 / 模式选择 / 创作流程 / 编辑舞台”拆成四个不同层级。
@@ -2030,7 +2074,7 @@ main.container > .review-page {
 #app .profile-page .profile-shell {
   position: relative;
   z-index: 1;
-  width: min(1240px, 100%);
+  width: min(1400px, 100%);
   margin: 0 auto;
 }
 
@@ -2185,4 +2229,199 @@ main.container > .review-page {
   #app .profile-page .ability-card,
   #app .profile-page .achievement-card,
   #app .profile-page .record-card { padding: 21px 18px; }
+}
+
+/* ===== 古意光标：桌面端全局自定义资源，触屏端由 JS 自动移除 ===== */
+.custom-cursor {
+  --cursor-x: -120px;
+  --cursor-y: -120px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2147483646;
+  width: 64px;
+  height: 64px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(calc(var(--cursor-x) - 10px), calc(var(--cursor-y) - 5px), 0);
+  will-change: transform, opacity;
+}
+
+.custom-cursor img {
+  display: block;
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 5px 8px rgba(37, 58, 48, .24));
+  transform: scale(.96);
+  transform-origin: 16% 10%;
+  transition: transform .16s ease, filter .16s ease;
+}
+
+.custom-cursor-visible {
+  opacity: 1;
+}
+
+.custom-cursor-interactive img {
+  filter: drop-shadow(0 0 10px rgba(180, 139, 73, .46)) drop-shadow(0 5px 9px rgba(37, 58, 48, .2));
+  transform: scale(1.08);
+}
+
+.custom-cursor-text img {
+  filter: drop-shadow(0 3px 5px rgba(37, 58, 48, .16));
+  transform: scale(.78);
+}
+
+.custom-cursor-pressed img {
+  transform: scale(.9);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .custom-cursor img {
+    transition: none;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .custom-cursor {
+    display: none !important;
+  }
+}
+
+/* 诗词详情页是全屏意境舞台，导航悬浮在背景之上。 */
+#app.poem-shell {
+  background: transparent;
+}
+
+#app.poem-shell .ios26-navbar {
+  position: absolute;
+  top: 14px;
+  left: 40px;
+  right: 40px;
+  min-height: 100px;
+  height: 100px;
+  padding: 0;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, .62);
+  border-radius: 22px;
+  background: rgba(247, 249, 240, .5) !important;
+  box-shadow: 0 14px 34px rgba(24, 62, 58, .13), inset 0 1px 0 rgba(255,255,255,.72) !important;
+  backdrop-filter: blur(22px) saturate(130%);
+  -webkit-backdrop-filter: blur(22px) saturate(130%);
+}
+
+#app.poem-shell .ios26-navbar:hover {
+  background: rgba(250, 250, 242, .64) !important;
+  box-shadow: 0 18px 42px rgba(24, 62, 58, .17), inset 0 1px 0 rgba(255,255,255,.82) !important;
+}
+
+#app.poem-shell .navbar-container {
+  min-height: 100px;
+  height: 100px;
+  padding-inline: 46px;
+  gap: 80px;
+}
+
+#app.poem-shell .navbar-brand {
+  width: 380px;
+  flex: 0 0 380px;
+  padding: 0;
+  border-color: transparent !important;
+  border-radius: 0;
+  background: transparent !important;
+  color: #1f5e59 !important;
+  box-shadow: none !important;
+}
+
+#app.poem-shell .navbar-brand:hover {
+  background: rgba(255,255,255,.52) !important;
+  border-color: rgba(255,255,255,.82) !important;
+}
+
+#app.poem-shell .main-title { color: #173e3b !important; font-family: 'Noto Serif SC', 'Songti SC', serif; font-size: 25px; letter-spacing: .08em; }
+#app.poem-shell .sub-title { color: rgba(39, 72, 68, .78) !important; font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif; font-size: 11px; }
+#app.poem-shell .brand-mark { flex: 0 0 auto; margin-right: 0; color: #2b8075; }
+#app.poem-shell .navbar-menu { gap: 12px; }
+#app.poem-shell .glass-nav-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 56px;
+  padding: 10px 27px;
+  border: 1px solid rgba(255,255,255,.44);
+  border-radius: 13px;
+  color: rgba(35, 83, 77, .78) !important;
+  background: rgba(255,255,255,.28) !important;
+  box-shadow: 0 7px 18px rgba(31,78,71,.06),inset 0 1px 0 rgba(255,255,255,.66) !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+}
+
+#app.poem-shell .glass-nav-button:hover {
+  color: #1d6b60 !important;
+  border-color: rgba(255,255,255,.58);
+  background: rgba(255,255,255,.38) !important;
+  transform: translateY(-1px);
+}
+
+#app.poem-shell .glass-nav-active {
+  color: #1d6b60 !important;
+  border-color: rgba(255,255,255,.7) !important;
+  background: rgba(255,255,255,.5) !important;
+  box-shadow: 0 5px 14px rgba(31, 92, 81, .08) !important;
+}
+
+#app.poem-shell .nav-icon {
+  flex: 0 0 auto;
+  color: #397f72;
+  opacity: .9;
+}
+
+#app.poem-shell main.container {
+  width: 100%;
+  max-width: none;
+  min-height: 100dvh;
+  padding: 0;
+  background: transparent !important;
+}
+
+#app.poem-shell main.container > .poem-detail {
+  width: 100%;
+  max-width: none;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#app.poem-shell main.container > .poem-detail::before { display: block; }
+#app.poem-shell > .footer { display: none; }
+
+@media (max-width: 1600px) {
+  #app.poem-shell .ios26-navbar { left: 24px; right: 24px; }
+  #app.poem-shell .navbar-container { gap: 24px; padding-inline: 24px; }
+  #app.poem-shell .navbar-brand { width: 300px; flex-basis: 300px; }
+  #app.poem-shell .brand-mark { width: 34px; height: 34px; }
+  #app.poem-shell .main-title { font-size: 21px; }
+  #app.poem-shell .sub-title { max-width: 250px; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #app.poem-shell .navbar-menu { gap: 5px; }
+  #app.poem-shell .glass-nav-button { min-height: 48px; padding: 8px 14px; font-size: 12px; }
+}
+
+@media (max-width: 1120px) {
+  #app.poem-shell .navbar-container { overflow-x: auto; }
+  #app.poem-shell .navbar-menu { flex: 0 0 auto; }
+  #app.poem-shell .navbar-brand { flex: 0 0 auto; }
+}
+
+@media (max-width: 760px) {
+  #app.poem-shell .ios26-navbar { top: 8px; left: 8px; right: 8px; min-height: 74px; border-radius: 16px; }
+  #app.poem-shell .navbar-container { min-height: 74px; flex-direction: column; align-items: stretch; gap: 3px; padding: 7px 10px; }
+  #app.poem-shell .navbar-brand { align-self: flex-start; width: auto; flex-basis: auto; }
+  #app.poem-shell .brand-mark { display: none; }
+  #app.poem-shell .navbar-menu { overflow-x: auto; padding-bottom: 2px; }
+  #app.poem-shell .glass-nav-button { font-size: 11px; padding: 6px 8px; white-space: nowrap; }
+  #app.poem-shell .sub-title { display: none; }
 }

@@ -1,218 +1,167 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const https = require('https');
+const { execFileSync } = require('child_process');
 
 const ROOT_DIR = __dirname;
 const DIST_DIR = path.join(ROOT_DIR, 'dist');
 const BACKEND_DIR = path.join(ROOT_DIR, 'backend');
-const POETRY_DIR = path.join(ROOT_DIR, 'poetry');
+const FRONTEND_DIR = path.join(ROOT_DIR, 'frontend');
+const DIST_BACKEND_DIR = path.join(DIST_DIR, 'backend');
+const DIST_NODE_DIR = path.join(DIST_DIR, 'nodejs');
 
-const NODE_VERSION = '20.11.0';
-const NODE_DOWNLOAD_URL = `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip`;
-const NODE_ZIP_PATH = path.join(DIST_DIR, 'node.zip');
-const NODE_DIR = path.join(DIST_DIR, 'node');
+// Keep the packaged runtime aligned with backend/package.json engines.node.
+const NODE_VERSION = process.env.NODE_VERSION || '22.14.0';
+const NODE_ARCHIVE_URL = `https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip`;
+const NODE_ARCHIVE_PATH = path.join(DIST_DIR, 'node.zip');
+
+const EXCLUDED_BACKEND_ENTRIES = new Set([
+  'node_modules',
+  'public',
+  'db',
+  'cache',
+  'logs',
+  '.env',
+  '.env.local'
+]);
 
 function ensureDir(dir) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  fs.mkdirSync(dir, { recursive: true });
 }
 
-function copyDir(src, dest, excludePatterns = []) {
+function copyDir(src, dest, exclude = () => false) {
   ensureDir(dest);
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (exclude(entry)) continue;
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
-    
-    const shouldExclude = excludePatterns.some(pattern => {
-      if (pattern.endsWith('/**')) {
-        return entry.name === pattern.replace('/**', '');
-      }
-      return entry.name === pattern;
-    });
-    
-    if (shouldExclude) continue;
-    
     if (entry.isDirectory()) {
-      copyDir(srcPath, destPath, excludePatterns);
+      copyDir(srcPath, destPath, exclude);
     } else {
       fs.copyFileSync(srcPath, destPath);
     }
   }
 }
 
-console.log('========================================');
-console.log('    古诗词学习系统 打包工具');
-console.log('========================================');
-console.log('');
-
-ensureDir(DIST_DIR);
-
-console.log('[1/6] 复制后端代码...');
-const distBackendDir = path.join(DIST_DIR, 'backend');
-if (fs.existsSync(distBackendDir)) {
-  fs.rmSync(distBackendDir, { recursive: true });
-}
-copyDir(BACKEND_DIR, distBackendDir, ['node_modules', 'cache']);
-
-console.log('[2/6] 复制诗词数据...');
-const distPoetryDir = path.join(DIST_DIR, 'poetry');
-if (fs.existsSync(distPoetryDir)) {
-  fs.rmSync(distPoetryDir, { recursive: true });
-}
-copyDir(POETRY_DIR, distPoetryDir);
-
-console.log('[3/6] 创建 .env 配置文件...');
-const envContent = `PORT=3000
-NODE_ENV=production
-
-JWT_SECRET=your-secret-key-change-this-in-production
-
-DB_PATH=./db/poetry.db
-
-ALIYUN_BAILIAN_API_KEY=sk-a108d2b3d248481fb4201626bc44f464
-DASHSCOPE_API_KEY=sk-a108d2b3d248481fb4201626bc44f464
-
-ZHIPU_API_KEY=20aa68f683dd4089a8e13bf91bdb32c0.kmud8gA1sseTSnMF
-
-SILICONFLOW_API_KEY=sk-dpfwjaxfgczlafuzpewcczlwvmkfnzvjrrqxmwchdunylzvs
-
-CORS_ORIGIN=*
-
-LOG_LEVEL=info
-`;
-fs.writeFileSync(path.join(distBackendDir, '.env'), envContent);
-
-console.log('[4/6] 下载 Node.js 绿色版...');
-ensureDir(NODE_DIR);
-
-const https = require('https');
-const http = require('http');
-
-function downloadFile(url, dest) {
-  return new Promise((resolve, reject) => {
-    const protocol = url.startsWith('https') ? https : http;
-    const file = fs.createWriteStream(dest);
-    
-    const request = protocol.get(url, (response) => {
-      if (response.statusCode === 302 || response.statusCode === 301) {
-        file.close();
-        fs.unlinkSync(dest);
-        downloadFile(response.headers.location, dest).then(resolve).catch(reject);
-        return;
-      }
-      
-      const totalSize = parseInt(response.headers['content-length'], 10);
-      let downloadedSize = 0;
-      
-      response.on('data', (chunk) => {
-        downloadedSize += chunk.length;
-        const percent = Math.round((downloadedSize / totalSize) * 100);
-        process.stdout.write(`\r下载进度: ${percent}%`);
-      });
-      
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        console.log('');
-        resolve();
-      });
-    });
-    
-    request.on('error', (err) => {
-      file.close();
-      fs.unlink(dest, () => {});
-      reject(err);
-    });
+function run(command, args, options = {}) {
+  const executable = process.platform === 'win32' && command === 'npm' ? 'npm.cmd' : command;
+  execFileSync(executable, args, {
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+    ...options
   });
 }
 
-function extractZipWithPowerShell(zipPath, destDir) {
-  const psCommand = `Expand-Archive -Path "${zipPath}" -DestinationPath "${destDir}" -Force`;
-  execSync(`powershell -Command "${psCommand}"`, { stdio: 'inherit' });
-}
-
-async function downloadAndExtractNode() {
-  if (fs.existsSync(path.join(NODE_DIR, 'node.exe'))) {
-    console.log('Node.js 已存在，跳过下载');
-    return true;
-  }
-  
-  console.log('正在下载 Node.js v' + NODE_VERSION + '...');
-  
-  try {
-    await downloadFile(NODE_DOWNLOAD_URL, NODE_ZIP_PATH);
-    console.log('下载完成，正在解压...');
-    
-    extractZipWithPowerShell(NODE_ZIP_PATH, DIST_DIR);
-    
-    const extractedDir = path.join(DIST_DIR, `node-v${NODE_VERSION}-win-x64`);
-    if (fs.existsSync(extractedDir)) {
-      console.log('重命名目录...');
-      const entries = fs.readdirSync(extractedDir);
-      for (const entry of entries) {
-        const srcPath = path.join(extractedDir, entry);
-        const destPath = path.join(NODE_DIR, entry);
-        if (fs.statSync(srcPath).isDirectory()) {
-          copyDir(srcPath, destPath);
-        } else {
-          fs.copyFileSync(srcPath, destPath);
-        }
+function download(url, destination) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, response => {
+      if ([301, 302, 307, 308].includes(response.statusCode) && response.headers.location) {
+        response.resume();
+        download(response.headers.location, destination).then(resolve, reject);
+        return;
       }
-      fs.rmSync(extractedDir, { recursive: true });
-    }
-    
-    fs.unlinkSync(NODE_ZIP_PATH);
-    console.log('Node.js 解压完成');
-    return true;
-  } catch (err) {
-    console.error('下载/解压 Node.js 失败:', err.message);
-    return false;
-  }
-}
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`Node.js download failed with HTTP ${response.statusCode}`));
+        return;
+      }
 
-async function main() {
-  const nodeOk = await downloadAndExtractNode();
-  
-  if (!nodeOk) {
-    console.log('');
-    console.log('请手动下载 Node.js 并解压:');
-    console.log(NODE_DOWNLOAD_URL);
-    console.log('解压后将文件夹重命名为 "node" 放在 dist 目录下');
-    return;
-  }
-  
-  console.log('[5/6] 修复依赖兼容性并安装...');
-  const pkgPath = path.join(distBackendDir, 'package.json');
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-  pkg.dependencies.uuid = '^9.0.0';
-  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
-  
-  try {
-    const npmCmd = path.join(NODE_DIR, 'npm.cmd');
-    execSync(`"${npmCmd}" install --production`, {
-      cwd: distBackendDir,
-      stdio: 'inherit',
-      env: { ...process.env, NODE_ENV: 'production' }
+      const file = fs.createWriteStream(destination);
+      response.pipe(file);
+      file.on('finish', () => file.close(resolve));
+      file.on('error', error => {
+        file.destroy();
+        reject(error);
+      });
     });
-  } catch (e) {
-    console.log('npm install 失败，请检查网络连接');
-  }
-  
-  console.log('[6/6] 创建数据库目录...');
-  ensureDir(path.join(distBackendDir, 'db'));
-  
-  console.log('');
-  console.log('========================================');
-  console.log('    打包完成！');
-  console.log('========================================');
-  console.log('');
-  console.log('输出目录: ' + DIST_DIR);
-  console.log('');
-  console.log('使用方法:');
-  console.log('  双击运行: dist/启动古诗词学习系统.bat');
-  console.log('');
+    request.on('error', reject);
+  });
 }
 
-main().catch(console.error);
+async function ensurePortableNode() {
+  if (process.platform !== 'win32') {
+    throw new Error('The Windows release package must be built on Windows.');
+  }
+
+  if (fs.existsSync(path.join(DIST_NODE_DIR, 'node.exe'))) return;
+
+  ensureDir(DIST_DIR);
+  console.log(`Downloading Node.js v${NODE_VERSION}...`);
+  await download(NODE_ARCHIVE_URL, NODE_ARCHIVE_PATH);
+  execFileSync('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    `Expand-Archive -LiteralPath '${NODE_ARCHIVE_PATH}' -DestinationPath '${DIST_DIR}' -Force`
+  ], { stdio: 'inherit' });
+
+  const extractedDir = path.join(DIST_DIR, `node-v${NODE_VERSION}-win-x64`);
+  copyDir(extractedDir, DIST_NODE_DIR);
+  fs.rmSync(extractedDir, { recursive: true, force: true });
+  fs.rmSync(NODE_ARCHIVE_PATH, { force: true });
+}
+
+function writeRuntimeEnv() {
+  const env = {
+    PORT: process.env.PORT || '3000',
+    HOST: process.env.HOST || 'localhost',
+    NODE_ENV: 'production',
+    DB_TYPE: process.env.DB_TYPE || 'sqlite',
+    DATABASE_URL: process.env.DATABASE_URL || '',
+    DB_PATH: process.env.DB_PATH || './db/poetry.db',
+    JWT_SECRET: process.env.JWT_SECRET || '',
+    JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '24h',
+    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || '*',
+    ZHIPU_API_KEY: process.env.ZHIPU_API_KEY || '',
+    ZHIPU_MODEL: process.env.ZHIPU_MODEL || 'GLM-4-Flash-250414',
+    SPARK_API_PASSWORD: process.env.SPARK_API_PASSWORD || '',
+    SPARK_MODEL: process.env.SPARK_MODEL || 'lite',
+    ALIYUN_BAILIAN_API_KEY: process.env.ALIYUN_BAILIAN_API_KEY || '',
+    DASHSCOPE_API_KEY: process.env.DASHSCOPE_API_KEY || '',
+    SILICONFLOW_API_KEY: process.env.SILICONFLOW_API_KEY || ''
+  };
+
+  const content = Object.entries(env)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n') + '\n';
+  fs.writeFileSync(path.join(DIST_BACKEND_DIR, '.env'), content, 'utf8');
+}
+
+function writeStartScript() {
+  fs.writeFileSync(path.join(DIST_DIR, 'start.bat'), `@echo off
+chcp 65001 >nul
+title SoulSync-Poetry
+pushd "%~dp0backend"
+start "" http://localhost:3000
+"%~dp0nodejs\\node.exe" server.js
+popd
+pause
+`, 'utf8');
+}
+
+async function build() {
+  console.log('Building frontend...');
+  run('npm', ['run', 'build'], { cwd: FRONTEND_DIR });
+
+  fs.rmSync(DIST_DIR, { recursive: true, force: true });
+  ensureDir(DIST_BACKEND_DIR);
+
+  console.log('Copying backend source...');
+  copyDir(BACKEND_DIR, DIST_BACKEND_DIR, entry => EXCLUDED_BACKEND_ENTRIES.has(entry.name));
+  copyDir(path.join(BACKEND_DIR, 'public'), path.join(DIST_BACKEND_DIR, 'public'));
+  ensureDir(path.join(DIST_BACKEND_DIR, 'db'));
+
+  console.log('Installing production dependencies...');
+  run('npm', ['ci', '--omit=dev'], { cwd: DIST_BACKEND_DIR });
+
+  writeRuntimeEnv();
+  await ensurePortableNode();
+  writeStartScript();
+
+  console.log(`Release package created at ${DIST_DIR}`);
+}
+
+build().catch(error => {
+  console.error(`Build failed: ${error.message}`);
+  process.exitCode = 1;
+});

@@ -148,14 +148,14 @@
             @keydown.enter.ctrl="submitLine"
           ></textarea>
           <div class="input-meta">
-            <span class="char-count">{{ userInput.length }}/{{ expectedChars }}字</span>
+            <span class="char-count">{{ userInputCharCount }}/{{ expectedChars }}字</span>
             <span class="input-hint">Ctrl+Enter 快捷提交</span>
           </div>
         </div>
         <button
           class="submit-btn"
           @click="submitLine"
-          :disabled="!userInput.trim() || userInput.length !== expectedChars"
+          :disabled="!canSubmitLine"
         >
           <span>提交</span>
           <span class="arrow">→</span>
@@ -241,6 +241,10 @@ export default {
       return chainLines.value.map(l => l.text).join('\n');
     });
 
+    const normalizeLine = (line) => String(line || '').replace(/[\s，。！？、；：、“”‘’《》【】]/g, '');
+    const userInputCharCount = computed(() => normalizeLine(userInput.value).length);
+    const canSubmitLine = computed(() => userInputCharCount.value === expectedChars.value && !isAIThinking.value);
+
     const startChain = () => {
       if (!chainTheme.value.trim()) return;
 
@@ -285,10 +289,10 @@ export default {
     };
 
     const submitLine = () => {
-      if (!userInput.value.trim()) return;
+      if (!canSubmitLine.value) return;
 
       chainLines.value.push({
-        text: userInput.value.trim(),
+        text: normalizeLine(userInput.value),
         from: 'user'
       });
 
@@ -356,6 +360,7 @@ export default {
     };
 
     const endChain = () => {
+      const completedLines = chainLines.value.map(l => l.text);
       chainStarted.value = false;
       chainLines.value = [];
       userInput.value = '';
@@ -363,7 +368,7 @@ export default {
       showCompletion.value = false;
 
       emit('end', {
-        lines: chainLines.value.map(l => l.text),
+        lines: completedLines,
         title: poemTitle.value,
         genre: selectedGenre.value,
         theme: chainTheme.value
@@ -413,6 +418,8 @@ export default {
       showCompletion,
       poemTitle,
       expectedChars,
+      userInputCharCount,
+      canSubmitLine,
       targetLines,
       currentLineNumber,
       progressPercent,

@@ -65,6 +65,16 @@ module.exports = {
     model: process.env.SPARK_MODEL || 'lite',
     timeout: 60000
   },
+
+  // Xiaomi MiMo TTS（OpenAI 兼容 Chat Completions）
+  mimo: {
+    apiKey: process.env.MIMO_API_KEY || '',
+    apiUrl: (process.env.MIMO_BASE_URL || 'https://api.xiaomimimo.com/v1').replace(/\/+$/, '') + '/chat/completions',
+    model: process.env.MIMO_TTS_MODEL || 'mimo-v2.5-tts',
+    voice: process.env.MIMO_TTS_VOICE || '茉莉',
+    style: process.env.MIMO_TTS_STYLE || '普通话，温柔自然，吐字清晰，语速舒缓，适合朗读古诗词。',
+    timeout: Number(process.env.MIMO_TTS_TIMEOUT_MS) || 60000
+  },
   
   // 缓存配置
   cache: {

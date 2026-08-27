@@ -182,10 +182,11 @@ router.post('/inspiration/generate', optionalAuthenticateToken, async (req, res)
  */
 router.post('/structure/guide', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
     const { genre, theme, keywords, mood } = req.body;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁，请稍后重试' });
     }
 
@@ -610,10 +611,11 @@ router.post('/feihua/score', optionalAuthenticateToken, async (req, res) => {
  */
 router.post('/generate', optionalAuthenticateToken, async (req, res) => {
   try {
-    const userId = req.user.userId;
-    const { theme, genre, keywords, structure } = req.body;
+    const userId = req.user ? req.user.userId : null;
+    const rateLimitKey = userId ? `user_${userId}` : `ip_${req.ip}`;
+    const { theme, genre, keywords, structure, existingLines } = req.body;
 
-    if (!checkAIRateLimit(userId)) {
+    if (!checkAIRateLimit(rateLimitKey)) {
       return res.status(429).json({ success: false, message: '请求过于频繁' });
     }
 
@@ -625,8 +627,12 @@ router.post('/generate', optionalAuthenticateToken, async (req, res) => {
     const escapedGenre = escapeString(genre);
     const escapedKeywords = Array.isArray(keywords) ? keywords.join('、') : '';
     const escapedStructure = escapeString(structure || '');
+    const escapedExistingLines = Array.isArray(existingLines)
+      ? existingLines.map(escapeString).filter(Boolean).join('；')
+      : '';
 
     const prompt = `创作${escapedGenre}，主题："${escapedTheme}"，关键词：${escapedKeywords || '无'}。
+${escapedExistingLines ? `请保留并续写这些已完成诗句：${escapedExistingLines}。` : ''}
 
 请严格按照以下JSON格式返回结果，不要返回其他任何内容：
 {"poem":"每句一行","title":"标题","explanation":"简述"}`;

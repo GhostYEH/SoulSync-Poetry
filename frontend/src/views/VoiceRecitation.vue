@@ -243,6 +243,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import api from '../services/api'
+import { notify } from '../services/appFeedback'
 
 // 状态
 const searchKeyword = ref('')
@@ -374,7 +375,7 @@ const startRecording = () => {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
   
   if (!SpeechRecognition) {
-    alert('抱歉，您的浏览器不支持语音识别。请使用Chrome、Edge或Safari浏览器。')
+    notify('抱歉，您的浏览器不支持语音识别。请使用 Chrome、Edge 或 Safari 浏览器。', 'warning')
     return
   }
 
@@ -407,7 +408,7 @@ const startRecording = () => {
     console.error('语音识别错误:', event.error)
     isRecording.value = false
     if (event.error !== 'no-speech') {
-      alert('语音识别出错: ' + event.error)
+      notify('语音识别出错：' + event.error, 'error')
     }
   }
 
@@ -421,7 +422,7 @@ const startRecording = () => {
     isRecording.value = true
   } catch (e) {
     console.error('启动语音识别失败:', e)
-    alert('启动语音识别失败，请刷新页面重试')
+    notify('启动语音识别失败，请刷新页面重试', 'error')
   }
 }
 
@@ -450,11 +451,11 @@ const checkRecitation = async () => {
     if (res) {
       scoreResult.value = res
     } else {
-      alert('评测结果解析失败，请重试')
+      notify('评测结果解析失败，请重试', 'error')
     }
   } catch (error) {
     console.error('评测失败:', error)
-    alert('评测失败，请重试: ' + (error.message || '未知错误'))
+    notify('评测失败，请重试：' + (error.message || '未知错误'), 'error')
   } finally {
     isProcessing.value = false
   }

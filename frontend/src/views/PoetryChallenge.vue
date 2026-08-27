@@ -320,8 +320,9 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import * as echarts from 'echarts'
+import { init as initChart } from '@/utils/echarts'
 import api from '../services/api'
+import { notify } from '../services/appFeedback'
 
 const themes = ref([])
 const selectedTheme = ref(null)
@@ -458,7 +459,7 @@ const generateChallenge = async () => {
       await nextTick()
       initRadarChart()
     } else {
-      alert(res?.message || '生成失败')
+      notify(res?.message || '生成失败', 'error')
     }
   } catch (error) {
     console.error('生成挑战失败:', error)
@@ -482,7 +483,7 @@ const submitScore = async () => {
     )
     if (res?.success) {
       await loadStats()
-      alert('评价成功！感谢参与！')
+      notify('评价成功！感谢参与！', 'success')
     }
   } catch (error) {
     console.error('提交评分失败:', error)
@@ -504,7 +505,7 @@ const initRadarChart = () => {
   
   const dims = currentChallenge.value.poem.evaluation.dimensions
   
-  const chart = echarts.init(radarChartRef.value)
+  const chart = initChart(radarChartRef.value)
   
   const option = {
     radar: {

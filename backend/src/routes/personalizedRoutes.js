@@ -1,10 +1,21 @@
 const express = require('express');
 const router = express.Router();
-const { getPersonalizedData, getReviewRecommendations, getLearnRecommendations } = require('../services/personalizedService');
+const {
+  getPersonalizedData,
+  getReviewRecommendations,
+  getLearnRecommendations,
+  generateAIAnalysisReport,
+  getAISuggestionDashboard,
+  getChallengeRecords,
+  getFeihuaRecords,
+  getLearningRecords
+} = require('../services/personalizedService');
+const { getWrongQuestions } = require('../services/wrongQuestionService');
 
 // 缓存配置
 const CACHE_TTL = 30 * 60 * 1000; // 30分钟缓存
 const analysisCache = new Map(); // userId -> { data, timestamp }
+const adviceCache = new Map(); // userId -> { data, timestamp }
 
 /**
  * 获取缓存数据
@@ -34,6 +45,16 @@ function setCachedData(userId, data) {
  */
 function clearCache(userId) {
   analysisCache.delete(userId);
+  adviceCache.delete(userId);
+}
+
+function getCachedAdvice(userId) {
+  const cached = adviceCache.get(userId);
+  return cached && Date.now() - cached.timestamp < 10 * 60 * 1000 ? cached.data : null;
+}
+
+function setCachedAdvice(userId, data) {
+  adviceCache.set(userId, { data, timestamp: Date.now() });
 }
 
 /**
@@ -150,7 +171,7 @@ router.get('/review', authMiddleware, async (req, res) => {
   
   try {
     const result = await withTimeout(getReviewRecommendations(req.userId), 30000);
-    res.json(result);
+    res.json({ success: true, data: result });
   } catch (err) {
     console.error('[personalizedRoutes] 获取复习推荐失败:', err.message);
     res.json({
@@ -170,7 +191,7 @@ router.get('/learn', authMiddleware, async (req, res) => {
   
   try {
     const result = await withTimeout(getLearnRecommendations(req.userId), 30000);
-    res.json(result);
+    res.json({ success: true, data: result });
   } catch (err) {
     console.error('[personalizedRoutes] 获取学习推荐失败:', err.message);
     res.json({
@@ -203,8 +224,6 @@ router.get('/analysis', authMiddleware, async (req, res) => {
   }
   
   try {
-    const { generateAIAnalysisReport, getWrongQuestions, getChallengeRecords, getFeihuaRecords, getLearningRecords } = require('../services/personalizedService');
-    
     // 并行获取所有需要的数据
     const [wrongQuestions, challengeRecords, feihuaRecords, learningRecords] = await Promise.all([
       getWrongQuestions(req.userId).catch(() => []),
@@ -239,6 +258,28 @@ router.get('/analysis', authMiddleware, async (req, res) => {
       },
       error: err.message
     });
+  }
+});
+
+/**
+ * POST /api/personalized/advice
+ * 聚合真实学习数据后调用大模型生成 AI 建议与学习路线。
+ * 结果短暂缓存，避免用户每次回到首页都重复触发模型调用。
+ */
+router.post('/advice', authMiddleware, async (req, res) => {
+  const forceRefresh = Boolean(req.body?.forceRefresh);
+  if (!forceRefresh) {
+    const cached = getCachedAdvice(req.userId);
+    if (cached) return res.json({ success: true, data: cached, fromCache: true });
+  }
+
+  try {
+    const result = await withTimeout(getAISuggestionDashboard(req.userId), 50000);
+    setCachedAdvice(req.userId, result);
+    res.json({ success: true, data: result, fromCache: false });
+  } catch (err) {
+    console.error('[personalizedRoutes] 获取 AI 建议失败:', err.message);
+    res.status(500).json({ success: false, message: '暂时无法生成学习建议，请稍后重试' });
   }
 });
 

@@ -65,6 +65,7 @@
         </div>
         <span class="hud-label">得分</span>
       </div>
+      <button class="hud-pause-btn" type="button" aria-label="暂停游戏" @click="pauseGame">暂停</button>
     </div>
 
     <!-- 开始菜单 -->
@@ -416,6 +417,12 @@ export default {
 
     // 按键状态
     const keys = { up: false, down: false, left: false, right: false };
+    const resetKeys = () => {
+      keys.up = false;
+      keys.down = false;
+      keys.left = false;
+      keys.right = false;
+    };
 
     // Toast
     const toast = ref({ show: false, text: '', type: 'info' });
@@ -816,7 +823,12 @@ export default {
     // ==================== 绘制函数 ====================
 
     const drawBackground = () => {
-      ctx.fillStyle = 'rgba(10, 10, 30, 0.35)';
+      // Canvas 覆盖整块舞台，必须每帧清空，否则半透明底色会持续叠加成深色。
+      ctx.clearRect(0, 0, containerW, containerH);
+      const paperGrad = ctx.createLinearGradient(0, 0, 0, containerH);
+      paperGrad.addColorStop(0, 'rgba(255, 255, 255, .36)');
+      paperGrad.addColorStop(1, 'rgba(237, 247, 242, .54)');
+      ctx.fillStyle = paperGrad;
       ctx.fillRect(0, 0, containerW, containerH);
 
       // 飘浮装饰字符
@@ -832,7 +844,7 @@ export default {
         ctx.translate(el.x, el.y);
         ctx.rotate(el.rotate);
         ctx.globalAlpha = el.alpha * el.depth;
-        ctx.fillStyle = '#f0d78c';
+        ctx.fillStyle = '#b08c5c';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(el.char, 0, 0);
@@ -877,7 +889,7 @@ export default {
         ctx.globalAlpha = t.life * 0.3;
         const r = 10 * t.life;
         const grd = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, r);
-        grd.addColorStop(0, '#60a5fa');
+        grd.addColorStop(0, '#2d9d8a');
         grd.addColorStop(1, 'transparent');
         ctx.fillStyle = grd;
         ctx.beginPath();
@@ -915,8 +927,8 @@ export default {
       ctx.save();
       ctx.rotate(player.wingAngle);
       const wingGradL = ctx.createLinearGradient(-w * 0.5, 0, 0, 0);
-      wingGradL.addColorStop(0, 'rgba(147, 197, 253, 0.0)');
-      wingGradL.addColorStop(1, 'rgba(147, 197, 253, 0.8)');
+      wingGradL.addColorStop(0, 'rgba(45, 157, 138, 0.0)');
+      wingGradL.addColorStop(1, 'rgba(45, 157, 138, 0.8)');
       ctx.fillStyle = wingGradL;
       ctx.beginPath();
       ctx.ellipse(-w * 0.35, -h * 0.05, w * 0.4, h * 0.2, -0.25, 0, Math.PI * 2);
@@ -926,8 +938,8 @@ export default {
       ctx.save();
       ctx.rotate(-player.wingAngle);
       const wingGradR = ctx.createLinearGradient(0, 0, w * 0.5, 0);
-      wingGradR.addColorStop(0, 'rgba(147, 197, 253, 0.8)');
-      wingGradR.addColorStop(1, 'rgba(147, 197, 253, 0.0)');
+      wingGradR.addColorStop(0, 'rgba(45, 157, 138, 0.8)');
+      wingGradR.addColorStop(1, 'rgba(45, 157, 138, 0.0)');
       ctx.fillStyle = wingGradR;
       ctx.beginPath();
       ctx.ellipse(w * 0.35, -h * 0.05, w * 0.4, h * 0.2, 0.25, 0, Math.PI * 2);
@@ -945,7 +957,7 @@ export default {
       ctx.beginPath();
       ctx.arc(0, 0, w * 0.38, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#3b82f6';
+      ctx.strokeStyle = '#197666';
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.shadowBlur = 0;
@@ -953,7 +965,7 @@ export default {
       // 发光书生帽子
       const hatGrad = ctx.createLinearGradient(0, -h * 0.5, 0, -h * 0.2);
       hatGrad.addColorStop(0, '#1e3a8a');
-      hatGrad.addColorStop(1, '#3b82f6');
+      hatGrad.addColorStop(1, '#197666');
       ctx.fillStyle = hatGrad;
       ctx.shadowColor = '#60a5fa';
       ctx.shadowBlur = 10;
@@ -1013,16 +1025,16 @@ export default {
         // 方块背景 - 统一样式
         let bg, border, textColor;
         if (hit) {
-          bg = 'rgba(96, 165, 250, 0.25)';
-          border = '#60a5fa';
-          textColor = '#3b82f6';
+          bg = 'rgba(45, 157, 138, 0.2)';
+          border = '#2d9d8a';
+          textColor = '#197666';
         } else {
           const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
-          bgGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
-          bgGrad.addColorStop(1, 'rgba(241, 245, 249, 0.95)');
+          bgGrad.addColorStop(0, 'rgba(255, 255, 255, 0.96)');
+          bgGrad.addColorStop(1, 'rgba(232, 245, 239, 0.94)');
           bg = bgGrad;
-          border = '#94a3b8';
-          textColor = '#1e293b';
+          border = '#9bb7ae';
+          textColor = '#315d55';
         }
 
         ctx.fillStyle = bg;
@@ -1047,7 +1059,7 @@ export default {
 
         // 文字光晕
         if (!hit) {
-          ctx.shadowColor = '#60a5fa';
+          ctx.shadowColor = '#2d9d8a';
           ctx.shadowBlur = 8;
         }
         ctx.fillText(text, x + w / 2, y + h / 2, w - 18);
@@ -1185,6 +1197,7 @@ export default {
     // ==================== 游戏控制 ====================
 
     const startGame = () => {
+      resetKeys();
       score.value = 0;
       currentLives.value = INITIAL_LIVES;
       distance.value = 0;
@@ -1201,6 +1214,7 @@ export default {
       inkParticles = [];
       questionQueue = [];
       player.trail = [];
+      player.x = Math.round(containerW * 0.12);
       player.y = (containerH + 60) / 2;
       player.vx = 0;
       player.vy = 0;
@@ -1229,6 +1243,7 @@ export default {
     };
 
     const endGame = () => {
+      resetKeys();
       gameState.value = 'GAME_OVER';
       cancelAnimationFrame(animFrameId);
       drawBackground();
@@ -1241,6 +1256,7 @@ export default {
     };
 
     const quitGame = () => {
+      resetKeys();
       gameState.value = 'MENU';
       cancelAnimationFrame(animFrameId);
       towers = [];
@@ -1264,6 +1280,7 @@ export default {
       }
 
       isAddingToErrorBook.value = true;
+      addedToErrorBook.value = false;
 
       try {
         const token = localStorage.getItem('token');
@@ -1273,6 +1290,9 @@ export default {
         }
 
         const apiBaseUrl = API_BASE_URL;
+
+        let successCount = 0;
+        let failedCount = 0;
 
         for (const wq of wrongQuestions.value) {
           const questionContent = `${wq.beforeBlank}【】${wq.afterBlank}`;
@@ -1291,21 +1311,35 @@ export default {
                 level: 1,
                 full_poem: '',
                 author: wq.originalQuestion?.author || '',
-                title: wq.originalQuestion?.poem || wq.originalQuestion?.title || ''
+                title: wq.originalQuestion?.poem || wq.originalQuestion?.title || '',
+                source: 'parkour'
               })
             });
 
             const result = await response.json();
-            if (!response.ok) {
+            if (response.ok && result?.id) {
+              successCount++;
+            } else {
+              failedCount++;
               console.error('添加错题失败:', result);
             }
           } catch (e) {
+            failedCount++;
             console.error('添加错题失败:', e);
           }
         }
 
-        addedToErrorBook.value = true;
-        showToast(`已成功添加 ${wrongQuestions.value.length} 道错题到错题本！`, 'success');
+        if (successCount > 0) {
+          addedToErrorBook.value = true;
+          showToast(
+            failedCount > 0
+              ? `已添加 ${successCount} 道，${failedCount} 道失败，请重试`
+              : `已成功添加 ${successCount} 道错题到错题本！`,
+            failedCount > 0 ? 'warn' : 'success'
+          );
+        } else {
+          showToast('错题添加失败，请重试', 'error');
+        }
 
         setTimeout(() => {
           addedToErrorBook.value = false;
@@ -1350,6 +1384,8 @@ export default {
 
     onUnmounted(() => {
       cancelAnimationFrame(animFrameId);
+      window.removeEventListener('resize', resizeCanvas);
+      resetKeys();
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       if (toastTimer) clearTimeout(toastTimer);
@@ -1362,7 +1398,7 @@ export default {
       selectedDifficulty, difficulties,
       toast, gradeText, gradeClass,
       wrongQuestions, isAddingToErrorBook, addedToErrorBook,
-      startGame, resumeGame, restartGame, quitGame, goBack,
+      startGame, pauseGame, resumeGame, restartGame, quitGame, goBack,
       addAllToErrorBook
     };
   }
@@ -1370,7 +1406,6 @@ export default {
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&display=swap');
 
 /* ==================== 基础布局 ==================== */
 .parkour-wrapper {

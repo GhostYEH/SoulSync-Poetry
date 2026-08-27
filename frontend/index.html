@@ -1,10 +1,21 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="custom-cursor-pending">
   <head>
     <meta charset="UTF-8">
-    <link rel="icon" type="image/svg+xml" href="/vite.svg">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>《智韵·灵犀》——基于大模型认知引擎与多维行为分析的智能化古诗词学习系统</title>
+    <style>
+      /* 桌面端在应用脚本完成加载前先隐藏系统光标，避免路由/资源初始化瞬间闪回默认光标。 */
+      @media (hover: hover) and (pointer: fine) {
+        html.custom-cursor-pending,
+        html.custom-cursor-pending *,
+        html.custom-cursor-enabled,
+        html.custom-cursor-enabled * {
+          cursor: none !important;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>

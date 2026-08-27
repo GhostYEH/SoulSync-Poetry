@@ -3,6 +3,10 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import './assets/style.css'
+import './assets/game-suite.css'
+import { installCustomCursor } from './utils/customCursor'
+
+installCustomCursor(router)
 
 const app = createApp(App)
 const pinia = createPinia()

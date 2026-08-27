@@ -1,5 +1,13 @@
 <template>
-  <div id="app" :class="{ 'home-shell': $route.path === '/' }" @mousemove="createMapleLeaf">
+  <div
+    id="app"
+    :class="{
+    'home-shell': $route.path === '/',
+      'challenge-shell': $route.path === '/challenge' || $route.path.startsWith('/challenge/level/'),
+      'poem-shell': $route.path.startsWith('/poem/')
+    }"
+    @mousemove="createMapleLeaf"
+  >
 
     <!-- 自定义标题栏 (Electron环境) -->
     <TitleBar v-if="isElectron" />
@@ -7,16 +15,20 @@
     <!-- 演示模式组件 -->
     <DemoMode ref="demoMode" />
 
+    <!-- 全局非阻塞消息与确认框，避免原生弹窗抢占浏览器焦点 -->
+    <AppFeedback />
+
     <!-- 动态元素容器 -->
     <div class="dynamic-elements" ref="dynamicElements"></div>
 
     <!-- 导航栏 -->
-    <nav class="navbar ios26-navbar">
+    <nav class="navbar ios26-navbar" @pointerover="prefetchNavigation" @focusin="prefetchNavigation">
       <div class="nav-liquid-border"></div>
       <div class="nav-liquid-shine"></div>
       <div class="container navbar-container">
         <!-- 品牌 logo/标题 -->
         <router-link to="/" class="navbar-brand">
+          <Leaf class="brand-mark" :size="42" weight="duotone" />
           <div class="brand-title">
             <div class="main-title">《智韵·灵犀》</div>
             <div class="sub-title">——基于大模型认知引擎与多维行为分析的智能化古诗词学习系统</div>
@@ -25,28 +37,28 @@
         
         <ul class="navbar-menu">
           <li class="navbar-item">
-            <router-link to="/" class="glass-nav-button" active-class="glass-nav-active">首页</router-link>
+            <router-link to="/" class="glass-nav-button" active-class="glass-nav-active"><House class="nav-icon" :size="21" />首页</router-link>
           </li>
           <li class="navbar-item">
-            <router-link to="/search" class="glass-nav-button" active-class="glass-nav-active">搜索</router-link>
+            <router-link to="/search" class="glass-nav-button" active-class="glass-nav-active"><MagnifyingGlass class="nav-icon" :size="21" />诗库</router-link>
           </li>
           <li class="navbar-item">
-            <router-link to="/dashboard" class="glass-nav-button" active-class="glass-nav-active">学习仪表盘</router-link>
+            <router-link to="/dashboard" class="glass-nav-button" active-class="glass-nav-active"><Books class="nav-icon" :size="21" />学习仪表盘</router-link>
           </li>
           <li class="navbar-item">
-            <router-link to="/feihualing/single" class="glass-nav-button" active-class="glass-nav-active">飞花令</router-link>
+            <router-link to="/feihualing/single" class="glass-nav-button" active-class="glass-nav-active"><FlagBanner class="nav-icon" :size="21" />飞花令</router-link>
           </li>
           <li class="navbar-item">
-            <router-link to="/challenge" class="glass-nav-button" active-class="glass-nav-active">诗词闯关</router-link>
+            <router-link to="/challenge" class="glass-nav-button" active-class="glass-nav-active"><CirclesThreePlus class="nav-icon" :size="21" />诗词闯关</router-link>
           </li>
           <li class="navbar-item">
-            <router-link to="/creation" class="glass-nav-button" active-class="glass-nav-active">诗词创作</router-link>
+            <router-link to="/creation" class="glass-nav-button" active-class="glass-nav-active"><PenNib class="nav-icon" :size="21" />诗词创作</router-link>
           </li>
           <li class="navbar-item">
-            <router-link to="/error-book" class="glass-nav-button" active-class="glass-nav-active">错题本</router-link>
+            <router-link to="/error-book" class="glass-nav-button" active-class="glass-nav-active"><Notebook class="nav-icon" :size="21" />错题本</router-link>
           </li>
           <li class="navbar-item">
-            <router-link to="/profile" class="glass-nav-button" active-class="glass-nav-active">个人中心</router-link>
+            <router-link to="/profile" class="glass-nav-button" active-class="glass-nav-active"><UserCircle class="nav-icon" :size="21" />个人中心</router-link>
           </li>
         </ul>
       </div>
@@ -55,16 +67,15 @@
     <!-- 主内容区 -->
     <main class="container">
       <router-view v-slot="{ Component }">
-        <transition :name="transitionName" mode="out-in">
-          <keep-alive :include="keepAliveIncludes">
-            <component :is="Component" />
-          </keep-alive>
-        </transition>
+        <!-- 路由页面直接替换，避免旧首页在滚动回顶时短暂留在视口中。 -->
+        <keep-alive :include="keepAliveIncludes">
+          <component :is="Component" />
+        </keep-alive>
       </router-view>
     </main>
 
     <!-- 页脚 -->
-    <footer class="footer">
+    <footer v-if="$route.path !== '/challenge' && !$route.path.startsWith('/challenge/level/')" class="footer">
       <div class="container footer-container">
         <p class="footer-text">© 2026 《智韵·灵犀》——基于大模型认知引擎与多维行为分析的智能化古诗词学习系统</p>
         <p class="footer-text">基于 AI 技术的智能学习平台</p>
@@ -75,13 +86,26 @@
 
 <script>
 import TitleBar from './components/TitleBar.vue'
+import AppFeedback from './components/AppFeedback.vue'
 import DemoMode from './views/DemoMode.vue'
+import { prefetchRoute } from './router'
+import { PhBooks as Books, PhCirclesThreePlus as CirclesThreePlus, PhFlagBanner as FlagBanner, PhHouse as House, PhLeaf as Leaf, PhMagnifyingGlass as MagnifyingGlass, PhNotebook as Notebook, PhPenNib as PenNib, PhUserCircle as UserCircle } from '@phosphor-icons/vue'
 
 export default {
   name: 'App',
   components: {
+    AppFeedback,
     TitleBar,
-    DemoMode
+    DemoMode,
+    Books,
+    CirclesThreePlus,
+    FlagBanner,
+    House,
+    Leaf,
+    MagnifyingGlass,
+    Notebook,
+    PenNib,
+    UserCircle
   },
   data() {
     return {
@@ -98,6 +122,10 @@ export default {
   },
 
   mounted() {
+    // 这些集合不参与视图渲染，不放进响应式 data，避免装饰元素增删时触发
+    // 无意义的组件更新。
+    this.dynamicElementNodes = new Set()
+    this.hoverPointerStates = new Map()
     // 检测是否在Electron环境中
     this.isElectron = typeof window !== 'undefined' && window.electronAPI;
 
@@ -108,9 +136,8 @@ export default {
     }
 
     // 监听页面切换方向事件
-    window.addEventListener('page-transition', ((e) => {
-      this.transitionName = `page-${e.detail.direction}`
-    }))
+    this.pageTransitionHandler = this.handlePageTransition.bind(this)
+    window.addEventListener('page-transition', this.pageTransitionHandler)
 
     this.createDynamicElements()
     this.startCreatingDynamicElements()
@@ -150,7 +177,7 @@ export default {
       document.removeEventListener('touchstart', this.clickHandler)
     }
 
-    window.removeEventListener('page-transition', this.handlePageTransition)
+    window.removeEventListener('page-transition', this.pageTransitionHandler)
 
     // 移除本地存储监听器
     window.removeEventListener('storage', this.handleStorageChange)
@@ -167,23 +194,38 @@ export default {
     handlePageTransition(e) {
       this.transitionName = `page-${e.detail.direction}`
     },
-    // 导航栏鼠标跟踪效果
+    prefetchNavigation(event) {
+      const link = event.target.closest?.('a[href]')
+      if (!link || !event.currentTarget.contains(link)) return
+
+      const path = link.hash?.replace(/^#/, '')
+      if (path?.startsWith('/')) prefetchRoute(path).catch(() => {})
+    },
+    // 导航栏鼠标跟踪效果：同一帧只读取一次布局，避免高刷新率鼠标造成连续回流。
     handleNavbarMouseMove(e) {
-      const navbar = e.currentTarget;
-      const rect = navbar.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * 100;
-      const y = ((e.clientY - rect.top) / rect.height) * 100;
-      navbar.style.setProperty('--mouse-x', `${x}%`);
-      navbar.style.setProperty('--mouse-y', `${y}%`);
+      this.queuePointerGradient(e.currentTarget, e.clientX, e.clientY, '--mouse-x', '--mouse-y')
     },
     // 导航按钮鼠标跟踪效果
     handleBtnMouseMove(e) {
-      const btn = e.currentTarget;
-      const rect = btn.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * 100;
-      const y = ((e.clientY - rect.top) / rect.height) * 100;
-      btn.style.setProperty('--btn-mouse-x', `${x}%`);
-      btn.style.setProperty('--btn-mouse-y', `${y}%`);
+      this.queuePointerGradient(e.currentTarget, e.clientX, e.clientY, '--btn-mouse-x', '--btn-mouse-y')
+    },
+    queuePointerGradient(element, clientX, clientY, xVariable, yVariable) {
+      const state = this.hoverPointerStates.get(element) || {}
+      state.clientX = clientX
+      state.clientY = clientY
+      state.xVariable = xVariable
+      state.yVariable = yVariable
+
+      if (!state.frameId) {
+        state.frameId = window.requestAnimationFrame(() => {
+          const rect = element.getBoundingClientRect()
+          element.style.setProperty(state.xVariable, `${((state.clientX - rect.left) / rect.width) * 100}%`)
+          element.style.setProperty(state.yVariable, `${((state.clientY - rect.top) / rect.height) * 100}%`)
+          state.frameId = null
+        })
+      }
+
+      this.hoverPointerStates.set(element, state)
     },
     setupNavbarHoverEffects() {
       const navbar = document.querySelector('.ios26-navbar');
@@ -204,6 +246,10 @@ export default {
       navButtons.forEach(btn => {
         btn.removeEventListener('mousemove', this.handleBtnMouseMove);
       });
+      this.hoverPointerStates?.forEach((state) => {
+        if (state.frameId) window.cancelAnimationFrame(state.frameId)
+      })
+      this.hoverPointerStates?.clear()
     },
     // 更新收藏数量
     updateCollectionCount() {
@@ -248,12 +294,22 @@ export default {
         clearInterval(this.textInterval)
       }
       // 清除所有动态元素
-      this.dynamicElements.forEach(element => {
+      this.dynamicElementNodes?.forEach(element => {
         if (element && element.parentNode) {
           element.parentNode.removeChild(element)
         }
       })
-      this.dynamicElements = []
+      this.dynamicElementNodes?.clear()
+    },
+    addDynamicElement(element, duration) {
+      if (!this.$refs.dynamicElements) return
+      this.$refs.dynamicElements.appendChild(element)
+      this.dynamicElementNodes.add(element)
+      window.setTimeout(() => this.removeDynamicElement(element), duration)
+    },
+    removeDynamicElement(element) {
+      if (element.parentNode) element.parentNode.removeChild(element)
+      this.dynamicElementNodes?.delete(element)
     },
     createPetal() {
       const petal = document.createElement('div')
@@ -273,19 +329,7 @@ export default {
       
       // 添加到容器
       if (this.$refs.dynamicElements) {
-        this.$refs.dynamicElements.appendChild(petal)
-        this.dynamicElements.push(petal)
-        
-        // 动画结束后移除元素
-        setTimeout(() => {
-          if (petal.parentNode) {
-            petal.parentNode.removeChild(petal)
-            const index = this.dynamicElements.indexOf(petal)
-            if (index > -1) {
-              this.dynamicElements.splice(index, 1)
-            }
-          }
-        }, (duration + delay) * 1000)
+        this.addDynamicElement(petal, (duration + delay) * 1000)
       }
     },
     createFloatingText() {
@@ -309,19 +353,7 @@ export default {
       
       // 添加到容器
       if (this.$refs.dynamicElements) {
-        this.$refs.dynamicElements.appendChild(text)
-        this.dynamicElements.push(text)
-        
-        // 动画结束后移除元素
-        setTimeout(() => {
-          if (text.parentNode) {
-            text.parentNode.removeChild(text)
-            const index = this.dynamicElements.indexOf(text)
-            if (index > -1) {
-              this.dynamicElements.splice(index, 1)
-            }
-          }
-        }, (duration + delay) * 1000)
+        this.addDynamicElement(text, (duration + delay) * 1000)
       }
     },
     createMapleLeaf(event) {
@@ -350,19 +382,7 @@ export default {
       
       // 添加到容器
       if (this.$refs.dynamicElements) {
-        this.$refs.dynamicElements.appendChild(mapleLeaf)
-        this.dynamicElements.push(mapleLeaf)
-        
-        // 动画结束后移除元素
-        setTimeout(() => {
-          if (mapleLeaf.parentNode) {
-            mapleLeaf.parentNode.removeChild(mapleLeaf)
-            const index = this.dynamicElements.indexOf(mapleLeaf)
-            if (index > -1) {
-              this.dynamicElements.splice(index, 1)
-            }
-          }
-        }, duration * 1000)
+        this.addDynamicElement(mapleLeaf, duration * 1000)
       }
     },
     createRipple(event) {
@@ -380,20 +400,8 @@ export default {
       
       // 添加到容器
       if (this.$refs.dynamicElements) {
-        this.$refs.dynamicElements.appendChild(ripple)
-        this.dynamicElements.push(ripple)
-        
-        // 动画结束后移除元素
         const animationDuration = 0.6 // 涟漪动画持续时间
-        setTimeout(() => {
-          if (ripple.parentNode) {
-            ripple.parentNode.removeChild(ripple)
-            const index = this.dynamicElements.indexOf(ripple)
-            if (index > -1) {
-              this.dynamicElements.splice(index, 1)
-            }
-          }
-        }, animationDuration * 1000)
+        this.addDynamicElement(ripple, animationDuration * 1000)
       }
     },
     clearAuthData() {

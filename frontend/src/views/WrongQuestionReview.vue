@@ -296,6 +296,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import api from '../services/api';
+import { askConfirm } from '../services/appFeedback';
 
 export default {
   name: 'WrongQuestionReview',
@@ -524,7 +525,7 @@ export default {
     };
 
     const deleteCurrentQuestion = async () => {
-      if (!currentQuestion.value || !confirm('确定要删除这道错题吗？')) return;
+      if (!currentQuestion.value || !await askConfirm('确定要删除这道错题吗？', { title: '删除错题', confirmText: '删除', danger: true })) return;
       const questionId = currentQuestion.value.question_id || currentQuestion.value.id;
       const itemId = currentQuestion.value.id;
 
@@ -551,13 +552,13 @@ export default {
       }
     };
 
-    const nextQuestion = () => {
+    const nextQuestion = async () => {
       if (currentIndex.value < questions.value.length - 1) {
         currentIndex.value++;
         resetState();
         nextTick(() => answerInputRef.value?.focus());
       } else {
-        if (confirm('已完成所有错题复习！继续加油！')) {
+        if (await askConfirm('已完成所有错题复习！继续加油！', { title: '复习完成', confirmText: '返回挑战', cancelText: '留在本页' })) {
           router.push('/challenge');
         }
       }

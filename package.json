@@ -10,6 +10,7 @@
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend && npm run dev",
     "build:frontend": "cd frontend && npm run build",
+    "package": "node build.js",
     "build:backend": "cd backend && npm install",
     "test": "cd backend && npm test",
     "db:seed": "cd backend && node scripts/seed.js",

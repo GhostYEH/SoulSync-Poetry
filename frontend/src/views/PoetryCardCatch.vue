@@ -170,6 +170,7 @@
             <span class="time-icon">⏱</span>
             <span class="time-value">{{ formatTime(elapsed) }}</span>
           </div>
+          <button class="hud-pause-btn" type="button" aria-label="暂停游戏" @click="pauseGame">暂停</button>
         </div>
       </div>
     </transition>
@@ -286,6 +287,13 @@
           <div class="gameover-actions">
             <button
               v-if="wrongCaughtLog.length > 0"
+              class="action-btn review-btn"
+              @click="showReview"
+            >
+              <span class="btn-text">复盘错题</span>
+            </button>
+            <button
+              v-if="wrongCaughtLog.length > 0"
               class="action-btn error-book-btn"
               :class="{ 'all-added': allErrorsAddedToBook }"
               :disabled="isAddingAllToBook || allErrorsAddedToBook"
@@ -301,7 +309,7 @@
               <span class="btn-icon">🔄</span>
               <span class="btn-text">再来一局</span>
             </button>
-            <button v-if="gameLevel < 200" class="action-btn primary-btn" @click="nextLevel">
+            <button v-if="gameLevel < 5" class="action-btn primary-btn" @click="nextLevel">
               <span class="btn-icon">▶</span>
               <span class="btn-text">下一关</span>
             </button>
@@ -501,28 +509,6 @@ const DIFFICULTIES = [
   { value: 'hard', label: '挑战', icon: '🌳', desc: '诗词达人', color: '#f44336' }
 ];
 
-const getUserId = () => {
-  const userInfo = localStorage.getItem('userInfo');
-  if (userInfo) {
-    try {
-      const user = JSON.parse(userInfo);
-      return user.id || user.userId || 1;
-    } catch (e) {
-      return 1;
-    }
-  }
-  const user = localStorage.getItem('user');
-  if (user) {
-    try {
-      const userData = JSON.parse(user);
-      return userData.id || userData.userId || 1;
-    } catch (e) {
-      return 1;
-    }
-  }
-  return 1;
-};
-
 const authFetch = (url, options = {}) => {
   const token = localStorage.getItem('token');
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -558,6 +544,9 @@ export default {
     let elapsedTimer = null;
     let spawnTimer = 0;
     let gameStartTime = 0;
+    let elapsedBeforePause = 0;
+    let startingLevel = 1;
+    let startToken = 0;
 
     // ==================== 玩家 ====================
     const player = {
@@ -572,6 +561,10 @@ export default {
     const MAX_VX = 14;
     const FRICTION = 0.84;
     const keys = { left: false, right: false };
+    const resetKeys = () => {
+      keys.left = false;
+      keys.right = false;
+    };
 
     // ==================== 卡片 ====================
     let cards = [];
@@ -632,6 +625,7 @@ export default {
     const allAddedToReview = computed(() => {
       return reviewErrors.value.length > 0 && reviewErrors.value.every(e => e.addedToReview);
     });
+    const isStarting = ref(false);
 
     // ==================== 方法 ====================
     const showToast = (text, type = 'info', comboVal = 0) => {
@@ -660,7 +654,7 @@ export default {
     const getDifficultyParams = () => {
       const d = diff.value;
       const t = elapsed.value;
-      const level = Math.min(Math.floor(t / 30) + 1, 5);
+      const level = Math.min(startingLevel + Math.floor(t / 30), 5);
       gameLevel.value = level;
       const mult = 1 + (level - 1) * 0.15;
       const speedMap = { easy: 1.0, medium: 1.35, hard: 1.8 };
@@ -969,23 +963,23 @@ export default {
       // 卡片主体 - 统一深色卷轴风格
       if (!collected) {
         const cardGrad = ctx.createLinearGradient(x, y, x + w, y + h);
-        cardGrad.addColorStop(0, 'rgba(20, 30, 60, 0.97)');
-        cardGrad.addColorStop(1, 'rgba(15, 25, 50, 0.97)');
+        cardGrad.addColorStop(0, 'rgba(255, 255, 255, 0.97)');
+        cardGrad.addColorStop(1, 'rgba(232, 245, 239, 0.97)');
         ctx.fillStyle = cardGrad;
       } else {
-        ctx.fillStyle = 'rgba(30, 20, 50, 0.5)';
+        ctx.fillStyle = 'rgba(245, 249, 246, 0.58)';
       }
 
       // 统一边框颜色
-      ctx.strokeStyle = 'rgba(205, 133, 63, 0.5)';
+      ctx.strokeStyle = 'rgba(176, 140, 92, 0.62)';
       ctx.lineWidth = 2;
 
       // 卷轴头装饰
       const rollW = 12;
       const rollGrad = ctx.createLinearGradient(x, y, x + rollW, y);
-      rollGrad.addColorStop(0, 'rgba(139, 90, 43, 0.8)');
-      rollGrad.addColorStop(0.5, 'rgba(205, 133, 63, 1)');
-      rollGrad.addColorStop(1, 'rgba(139, 90, 43, 0.8)');
+      rollGrad.addColorStop(0, 'rgba(176, 140, 92, 0.72)');
+      rollGrad.addColorStop(0.5, 'rgba(208, 183, 143, 1)');
+      rollGrad.addColorStop(1, 'rgba(176, 140, 92, 0.72)');
       ctx.fillStyle = rollGrad;
       ctx.fillRect(x, y, rollW, h);
 
@@ -1020,7 +1014,7 @@ export default {
 
       // 上句
       const fontSize = Math.min(12, Math.max(9, (w - rollW - 28) / upperText.length * 1.5));
-      ctx.fillStyle = collected ? 'rgba(255, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.7)';
+      ctx.fillStyle = collected ? 'rgba(49, 93, 85, 0.32)' : '#315d55';
       ctx.font = `${fontSize}px 'STSong','SimSun','Noto Serif SC',serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -1028,8 +1022,8 @@ export default {
 
       // 下句文字：统一浅金色
       const lowerColor = collected
-        ? 'rgba(255, 255, 255, 0.3)'
-        : '#f0d78c';
+        ? 'rgba(49, 93, 85, 0.26)'
+        : '#197666';
       ctx.font = `bold ${Math.min(14, Math.max(10, (w - rollW - 28) / lowerText.length * 1.7))}px 'STSong','SimSun','Noto Serif SC',serif`;
       ctx.fillStyle = lowerColor;
       ctx.fillText(lowerText, x + rollW + (w - rollW) / 2, y + h * 0.72, w - rollW - 20);
@@ -1112,14 +1106,14 @@ export default {
 
       // 帽子 - 书生帽
       const hatGrad = ctx.createLinearGradient(0, -ph * 0.55, 0, -ph * 0.2);
-      hatGrad.addColorStop(0, '#1a1035');
-      hatGrad.addColorStop(1, '#2c1654');
+      hatGrad.addColorStop(0, '#173f39');
+      hatGrad.addColorStop(1, '#197666');
       ctx.fillStyle = hatGrad;
       ctx.beginPath();
       ctx.ellipse(0, -ph * 0.28, pw * 0.3, ph * 0.07, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillRect(-pw * 0.12, -ph * 0.42, pw * 0.24, ph * 0.14);
-      ctx.fillStyle = '#0f0a1e';
+      ctx.fillStyle = '#173f39';
       ctx.beginPath();
       ctx.arc(0, -ph * 0.42, pw * 0.1, Math.PI, 0);
       ctx.fill();
@@ -1280,7 +1274,8 @@ export default {
                 questionText: card.upperText,
                 userAnswer: card.lowerText,
                 correctAnswer: card.correctAnswer,
-                poem: card.poem
+                poem: card.poem,
+                addedToReview: false
               });
               spawnParticles(card.x + card.w / 2, card.y + card.h / 2, '#f87171', 12);
               showToast('错误！', 'error');
@@ -1326,7 +1321,19 @@ export default {
     };
 
     // ==================== 游戏控制 ====================
-    const startGame = async () => {
+    const startElapsedTimer = () => {
+      if (elapsedTimer) clearInterval(elapsedTimer);
+      gameStartTime = Date.now();
+      elapsedTimer = setInterval(() => {
+        elapsed.value = elapsedBeforePause + Math.floor((Date.now() - gameStartTime) / 1000);
+      }, 1000);
+    };
+
+    const startGame = async ({ level = 1 } = {}) => {
+      if (isStarting.value) return;
+      const requestToken = ++startToken;
+      isStarting.value = true;
+      resetKeys();
       phase.value = 'PLAYING';
       gameSessionId.value = generateAttemptId();
       score.value = 0;
@@ -1335,6 +1342,8 @@ export default {
       missedCount.value = 0;
       elapsed.value = 0;
       gameLevel.value = 1;
+      startingLevel = Math.min(Math.max(level, 1), 5);
+      gameLevel.value = startingLevel;
       combo.value = 0;
       maxCombo.value = 0;
       spawnTimer = 0;
@@ -1350,37 +1359,47 @@ export default {
       poemSpawnTime.clear();
       wrongCaughtLog = [];
       reviewErrors.value = [];
+      reviewLoading.value = false;
       allErrorsAddedToBook.value = false;
       cardIdCounter = 0;
 
       // 从API获取带难度梯度的题库
-      await fetchQuestionBank(diff.value, 1);
-      wrongCardPool = buildWrongPoolFromBank();
+      try {
+        await fetchQuestionBank(diff.value, 1);
+        // 开始按钮、重开或退出可能在请求期间再次触发。旧请求回来后不能偷跑一局。
+        if (requestToken !== startToken || phase.value !== 'PLAYING') return;
+        wrongCardPool = buildWrongPoolFromBank();
 
-      gameStartTime = Date.now();
-      elapsedTimer = setInterval(() => {
-        elapsed.value = Math.floor((Date.now() - gameStartTime) / 1000);
-      }, 1000);
+        elapsedBeforePause = 0;
+        startElapsedTimer();
 
-      await nextTick();
+        await nextTick();
 
-      // 确保全屏切换时立即响应
-      requestAnimationFrame(() => {
-        scrollGameIntoView();
-        lastTime = performance.now();
-        animId = requestAnimationFrame(gameLoop);
-      });
+        // 确保全屏切换时立即响应
+        requestAnimationFrame(() => {
+          if (requestToken !== startToken || phase.value !== 'PLAYING') return;
+          scrollGameIntoView();
+          lastTime = performance.now();
+          animId = requestAnimationFrame(gameLoop);
+        });
+      } finally {
+        if (requestToken === startToken) isStarting.value = false;
+      }
     };
 
     const pauseGame = () => {
-      if (phase.value !== 'PLAYING') return;
+      // 题库尚未准备好时不允许切到 PAUSED，避免请求返回后无法启动循环。
+      if (isStarting.value || phase.value !== 'PLAYING') return;
       phase.value = 'PAUSED';
       cancelAnimationFrame(animId);
+      if (elapsedTimer) clearInterval(elapsedTimer);
+      elapsedBeforePause = elapsed.value;
     };
 
     const resumeGame = () => {
       if (phase.value !== 'PAUSED') return;
       phase.value = 'PLAYING';
+      startElapsedTimer();
       lastTime = performance.now();
       animId = requestAnimationFrame(gameLoop);
     };
@@ -1395,25 +1414,21 @@ export default {
     };
 
     const nextLevel = () => {
-      if (gameLevel.value < 200) {
-        gameLevel.value++;
-        startGame();
+      if (gameLevel.value < 5) {
+        startGame({ level: Math.min(gameLevel.value + 1, 5) });
       } else {
         endGame();
       }
     };
 
     const restartGame = () => {
-      phase.value = 'MENU';
-      cancelAnimationFrame(animId);
-      wrongCaughtLog = [];
-      reviewErrors.value = [];
-      reviewLoading.value = false;
-      ctx?.clearRect(0, 0, CANVAS_W, CANVAS_H);
-      drawBackground();
+      startGame();
     };
 
     const quitGame = () => {
+      startToken++;
+      isStarting.value = false;
+      resetKeys();
       phase.value = 'MENU';
       cancelAnimationFrame(animId);
       if (elapsedTimer) clearInterval(elapsedTimer);
@@ -1427,6 +1442,7 @@ export default {
 
     // ==================== 复盘功能 ====================
     const showReview = async () => {
+      const reviewToken = startToken;
       phase.value = 'REVIEW';
       cancelAnimationFrame(animId);
       reviewLoading.value = true;
@@ -1460,6 +1476,7 @@ export default {
             })
           });
           const json = await resp.json();
+          if (reviewToken !== startToken || phase.value !== 'REVIEW') return;
           if (json.success && json.data) {
             errList[i].aiData = json.data;
             reviewErrors.value = [...errList];
@@ -1468,25 +1485,37 @@ export default {
           console.error('AI讲解请求失败', e);
         }
       }
-      reviewLoading.value = false;
+      if (reviewToken === startToken && phase.value === 'REVIEW') {
+        reviewLoading.value = false;
+      }
+    };
+
+    const buildReviewPayload = (err) => {
+      const poem = err.poem || {};
+      return {
+        questionText: err.questionText,
+        correctAnswer: err.correctAnswer,
+        userAnswer: err.userAnswer,
+        question_id: poem.id || poem.question_id || null,
+        level: Number(poem.level) || gameLevel.value || 1,
+        full_poem: poem.full_poem || poem.fullPoem || '',
+        author: poem.author || '',
+        title: poem.title || poem.poem || '',
+        source: 'card-catch'
+      };
     };
 
     const addSingleToErrorBook = async (err) => {
       try {
-        const userId = getUserId();
-          const resp = await authFetch(`${API_BASE}/add-to-review`, {
-            method: 'POST',
-            body: JSON.stringify({
-              questionText: err.questionText,
-              correctAnswer: err.correctAnswer,
-              userAnswer: err.userAnswer
-            })
-          });
-          const json = await resp.json();
-          if (json.success) {
-            err.addedToReview = true;
-            reviewErrors.value = [...reviewErrors.value];
-            showToast('已加入错题本', 'success');
+        const resp = await authFetch(`${API_BASE}/add-to-review`, {
+          method: 'POST',
+          body: JSON.stringify(buildReviewPayload(err))
+        });
+        const json = await resp.json();
+        if (resp.ok && json.success) {
+          err.addedToReview = true;
+          reviewErrors.value = [...reviewErrors.value];
+          showToast('已加入错题本', 'success');
         } else {
           showToast(json.message || '添加失败', 'error');
         }
@@ -1501,23 +1530,24 @@ export default {
       isAddingAll.value = true;
 
       const notAdded = reviewErrors.value.filter(e => !e.addedToReview);
+      let successCount = 0;
+      let failedCount = 0;
       
       for (const err of notAdded) {
         try {
-          const userId = getUserId();
           const resp = await authFetch(`${API_BASE}/add-to-review`, {
             method: 'POST',
-            body: JSON.stringify({
-              questionText: err.questionText,
-              correctAnswer: err.correctAnswer,
-              userAnswer: err.userAnswer
-            })
+            body: JSON.stringify(buildReviewPayload(err))
           });
           const json = await resp.json();
-          if (json.success) {
+          if (resp.ok && json.success) {
             err.addedToReview = true;
+            successCount++;
+          } else {
+            failedCount++;
           }
         } catch (e) {
+          failedCount++;
           console.error('添加错题失败', e);
         }
       }
@@ -1525,10 +1555,17 @@ export default {
       reviewErrors.value = [...reviewErrors.value];
       isAddingAll.value = false;
       
-      if (notAdded.length > 0) {
+      if (successCount > 0) {
         addedSuccess.value = true;
         setTimeout(() => { addedSuccess.value = false; }, 3000);
-        showToast(`已成功添加 ${notAdded.length} 条错题！`, 'success');
+        showToast(
+          failedCount > 0
+            ? `已添加 ${successCount} 条，${failedCount} 条失败，请重试`
+            : `已成功添加 ${successCount} 条错题！`,
+          failedCount > 0 ? 'warn' : 'success'
+        );
+      } else if (notAdded.length > 0) {
+        showToast('错题添加失败，请重试', 'error');
       }
     };
 
@@ -1538,31 +1575,44 @@ export default {
       
       isAddingAllToBook.value = true;
 
-      for (const err of wrongCaughtLog) {
+      const pendingErrors = wrongCaughtLog.filter(err => !err.addedToReview);
+      let successCount = 0;
+      let failedCount = 0;
+
+      for (const err of pendingErrors) {
         try {
-          const userId = getUserId();
           const resp = await authFetch(`${API_BASE}/add-to-review`, {
             method: 'POST',
-            body: JSON.stringify({
-              questionText: err.questionText,
-              correctAnswer: err.correctAnswer,
-              userAnswer: err.userAnswer
-            })
+            body: JSON.stringify(buildReviewPayload(err))
           });
           const json = await resp.json();
-          if (!json.success) {
+          if (resp.ok && json.success) {
+            err.addedToReview = true;
+            successCount++;
+          } else {
+            failedCount++;
             console.error('添加错题失败:', json.message);
           }
         } catch (e) {
+          failedCount++;
           console.error('添加错题失败', e);
         }
       }
 
       isAddingAllToBook.value = false;
-      allErrorsAddedToBook.value = true;
-      addedSuccess.value = true;
-      setTimeout(() => { addedSuccess.value = false; }, 3000);
-      showToast(`已成功添加 ${wrongCaughtLog.length} 条错题到错题本！`, 'success');
+      allErrorsAddedToBook.value = pendingErrors.length > 0 && failedCount === 0;
+      if (successCount > 0) {
+        addedSuccess.value = true;
+        setTimeout(() => { addedSuccess.value = false; }, 3000);
+        showToast(
+          failedCount > 0
+            ? `已添加 ${successCount} 条，${failedCount} 条失败，请重试`
+            : `已成功添加 ${successCount} 条错题到错题本！`,
+          failedCount > 0 ? 'warn' : 'success'
+        );
+      } else if (pendingErrors.length > 0) {
+        showToast('错题添加失败，请重试', 'error');
+      }
     };
 
     // ==================== 保存记录 ====================
@@ -1677,6 +1727,8 @@ export default {
     });
 
     onUnmounted(() => {
+      startToken++;
+      resetKeys();
       cancelAnimationFrame(animId);
       if (elapsedTimer) clearInterval(elapsedTimer);
       if (toastTimer) clearTimeout(toastTimer);
@@ -1694,14 +1746,13 @@ export default {
       isAddingAllToBook, allErrorsAddedToBook, wrongCaughtLog,
       toast, addedSuccess,
       formatTime, getPetalStyle, showReview, addSingleToErrorBook, addAllToErrorBook, addAllErrorsToBook,
-      startGame, resumeGame, restartGame, quitGame, nextLevel
+      startGame, pauseGame, resumeGame, restartGame, quitGame, nextLevel
     };
   }
 };
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700;900&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&display=swap');
 
 /* ==================== 基础布局 ==================== */
 .poetry-mahjong-wrapper {

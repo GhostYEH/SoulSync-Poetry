@@ -83,12 +83,12 @@
       <div class="editor-area">
         <div class="editor-hint">
           <span class="hint-icon">💡</span>
-          <span>请创作一首包含「{{ currentKeyword }}」字的诗词</span>
+          <span>围绕「{{ currentKeyword }}」起意，自然融入诗句即可</span>
         </div>
 
         <textarea
           v-model="localContent"
-          :placeholder="`在这里创作你的飞花令诗词...\n每句都应包含「${currentKeyword}」字`"
+          :placeholder="`在这里创作你的飞花令诗词...\n至少自然融入一次「${currentKeyword}」字`"
           class="poem-textarea"
           rows="8"
           @input="checkKeywordCount"
@@ -175,6 +175,10 @@ export default {
       type: String,
       default: ''
     },
+    keywordInfo: {
+      type: Object,
+      default: null
+    },
     isPolishing: {
       type: Boolean,
       default: false
@@ -184,7 +188,7 @@ export default {
       default: null
     }
   },
-  emits: ['update:title', 'update:content', 'score', 'change:keyword', 'polish', 'apply'],
+  emits: ['update:title', 'update:content', 'score', 'request-keyword', 'change:keyword', 'polish', 'apply'],
   setup(props, { emit }) {
     const currentKeyword = ref(props.keyword);
     const selectedDifficulty = ref('中等');
@@ -208,14 +212,7 @@ export default {
 
     // 随机获取关键字
     const getRandomKeyword = () => {
-      const difficulty = difficulties.find(d => d.value === selectedDifficulty.value);
-      const keywords = difficulty?.keywords || ['月', '花', '风'];
-      const randomKeyword = keywords[Math.floor(Math.random() * keywords.length)];
-
-      currentKeyword.value = randomKeyword;
-      relatedWords.value = getRelatedWords(randomKeyword);
-
-      emit('change:keyword', randomKeyword);
+      emit('request-keyword', selectedDifficulty.value);
     };
 
     // 获取相关意象
@@ -296,6 +293,15 @@ export default {
         relatedWords.value = getRelatedWords(newKeyword);
       }
     });
+
+    watch(() => props.keywordInfo, (info) => {
+      if (!info?.keyword) return;
+      currentKeyword.value = info.keyword;
+      relatedWords.value = Array.isArray(info.relatedWords) && info.relatedWords.length
+        ? info.relatedWords
+        : getRelatedWords(info.keyword);
+      emit('change:keyword', info.keyword);
+    }, { deep: true });
 
     watch(() => props.score, (newScore) => {
       showScore.value = !!newScore;

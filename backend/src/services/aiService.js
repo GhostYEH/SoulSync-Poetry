@@ -2562,89 +2562,78 @@ async function generateAuthorAvatar(author) {
   }
 }
 
-// 语音合成
+// 语音合成：MiMo 的 TTS 接口遵循 OpenAI Chat Completions 格式，
+// 目标播报文本必须放在 assistant 消息中，user 消息用于描述演绎风格。
 async function generateTTS(text) {
-  const apiKey = process.env.ALIYUN_BAILIAN_API_KEY;
-  
+  const { apiKey, apiUrl, model, voice, style, timeout } = config.mimo;
+
   if (!apiKey) {
-    console.error('[aiService] 阿里云百炼API密钥未配置');
-    throw new AIError(AI_ERRORS.AUTH_FAILED, 'AI语音合成未配置API密钥');
+    console.error('[aiService] MiMo API 密钥未配置');
+    throw new AIError(AI_ERRORS.AUTH_FAILED, 'MiMo 语音合成未配置 API 密钥');
   }
 
-  const url = 'https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer';
-  
+  if (typeof text !== 'string' || !text.trim()) {
+    throw new AIError(AI_ERRORS.INVALID_RESPONSE, '语音合成文本不能为空');
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
   try {
-    console.log('[aiService] 开始语音合成, 文本长度:', text.length);
-    
-    const response = await fetch(url, {
+    console.log('[aiService] 开始 MiMo 语音合成, model:', model, 'voice:', voice, '文本长度:', text.length);
+
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'cosyvoice-v2',
-        input: {
-          text: text,
-          voice: 'libai_v2',
-          format: 'mp3',
-          sample_rate: 22050
+        model,
+        messages: [
+          { role: 'user', content: style },
+          { role: 'assistant', content: text }
+        ],
+        audio: {
+          format: 'wav',
+          voice
         }
-      })
+      }),
+      signal: controller.signal
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('[aiService] 语音合成失败:', response.status, errorData);
-      throw new AIError(response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE, `语音合成API请求失败: ${response.status} - ${JSON.stringify(errorData)}`);
+      const errorText = await response.text().catch(() => '');
+      console.error('[aiService] MiMo 语音合成失败:', response.status, errorText.slice(0, 500));
+      throw new AIError(
+        response.status === 429 ? AI_ERRORS.RATE_LIMITED : AI_ERRORS.UNAVAILABLE,
+        `MiMo 语音合成请求失败: ${response.status}`
+      );
     }
 
-    const contentType = response.headers.get('content-type');
-    console.log('[aiService] 响应Content-Type:', contentType);
-    
-    if (contentType && contentType.includes('application/json')) {
-      const data = await response.json();
-      console.log('[aiService] 语音合成API返回JSON:', JSON.stringify(data).substring(0, 500));
-      
-      if (data.output && data.output.audio) {
-        const audioInfo = data.output.audio;
-        
-        if (audioInfo.data && audioInfo.data.length > 0) {
-          console.log('[aiService] 获得Base64音频数据');
-          return Buffer.from(audioInfo.data, 'base64');
-        } else if (audioInfo.url) {
-          console.log('[aiService] 获得音频URL:', audioInfo.url);
-          const audioResponse = await fetch(audioInfo.url);
-          if (!audioResponse.ok) {
-            throw new AIError(AI_ERRORS.UNAVAILABLE, '下载音频失败');
-          }
-          const audioData = await audioResponse.arrayBuffer();
-          return Buffer.from(audioData);
-        } else {
-          throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'API返回的音频数据为空');
-        }
-      } else if (data.output && data.output.audio_url) {
-        const audioUrl = data.output.audio_url;
-        console.log('[aiService] 获得音频URL:', audioUrl);
-        
-        const audioResponse = await fetch(audioUrl);
-        if (!audioResponse.ok) {
-          throw new AIError(AI_ERRORS.UNAVAILABLE, '下载音频失败');
-        }
-        const audioData = await audioResponse.arrayBuffer();
-        return Buffer.from(audioData);
-      } else {
-        console.error('[aiService] API返回格式错误:', data);
-        throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'API返回格式错误，未找到音频数据');
-      }
-    } else {
-      console.log('[aiService] 语音合成API直接返回音频数据');
-      const audioData = await response.arrayBuffer();
-      return Buffer.from(audioData);
+    const data = await response.json().catch(() => null);
+    const audioData = data?.choices?.[0]?.message?.audio?.data;
+    if (typeof audioData !== 'string' || !audioData) {
+      console.error('[aiService] MiMo 返回格式错误:', JSON.stringify(data).slice(0, 500));
+      throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'MiMo 返回格式错误，未找到音频数据');
     }
+
+    // 兼容纯 Base64 和意外带 data URL 前缀的返回值。
+    const base64Audio = audioData.includes(',') ? audioData.split(',').pop() : audioData;
+    const audioBuffer = Buffer.from(base64Audio, 'base64');
+    if (!audioBuffer.length) {
+      throw new AIError(AI_ERRORS.INVALID_RESPONSE, 'MiMo 返回的音频数据为空');
+    }
+
+    return audioBuffer;
   } catch (error) {
-    console.error('[aiService] 语音合成错误:', error);
+    if (error.name === 'AbortError') {
+      throw new AIError(AI_ERRORS.TIMEOUT, 'MiMo 语音合成请求超时');
+    }
+    console.error('[aiService] MiMo 语音合成错误:', error.message);
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

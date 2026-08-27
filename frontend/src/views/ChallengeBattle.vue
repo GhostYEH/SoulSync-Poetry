@@ -366,6 +366,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import io from 'socket.io-client';
 import api, { SOCKET_URL } from '../services/api';
+import { askConfirm } from '../services/appFeedback';
 
 export default {
   name: 'ChallengeBattle',
@@ -891,8 +892,8 @@ export default {
       }
     };
 
-    const confirmQuit = () => {
-      if (!confirm('确定要结束挑战吗？这将结束所有挑战。')) return;
+    const confirmQuit = async () => {
+      if (!await askConfirm('确定要结束挑战吗？这将结束所有挑战。', { title: '结束挑战', confirmText: '结束挑战', danger: true })) return;
       stopSingleTimer();
       stopDualTimer();
       if (gameMode.value === 'single') {
