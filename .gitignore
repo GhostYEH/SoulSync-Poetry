@@ -103,11 +103,17 @@ jspm_packages/
 playwright-report/
 test-results/
 screenshots/
+/.codex-*-profile*/
+/.codex-*-check*/
+/.codex-*-debug*/
 /*-desktop*.png
 /*-headless*.png
 /*-mobile*.png
 /*-page-turn*.png
 /*-qa*.png
+/digital-human-*.png
+/poem-detail-comparison.png
+/design-qa-compare.html
 
 # Temporary files
 test-*.js
