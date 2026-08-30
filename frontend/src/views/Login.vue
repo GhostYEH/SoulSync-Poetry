@@ -53,13 +53,12 @@
               <span class="page-paper-texture"></span>
               <span class="page-image landscape-page-image"></span>
               <span class="page-vignette"></span>
-              <span class="page-number">01</span>
-              <span class="page-side-note">山水有清音</span>
+              <span class="page-number">{{ leftPageNumber }}</span>
+              <span class="page-side-note">{{ leftPagePoem.sideNote }}</span>
               <span class="page-poem page-poem-left">
-                <b>山行</b>
-                <span>远上寒山石径斜，</span>
-                <span>白云生处有人家。</span>
-                <small>杜牧 · 唐</small>
+                <b>{{ leftPagePoem.title }}</b>
+                <span v-for="line in leftPagePoem.lines" :key="line">{{ line }}</span>
+                <small>{{ leftPagePoem.byline }}</small>
               </span>
             </span>
 
@@ -67,28 +66,38 @@
               <span class="page-paper-texture"></span>
               <span class="page-branch" aria-hidden="true"></span>
               <span class="page-moon" aria-hidden="true"></span>
-              <span class="page-number">02</span>
-              <span class="page-kicker">今日荐读 · {{ currentPoem.credit.split('·')[0] }}</span>
+              <span class="page-number">{{ rightPageNumber }}</span>
+              <span class="page-kicker">今日荐读 · {{ rightPagePoem.credit.split('·')[0] }}</span>
               <span class="page-poem page-poem-right">
-                <b>{{ currentPoem.line }}</b>
-                <small>{{ currentPoem.credit }}</small>
+                <b>{{ rightPagePoem.line }}</b>
+                <small>{{ rightPagePoem.credit }}</small>
               </span>
               <span class="page-seal">灵犀</span>
             </span>
 
-            <span class="turning-page" :class="{ 'is-turning': isTurning }" aria-hidden="true">
+            <span
+              class="turning-page"
+              :class="{ 'is-turning': isTurning }"
+              aria-hidden="true"
+              @animationend="handleTurnAnimationEnd"
+            >
               <span class="turn-face turn-front">
                 <span class="page-paper-texture"></span>
                 <span class="page-branch branch-front"></span>
                 <span class="page-kicker">诗词照见心灵</span>
-                <strong class="turn-title">{{ currentPoem.line }}</strong>
-                <small>{{ currentPoem.credit }}</small>
+                <strong class="turn-title">{{ turnFromPoem.line }}</strong>
+                <small>{{ turnFromPoem.credit }}</small>
               </span>
               <span class="turn-face turn-back">
                 <span class="page-paper-texture"></span>
-                <span class="page-kicker">学习点亮智慧</span>
-                <strong class="turn-title">{{ turningPoem.line }}</strong>
-                <small>{{ turningPoem.credit }}</small>
+                <span class="page-image landscape-page-image"></span>
+                <span class="page-vignette"></span>
+                <span class="page-side-note">{{ turnFromPoem.sideNote }}</span>
+                <span class="page-poem page-poem-left turn-back-poem">
+                  <b>{{ turnFromPoem.title }}</b>
+                  <span v-for="line in turnFromPoem.lines" :key="line">{{ line }}</span>
+                  <small>{{ turnFromPoem.byline }}</small>
+                </span>
                 <span class="page-seal">智韵</span>
               </span>
             </span>
@@ -208,24 +217,71 @@ const pageIndex = ref(0)
 const autoTurnTimer = ref(null)
 const turnTimeout = ref(null)
 const noticeTimer = ref(null)
+const flipFromPoem = ref(null)
+const flipToPoem = ref(null)
 let readyTimer = null
 
+function createBookPage(poem, sideNote = '诗心有回响') {
+  const titleMatch = poem.credit.match(/《([^》]+)》/)
+  return {
+    ...poem,
+    title: titleMatch?.[1] || '诗笺',
+    lines: poem.line.match(/[^，。！？；]+[，。！？；]?/gu) || [poem.line],
+    byline: poem.credit.replace(/\s*·\s*《[^》]+》/, ''),
+    sideNote
+  }
+}
+
+const INTRO_BOOK_PAGE = {
+  title: '山行',
+  line: '远上寒山石径斜，白云生处有人家。',
+  lines: ['远上寒山石径斜，', '白云生处有人家。'],
+  credit: '杜牧 · 唐',
+  byline: '杜牧 · 唐',
+  sideNote: '山水有清音'
+}
+const BOOK_PAGES = Object.freeze([
+  INTRO_BOOK_PAGE,
+  ...LOGIN_POEMS.slice(0, 11).map(poem => createBookPage(poem))
+])
+const BOOK_PAGE_COUNT = BOOK_PAGES.length
+const PAGE_TURN_FALLBACK_MS = 1500
 const form = ref({ username: '', password: '' })
-const currentPoem = computed(() => LOGIN_POEMS[pageIndex.value % LOGIN_POEMS.length])
-const turningPoem = computed(() => LOGIN_POEMS[(pageIndex.value + 1) % LOGIN_POEMS.length])
+const leftPagePoem = computed(() => BOOK_PAGES[pageIndex.value % BOOK_PAGE_COUNT])
+const currentPoem = computed(() => BOOK_PAGES[(pageIndex.value + 1) % BOOK_PAGE_COUNT])
+const nextPoem = computed(() => BOOK_PAGES[(pageIndex.value + 2) % BOOK_PAGE_COUNT])
+const rightPagePoem = computed(() => isTurning.value && flipToPoem.value ? flipToPoem.value : currentPoem.value)
+const turnFromPoem = computed(() => flipFromPoem.value || currentPoem.value)
+const leftPageNumber = computed(() => String(pageIndex.value + 1).padStart(2, '0'))
+const rightPageNumber = computed(() => String(((pageIndex.value + 1) % BOOK_PAGE_COUNT) + 1).padStart(2, '0'))
+
+function finishPageTurn() {
+  if (!isTurning.value) return
+  pageIndex.value = (pageIndex.value + 1) % BOOK_PAGE_COUNT
+  isTurning.value = false
+  flipFromPoem.value = null
+  flipToPoem.value = null
+  window.clearTimeout(turnTimeout.value)
+  turnTimeout.value = null
+}
+
+function handleTurnAnimationEnd(event) {
+  if (event.target !== event.currentTarget) return
+  finishPageTurn()
+}
 
 function turnPage() {
   if (isTurning.value) return
   if (isReducedMotion.value) {
-    pageIndex.value = (pageIndex.value + 1) % 12
+    pageIndex.value = (pageIndex.value + 1) % BOOK_PAGE_COUNT
     return
   }
+  flipFromPoem.value = currentPoem.value
+  flipToPoem.value = nextPoem.value
   isTurning.value = true
   window.clearTimeout(turnTimeout.value)
-  turnTimeout.value = window.setTimeout(() => {
-    pageIndex.value = (pageIndex.value + 1) % 12
-    isTurning.value = false
-  }, 1180)
+  // animationend is authoritative; this only recovers if the browser drops it.
+  turnTimeout.value = window.setTimeout(finishPageTurn, PAGE_TURN_FALLBACK_MS)
 }
 
 function showNotice(message) {
@@ -349,14 +405,17 @@ onBeforeUnmount(() => {
 .page-kicker { position: absolute; top: 25px; left: 28px; color: rgba(37,72,64,.52); font: 11px 'Noto Sans SC',sans-serif; letter-spacing: .14em; }
 .page-poem-right { left: 22%; top: 30%; align-items: center; gap: 14px; writing-mode: vertical-rl; } .page-poem-right b { max-height: 220px; color: var(--deep-ink); font-size: clamp(21px,2.35vw,30px); font-weight: 600; line-height: 1.7; letter-spacing: .2em; } .page-poem-right small { color: rgba(37,72,64,.58); font-size: 11px; letter-spacing: .12em; }
 .page-seal { position: absolute; right: 25px; bottom: 28px; display: grid; place-items: center; width: 34px; height: 42px; color: #f7eddb; background: #b56d58; font: 12px 'Noto Serif SC',serif; writing-mode: vertical-rl; letter-spacing: .1em; }
-.turning-page { position: absolute; z-index: 5; left: 50%; top: 0; width: 50%; height: 100%; transform-origin: left center; transform-style: preserve-3d; transition: transform 1.12s cubic-bezier(.64,.04,.2,1); }
-.turning-page.is-turning { transform: rotateY(-180deg) skewY(-2deg); }
-.turn-face { position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; background: linear-gradient(115deg,#fbf2dd,#eee0c2); box-shadow: inset 9px 0 20px rgba(94,65,32,.12),5px 2px 10px rgba(49,50,35,.12); }
-.turn-back { transform: rotateY(180deg); background: linear-gradient(70deg,#e9d8b7,#faf0dc); }
+.turning-page { position: absolute; z-index: 5; left: 50%; top: 0; width: 50%; height: 100%; transform-origin: left center; transform-style: preserve-3d; will-change: transform; }
+.turning-page.is-turning { animation: book-page-turn 1.12s cubic-bezier(.64,.04,.2,1) both; }
+.turn-face { position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform-style: preserve-3d; background: linear-gradient(115deg,#fbf2dd,#eee0c2); box-shadow: inset 9px 0 20px rgba(94,65,32,.12),5px 2px 10px rgba(49,50,35,.12); }
+.turn-front { transform: rotateY(0deg) translateZ(.1px); }
+.turn-back { transform: rotateY(180deg) translateZ(.1px); background: linear-gradient(70deg,#e9d8b7,#faf0dc); }
 .turn-face .turn-title { position: absolute; top: 30%; left: 18%; right: 16%; color: #24463e; font: 600 clamp(19px,2vw,28px)/1.7 'Noto Serif SC',serif; writing-mode: vertical-rl; letter-spacing: .18em; }
 .turn-face > small { position: absolute; left: 23%; bottom: 18%; color: rgba(37,72,64,.58); font: 11px 'Noto Serif SC',serif; writing-mode: vertical-rl; } .turn-face .page-seal { right: 20px; bottom: 24px; }
+.turn-face .page-kicker, .turn-face .turn-title, .turn-face > small, .turn-face .page-poem, .turn-face .page-poem *, .turn-face .page-seal { backface-visibility: hidden; -webkit-backface-visibility: hidden; text-rendering: geometricPrecision; font-synthesis: none; }
+.turn-back-poem { z-index: 2; }
 .branch-front { opacity: .4; right: -30%; bottom: -10%; transform: rotate(-16deg) scale(.86); }
-.book-stage:hover .open-book { transform: rotate(-1deg) translateY(-3px); transition: transform .6s ease; } .book-stage:hover .turning-page { transition-duration: 1.65s; }
+.book-stage:hover .open-book { transform: rotate(-1deg) translateY(-3px); transition: transform .6s ease; }
 .book-footer { display: flex; align-items: center; gap: 13px; width: 86%; margin: 6px auto 0; color: rgba(25,63,59,.54); font: 11px 'Noto Serif SC',serif; letter-spacing: .08em; } .footer-rule { flex: 1; height: 1px; background: linear-gradient(90deg,rgba(184,137,76,.65),transparent); }
 
 .login-panel { position: relative; width: 386px; min-height: 520px; padding: 17px; border: 1px solid rgba(255,255,255,.65); border-radius: 23px; background: rgba(246,247,238,.54); box-shadow: 0 30px 68px rgba(31,66,59,.18),inset 0 1px rgba(255,255,255,.8); backdrop-filter: blur(12px) saturate(112%); -webkit-backdrop-filter: blur(12px) saturate(112%); animation: reveal-up .95s .68s both; }
@@ -385,6 +444,7 @@ onBeforeUnmount(() => {
 
 .is-success .book-stage { animation: book-success .75s ease-in-out both; } .is-success .login-panel { animation: panel-success .75s ease-in-out both; }
 @keyframes reveal-up { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes book-page-turn { from { transform: rotateY(0deg) skewY(0deg); } to { transform: rotateY(-180deg) skewY(-2deg); } }
 @keyframes landscape-drift { from { transform: scale(1.04) translate3d(-.5%,-.3%,0); } to { transform: scale(1.08) translate3d(.7%,.4%,0); } } @keyframes mist-drift { from { transform: translate3d(-2%,0,0) rotate(-4deg); opacity: .32; } to { transform: translate3d(4%,-8px,0) rotate(-2deg); opacity: .62; } } @keyframes sun-breathe { 0%,100% { transform: scale(.96); opacity: .65; } 50% { transform: scale(1.04); opacity: 1; } } @keyframes ripple { 0%,100% { transform: scaleX(.85); opacity: .18; } 50% { transform: scaleX(1.1); opacity: .44; } } @keyframes ink-float { 0%,100% { transform: translateY(0); opacity: .6; } 50% { transform: translateY(-15px); opacity: 1; } } @keyframes petal-fall { 0% { transform: translate3d(0,-10vh,0) rotate(0); opacity: 0; } 12% { opacity: .55; } 54% { transform: translate3d(5vw,48vh,0) rotate(180deg); } 100% { transform: translate3d(-4vw,112vh,0) rotate(390deg); opacity: 0; } } @keyframes book-success { 50% { transform: scale(1.025) rotate(-.5deg); } 100% { transform: translateX(-8vw) scale(.95) rotate(-2deg); opacity: .35; } } @keyframes panel-success { to { transform: translateX(9vw); opacity: 0; } }
 
 @media (max-width: 1120px) { .login-shell { grid-template-columns: minmax(460px,1fr) 350px; gap: 36px; width: min(1000px,calc(100vw - 56px)); } .login-panel { width: 350px; } .brand-lockup { left: 28px; } .scene-mark { right: 28px; } }
