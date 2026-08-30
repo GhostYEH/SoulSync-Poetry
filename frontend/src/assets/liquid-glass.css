@@ -1,0 +1,226 @@
+/*
+ * Web approximation of liquid glass, adapted for this Vue application.
+ * Native Apple Liquid Glass is not a web API; this material uses backdrop
+ * filtering, layered edge highlights and pointer-aware lighting.
+ */
+:root {
+  --liquid-x: 24%;
+  --liquid-y: 0%;
+  --liquid-angle: 132deg;
+  --liquid-glass-fill: rgba(232, 248, 242, .14);
+  --liquid-glass-line: rgba(255, 255, 255, .84);
+  --liquid-glass-shadow: 0 20px 54px rgba(23, 74, 65, .16);
+}
+
+.liquid-glass-filter-bank {
+  position: fixed;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#app [data-liquid-glass] {
+  isolation: isolate;
+  background-color: var(--liquid-glass-fill) !important;
+  background-image:
+    radial-gradient(circle at var(--liquid-x) var(--liquid-y), rgba(255,255,255,.4), transparent 24%),
+    linear-gradient(var(--liquid-angle), rgba(255,255,255,.28), rgba(216,244,235,.08) 44%, rgba(255,248,224,.18)) !important;
+  background-clip: padding-box !important;
+  border-color: var(--liquid-glass-line) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.95),
+    inset 0 -1px 0 rgba(38,119,101,.2),
+    inset 2px 0 0 rgba(237,127,143,.1),
+    inset -2px 0 0 rgba(42,174,158,.14),
+    var(--liquid-glass-shadow) !important;
+  backdrop-filter: blur(16px) saturate(190%) contrast(1.09) brightness(1.035) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(190%) contrast(1.09) brightness(1.035) !important;
+}
+
+#app .liquid-glass-positioned { position: relative !important; }
+
+#app [data-liquid-glass="strong"] {
+  --liquid-glass-fill: rgba(235, 249, 244, .24);
+  --liquid-glass-shadow: 0 28px 72px rgba(24, 75, 66, .18);
+  backdrop-filter: blur(22px) saturate(185%) contrast(1.08) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(185%) contrast(1.08) !important;
+}
+
+#app [data-liquid-glass="control"] {
+  --liquid-glass-fill: rgba(240, 252, 247, .12);
+  --liquid-glass-shadow: 0 9px 24px rgba(30, 91, 79, .12);
+  backdrop-filter: blur(11px) saturate(185%) contrast(1.07) !important;
+  -webkit-backdrop-filter: blur(11px) saturate(185%) contrast(1.07) !important;
+  transition:
+    translate .2s cubic-bezier(.2,.8,.2,1),
+    scale .16s cubic-bezier(.2,.8,.2,1),
+    border-color .2s ease,
+    box-shadow .2s ease !important;
+}
+
+#app .liquid-glass-optics {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  border-radius: inherit;
+  background:
+    radial-gradient(170px circle at var(--liquid-x) var(--liquid-y), rgba(255,255,255,.5), rgba(255,255,255,.12) 28%, transparent 64%),
+    linear-gradient(var(--liquid-angle), transparent 28%, rgba(255,255,255,.3) 45%, rgba(198,242,232,.12) 52%, transparent 66%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.42),
+    inset 8px 0 18px -17px rgba(238,116,143,.82),
+    inset -8px 0 18px -17px rgba(40,180,165,.92);
+  opacity: .86;
+  pointer-events: none;
+  filter: url(#liquid-glass-global-refraction);
+  mix-blend-mode: screen;
+  transition: opacity .18s ease;
+}
+
+#app [data-liquid-glass]:hover > .liquid-glass-optics { opacity: 1; }
+
+#app [data-liquid-glass="control"]:hover {
+  border-color: rgba(194, 229, 218, .86) !important;
+  translate: 0 -1px;
+}
+
+#app [data-liquid-glass="control"].is-liquid-pressed {
+  translate: 0 0;
+  scale: .985;
+}
+
+/* The global navbar is the first concrete consumer of the Vue component. */
+#app .liquid-glass-vue.ios26-navbar {
+  overflow: hidden;
+  min-height: 80px;
+  padding: 6px 0;
+  border-bottom-color: rgba(255,255,255,.84) !important;
+  background: transparent !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    inset 0 -1px 0 rgba(45,127,109,.18),
+    0 16px 42px rgba(25,82,70,.14) !important;
+}
+
+/* Let the painted scenery supply contrast for the refractive material. */
+#app.home-shell main.container > .cockpit-home {
+  border: 0 !important;
+  background-color: transparent !important;
+  background-image:
+    radial-gradient(circle at 9% 11%, rgba(52, 151, 129, .2), transparent 25%),
+    radial-gradient(circle at 82% 16%, rgba(210, 165, 75, .16), transparent 24%),
+    radial-gradient(circle at 54% 55%, rgba(71, 156, 139, .12), transparent 34%),
+    linear-gradient(180deg, rgba(238, 248, 243, .34), rgba(245, 248, 240, .16)),
+    url('./jade-paper-ambient.png') !important;
+  background-position: center top !important;
+  background-size: cover !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#app.home-shell main.container > .cockpit-home::before { display: none !important; }
+
+#app.challenge-shell main.container > .challenge-map-page {
+  background-color: transparent !important;
+  background-image:
+    radial-gradient(circle at 12% 9%, rgba(43, 146, 123, .2), transparent 24%),
+    radial-gradient(circle at 88% 14%, rgba(216, 168, 73, .15), transparent 25%),
+    linear-gradient(180deg, rgba(237, 247, 242, .28), rgba(241, 247, 239, .12)),
+    url('./jade-paper-ambient.png') !important;
+  background-position: center top !important;
+  background-size: cover !important;
+}
+
+#app.challenge-shell .challenge-stage {
+  background-image: linear-gradient(90deg, rgba(232,245,237,.04), rgba(235,247,241,.2)), url('./challenge-map-landscape.png') !important;
+  background-position: center !important;
+  background-size: cover !important;
+}
+
+#app.challenge-shell .quest-card,
+#app.challenge-shell .level-browser,
+#app.challenge-shell .progress-summary,
+#app.challenge-shell .challenge-dock {
+  --liquid-glass-fill: rgba(235, 248, 243, .2);
+}
+
+#app.home-shell :is(.learning-hero,.daily-poem-card,.poem-scroll-shell,.footprint-summary,.ranking-card) {
+  --liquid-glass-fill: rgba(231, 248, 241, .16);
+}
+
+#app.home-shell .explore-card {
+  --liquid-glass-fill: rgba(234, 248, 241, .1);
+  background-image:
+    radial-gradient(circle at var(--liquid-x) var(--liquid-y), rgba(255,255,255,.36), transparent 25%),
+    linear-gradient(var(--liquid-angle), rgba(239,250,245,.34), rgba(229,244,236,.12) 48%, rgba(255,248,224,.18)),
+    var(--feature-image) !important;
+  background-position: center !important;
+  background-size: cover !important;
+}
+
+/* The two game modules were authored for dark panels. Keep their copy legible
+   after those panels become light jade glass. */
+#app :is(.parkour-wrapper,.poetry-mahjong-wrapper) :is(
+  .badge-text,.title-english,.title-en,.menu-subtitle,.game-slogan,.section-title,
+  .control-text,.control-label,.rules-header,.rule-item,.rule-text strong,
+  .diff-label,.diff-tab,.diff-tab.active,.diff-name,.diff-desc
+) {
+  color: #416c64 !important;
+}
+
+#app .parkour-wrapper .title-chinese,
+#app .poetry-mahjong-wrapper .title-cn {
+  background-image: linear-gradient(120deg, #165f58, #318f7e 48%, #9b6e2c) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+#app .liquid-glass-vue.ios26-navbar > .liquid-glass-vue__content {
+  min-height: 68px;
+  padding: 0;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  #app [data-liquid-glass] {
+    background-color: rgba(244,250,247,.95) !important;
+    background-image: linear-gradient(135deg, rgba(255,255,255,.82), rgba(236,246,242,.92)) !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  #app [data-liquid-glass] {
+    background-color: rgba(244,250,247,.97) !important;
+    background-image: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  #app .liquid-glass-optics { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app [data-liquid-glass],
+  #app [data-liquid-glass]:hover,
+  #app [data-liquid-glass].is-liquid-pressed {
+    transition: none !important;
+    translate: none !important;
+    scale: 1 !important;
+  }
+  #app .liquid-glass-optics { transition: none; }
+}
+
+@media (max-width: 767px) {
+  #app .navbar-container {
+    scrollbar-width: none;
+  }
+
+  #app .navbar-container::-webkit-scrollbar { display: none; }
+
+  #app [data-liquid-glass] {
+    backdrop-filter: blur(15px) saturate(145%) !important;
+    -webkit-backdrop-filter: blur(15px) saturate(145%) !important;
+  }
+}

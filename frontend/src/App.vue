@@ -9,6 +9,17 @@
     @mousemove="createMapleLeaf"
   >
 
+    <!-- Shared optical map used by automatically enhanced Vue surfaces. -->
+    <svg class="liquid-glass-filter-bank" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="liquid-glass-global-refraction" x="-18%" y="-18%" width="136%" height="136%" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.009 0.024" numOctaves="2" seed="11" result="liquidNoise" />
+          <feGaussianBlur in="liquidNoise" stdDeviation="1.1" result="softNoise" />
+          <feDisplacementMap in="SourceGraphic" in2="softNoise" scale="24" xChannelSelector="R" yChannelSelector="B" />
+        </filter>
+      </defs>
+    </svg>
+
     <!-- 自定义标题栏 (Electron环境) -->
     <TitleBar v-if="isElectron" />
 
@@ -22,7 +33,17 @@
     <div class="dynamic-elements" ref="dynamicElements"></div>
 
     <!-- 导航栏 -->
-    <nav class="navbar ios26-navbar" @pointerover="prefetchNavigation" @focusin="prefetchNavigation">
+    <LiquidGlass
+      as="nav"
+      class="navbar ios26-navbar"
+      :corner-radius="0"
+      padding="0"
+      :displacement-scale="34"
+      :aberration-intensity="1.9"
+      :elasticity="0.04"
+      @pointerover="prefetchNavigation"
+      @focusin="prefetchNavigation"
+    >
       <div class="nav-liquid-border"></div>
       <div class="nav-liquid-shine"></div>
       <div class="container navbar-container">
@@ -62,7 +83,7 @@
           </li>
         </ul>
       </div>
-    </nav>
+    </LiquidGlass>
 
     <!-- 主内容区 -->
     <main class="container">
