@@ -41,7 +41,14 @@
           <span class="caption-hint">点击诗集，继续读下一页</span>
         </div>
 
-        <button class="book-stage" type="button" aria-label="翻到下一页" @click="turnPage">
+        <button
+          class="book-stage"
+          :class="{ 'is-turning': isTurning }"
+          type="button"
+          aria-label="翻到下一页"
+          :aria-busy="isTurning"
+          @click="turnPage"
+        >
           <span class="book-shadow"></span>
           <span class="book-cover book-cover-back"></span>
           <span class="book-pages page-stack page-stack-left"></span>
@@ -56,7 +63,7 @@
               <span class="page-number">{{ leftPageNumber }}</span>
               <span class="page-side-note">{{ leftPagePoem.sideNote }}</span>
               <span class="page-poem page-poem-left">
-                <b>{{ leftPagePoem.title }}</b>
+                <b :class="{ 'is-long-poem-title': leftPagePoem.title.length > 8 }">{{ leftPagePoem.title }}</b>
                 <span v-for="line in leftPagePoem.lines" :key="line">{{ line }}</span>
                 <small>{{ leftPagePoem.byline }}</small>
               </span>
@@ -76,6 +83,8 @@
             </span>
 
             <span
+              v-if="activeTurn"
+              :key="activeTurn.id"
               class="turning-page"
               :class="{ 'is-turning': isTurning }"
               aria-hidden="true"
@@ -83,22 +92,27 @@
             >
               <span class="turn-face turn-front">
                 <span class="page-paper-texture"></span>
-                <span class="page-branch branch-front"></span>
-                <span class="page-kicker">诗词照见心灵</span>
-                <strong class="turn-title">{{ turnFromPoem.line }}</strong>
-                <small>{{ turnFromPoem.credit }}</small>
+                <span class="page-branch" aria-hidden="true"></span>
+                <span class="page-moon" aria-hidden="true"></span>
+                <span class="page-number">{{ activeTurn.fromPageNumber }}</span>
+                <span class="page-kicker">今日荐读 · {{ turnFromPoem.credit.split('·')[0] }}</span>
+                <span class="page-poem page-poem-right">
+                  <b>{{ turnFromPoem.line }}</b>
+                  <small>{{ turnFromPoem.credit }}</small>
+                </span>
+                <span class="page-seal">灵犀</span>
               </span>
               <span class="turn-face turn-back">
                 <span class="page-paper-texture"></span>
                 <span class="page-image landscape-page-image"></span>
                 <span class="page-vignette"></span>
+                <span class="page-number">{{ activeTurn.fromPageNumber }}</span>
                 <span class="page-side-note">{{ turnFromPoem.sideNote }}</span>
                 <span class="page-poem page-poem-left turn-back-poem">
-                  <b>{{ turnFromPoem.title }}</b>
+                  <b :class="{ 'is-long-poem-title': turnFromPoem.title.length > 8 }">{{ turnFromPoem.title }}</b>
                   <span v-for="line in turnFromPoem.lines" :key="line">{{ line }}</span>
                   <small>{{ turnFromPoem.byline }}</small>
                 </span>
-                <span class="page-seal">智韵</span>
               </span>
             </span>
           </span>
@@ -107,7 +121,7 @@
         <div class="book-footer">
           <span>卷一 · 山水与心</span>
           <span class="footer-rule"></span>
-          <span>阅至 {{ String(pageIndex + 1).padStart(2, '0') }} / 12</span>
+          <span>阅至 {{ String(pageIndex + 1).padStart(2, '0') }} / {{ String(BOOK_PAGE_COUNT).padStart(2, '0') }}</span>
         </div>
       </div>
 
@@ -181,12 +195,6 @@
             <button class="demo-button" type="button" :disabled="loading" @click="handleTestLogin">使用体验账号进入</button>
           </form>
 
-          <div class="social-divider"><span>或以其他方式登录</span></div>
-          <div class="social-actions">
-            <button type="button" class="social-button" @click="showNotice('微信登录将在接入服务后开放')"><span class="social-dot wechat-dot">微</span>微信</button>
-            <button type="button" class="social-button" @click="showNotice('钉钉登录将在接入服务后开放')"><span class="social-dot ding-dot">钉</span>钉钉</button>
-          </div>
-
           <p class="register-note">还没有账号？ <router-link to="/register">立即注册</router-link></p>
           <p v-if="notice" class="notice-line" aria-live="polite">{{ notice }}</p>
         </div>
@@ -211,23 +219,23 @@ const showPassword = ref(false)
 const rememberMe = ref(true)
 const isReady = ref(false)
 const isSuccess = ref(false)
-const isTurning = ref(false)
 const isReducedMotion = ref(false)
 const pageIndex = ref(0)
 const autoTurnTimer = ref(null)
 const turnTimeout = ref(null)
 const noticeTimer = ref(null)
-const flipFromPoem = ref(null)
-const flipToPoem = ref(null)
+const activeTurn = ref(null)
 let readyTimer = null
+let turnId = 0
 
 function createBookPage(poem, sideNote = '诗心有回响') {
   const titleMatch = poem.credit.match(/《([^》]+)》/)
+  const author = poem.credit.replace(/\s*·\s*《[^》]+》/, '')
   return {
     ...poem,
     title: titleMatch?.[1] || '诗笺',
     lines: poem.line.match(/[^，。！？；]+[，。！？；]?/gu) || [poem.line],
-    byline: poem.credit.replace(/\s*·\s*《[^》]+》/, ''),
+    byline: poem.dynasty ? `${author} · ${poem.dynasty}` : author,
     sideNote
   }
 }
@@ -242,27 +250,42 @@ const INTRO_BOOK_PAGE = {
 }
 const BOOK_PAGES = Object.freeze([
   INTRO_BOOK_PAGE,
-  ...LOGIN_POEMS.slice(0, 11).map(poem => createBookPage(poem))
+  ...LOGIN_POEMS.map(poem => createBookPage(poem, poem.sideNote))
 ])
 const BOOK_PAGE_COUNT = BOOK_PAGES.length
 const PAGE_TURN_FALLBACK_MS = 1500
+const AUTO_TURN_DELAY_MS = 6800
 const form = ref({ username: '', password: '' })
+const isTurning = computed(() => activeTurn.value !== null)
 const leftPagePoem = computed(() => BOOK_PAGES[pageIndex.value % BOOK_PAGE_COUNT])
 const currentPoem = computed(() => BOOK_PAGES[(pageIndex.value + 1) % BOOK_PAGE_COUNT])
 const nextPoem = computed(() => BOOK_PAGES[(pageIndex.value + 2) % BOOK_PAGE_COUNT])
-const rightPagePoem = computed(() => isTurning.value && flipToPoem.value ? flipToPoem.value : currentPoem.value)
-const turnFromPoem = computed(() => flipFromPoem.value || currentPoem.value)
+const rightPagePoem = computed(() => activeTurn.value?.toPoem || currentPoem.value)
+const turnFromPoem = computed(() => activeTurn.value?.fromPoem || currentPoem.value)
 const leftPageNumber = computed(() => String(pageIndex.value + 1).padStart(2, '0'))
-const rightPageNumber = computed(() => String(((pageIndex.value + 1) % BOOK_PAGE_COUNT) + 1).padStart(2, '0'))
+const rightPageNumber = computed(() => {
+  const offset = activeTurn.value ? 2 : 1
+  return String(((pageIndex.value + offset) % BOOK_PAGE_COUNT) + 1).padStart(2, '0')
+})
+
+function scheduleAutoTurn() {
+  window.clearTimeout(autoTurnTimer.value)
+  autoTurnTimer.value = null
+  if (isReducedMotion.value || isSuccess.value) return
+  autoTurnTimer.value = window.setTimeout(turnPage, AUTO_TURN_DELAY_MS)
+}
 
 function finishPageTurn() {
-  if (!isTurning.value) return
-  pageIndex.value = (pageIndex.value + 1) % BOOK_PAGE_COUNT
-  isTurning.value = false
-  flipFromPoem.value = null
-  flipToPoem.value = null
+  const completedTurn = activeTurn.value
+  if (!completedTurn) return
+
+  // 先提交已经冻结的目标页，再移除旋转纸页。两者在同一次 Vue 更新中完成，
+  // 旋转层不会弹回右侧，也不会在落页瞬间换字。
+  pageIndex.value = completedTurn.nextIndex
+  activeTurn.value = null
   window.clearTimeout(turnTimeout.value)
   turnTimeout.value = null
+  scheduleAutoTurn()
 }
 
 function handleTurnAnimationEnd(event) {
@@ -271,14 +294,24 @@ function handleTurnAnimationEnd(event) {
 }
 
 function turnPage() {
-  if (isTurning.value) return
+  if (activeTurn.value) return
+  window.clearTimeout(autoTurnTimer.value)
+  autoTurnTimer.value = null
+
+  const nextIndex = (pageIndex.value + 1) % BOOK_PAGE_COUNT
   if (isReducedMotion.value) {
-    pageIndex.value = (pageIndex.value + 1) % BOOK_PAGE_COUNT
+    pageIndex.value = nextIndex
     return
   }
-  flipFromPoem.value = currentPoem.value
-  flipToPoem.value = nextPoem.value
-  isTurning.value = true
+
+  // 旋转纸页使用一次性快照；动画期间任何响应式更新都不会改动纸面文字。
+  activeTurn.value = Object.freeze({
+    id: ++turnId,
+    nextIndex,
+    fromPageNumber: String(((pageIndex.value + 1) % BOOK_PAGE_COUNT) + 1).padStart(2, '0'),
+    fromPoem: currentPoem.value,
+    toPoem: nextPoem.value
+  })
   window.clearTimeout(turnTimeout.value)
   // animationend is authoritative; this only recovers if the browser drops it.
   turnTimeout.value = window.setTimeout(finishPageTurn, PAGE_TURN_FALLBACK_MS)
@@ -331,11 +364,11 @@ const handleTestLogin = async () => {
 onMounted(() => {
   isReducedMotion.value = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   readyTimer = window.setTimeout(() => { isReady.value = true }, 120)
-  if (!isReducedMotion.value) autoTurnTimer.value = window.setInterval(turnPage, 6800)
+  scheduleAutoTurn()
 })
 
 onBeforeUnmount(() => {
-  window.clearInterval(autoTurnTimer.value)
+  window.clearTimeout(autoTurnTimer.value)
   window.clearTimeout(turnTimeout.value)
   window.clearTimeout(readyTimer)
   window.clearTimeout(noticeTimer.value)
@@ -399,22 +432,20 @@ onBeforeUnmount(() => {
 .page-side-note { position: absolute; top: 23px; right: 17px; color: rgba(28,70,62,.5); font: 11px 'Noto Serif SC',serif; writing-mode: vertical-rl; letter-spacing: .16em; }
 .page-poem { position: absolute; z-index: 1; display: flex; flex-direction: column; color: #254840; font-family: 'Noto Serif SC',serif; }
 .page-poem-left { top: 24%; right: 23%; align-items: center; gap: 12px; writing-mode: vertical-rl; } .page-poem-left b { font-size: clamp(23px,2.5vw,31px); font-weight: 600; letter-spacing: .18em; } .page-poem-left span { color: rgba(37,72,64,.78); font-size: clamp(14px,1.4vw,18px); line-height: 1.9; letter-spacing: .08em; } .page-poem-left small { margin-top: 13px; color: rgba(37,72,64,.6); font-size: 11px; }
+.page-poem-left b.is-long-poem-title { font-size: clamp(17px,1.85vw,23px); letter-spacing: .1em; }
 .page-branch { position: absolute; right: -12%; bottom: -2%; width: 74%; height: 66%; opacity: .52; transform: rotate(-12deg); background: radial-gradient(ellipse at 24% 22%,transparent 0 29%,rgba(39,72,58,.7) 30% 31%,transparent 32%),radial-gradient(ellipse at 60% 47%,transparent 0 25%,rgba(39,72,58,.5) 26% 27%,transparent 28%); border-left: 5px solid rgba(63,58,40,.52); border-radius: 48% 10% 50% 0; }
 .page-branch::after { content: ''; position: absolute; inset: 12% -7% 0 18%; background: radial-gradient(ellipse at 20% 22%,rgba(209,126,106,.75) 0 5%,transparent 6%),radial-gradient(ellipse at 49% 40%,rgba(209,126,106,.66) 0 4%,transparent 5%),radial-gradient(ellipse at 68% 62%,rgba(209,126,106,.6) 0 5%,transparent 6%); }
 .page-moon { position: absolute; top: 15%; right: 22%; width: 62px; height: 62px; border-radius: 50%; background: rgba(199,154,87,.13); box-shadow: 0 0 25px rgba(199,154,87,.12); }
 .page-kicker { position: absolute; top: 25px; left: 28px; color: rgba(37,72,64,.52); font: 11px 'Noto Sans SC',sans-serif; letter-spacing: .14em; }
 .page-poem-right { left: 22%; top: 30%; align-items: center; gap: 14px; writing-mode: vertical-rl; } .page-poem-right b { max-height: 220px; color: var(--deep-ink); font-size: clamp(21px,2.35vw,30px); font-weight: 600; line-height: 1.7; letter-spacing: .2em; } .page-poem-right small { color: rgba(37,72,64,.58); font-size: 11px; letter-spacing: .12em; }
 .page-seal { position: absolute; right: 25px; bottom: 28px; display: grid; place-items: center; width: 34px; height: 42px; color: #f7eddb; background: #b56d58; font: 12px 'Noto Serif SC',serif; writing-mode: vertical-rl; letter-spacing: .1em; }
-.turning-page { position: absolute; z-index: 5; left: 50%; top: 0; width: 50%; height: 100%; transform-origin: left center; transform-style: preserve-3d; will-change: transform; }
+.turning-page { position: absolute; z-index: 5; left: 50%; top: 0; width: 50%; height: 100%; transform-origin: left center; transform-style: preserve-3d; will-change: transform; pointer-events: none; isolation: isolate; }
 .turning-page.is-turning { animation: book-page-turn 1.12s cubic-bezier(.64,.04,.2,1) both; }
-.turn-face { position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform-style: preserve-3d; background: linear-gradient(115deg,#fbf2dd,#eee0c2); box-shadow: inset 9px 0 20px rgba(94,65,32,.12),5px 2px 10px rgba(49,50,35,.12); }
+.turn-face { position: absolute; inset: 0; overflow: hidden; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform-style: preserve-3d; border-radius: 0 9px 8px 0; background: #f5edda; box-shadow: inset 0 0 20px rgba(117,91,52,.12); -webkit-font-smoothing: antialiased; }
 .turn-front { transform: rotateY(0deg) translateZ(.1px); }
-.turn-back { transform: rotateY(180deg) translateZ(.1px); background: linear-gradient(70deg,#e9d8b7,#faf0dc); }
-.turn-face .turn-title { position: absolute; top: 30%; left: 18%; right: 16%; color: #24463e; font: 600 clamp(19px,2vw,28px)/1.7 'Noto Serif SC',serif; writing-mode: vertical-rl; letter-spacing: .18em; }
-.turn-face > small { position: absolute; left: 23%; bottom: 18%; color: rgba(37,72,64,.58); font: 11px 'Noto Serif SC',serif; writing-mode: vertical-rl; } .turn-face .page-seal { right: 20px; bottom: 24px; }
-.turn-face .page-kicker, .turn-face .turn-title, .turn-face > small, .turn-face .page-poem, .turn-face .page-poem *, .turn-face .page-seal { backface-visibility: hidden; -webkit-backface-visibility: hidden; text-rendering: geometricPrecision; font-synthesis: none; }
+.turn-back { transform: rotateY(180deg) translateZ(.1px); }
+.turn-face .page-kicker, .turn-face .page-poem, .turn-face .page-seal { font-synthesis: none; }
 .turn-back-poem { z-index: 2; }
-.branch-front { opacity: .4; right: -30%; bottom: -10%; transform: rotate(-16deg) scale(.86); }
 .book-stage:hover .open-book { transform: rotate(-1deg) translateY(-3px); transition: transform .6s ease; }
 .book-footer { display: flex; align-items: center; gap: 13px; width: 86%; margin: 6px auto 0; color: rgba(25,63,59,.54); font: 11px 'Noto Serif SC',serif; letter-spacing: .08em; } .footer-rule { flex: 1; height: 1px; background: linear-gradient(90deg,rgba(184,137,76,.65),transparent); }
 
@@ -436,15 +467,13 @@ onBeforeUnmount(() => {
 .ink-sweep { position: absolute; inset: 0 auto 0 -100%; width: 75%; background: linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent); transform: skewX(-20deg); transition: left .75s ease; } .login-button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 14px 26px rgba(150,101,52,.28),inset 0 1px rgba(255,255,255,.35); } .login-button:hover:not(:disabled) .ink-sweep { left: 125%; } .login-button:active:not(:disabled) { transform: translateY(1px) scale(.99); } .login-button:disabled { cursor: wait; opacity: .72; }
 .button-arrow { font-family: Georgia,serif; font-size: 22px; line-height: 1; letter-spacing: 0; transition: transform .25s ease; } .login-button:hover .button-arrow { transform: translateX(4px); }
 .demo-button { align-self: center; padding: 2px 0; border: 0; border-bottom: 1px solid rgba(46,117,104,.25); color: rgba(46,117,104,.56); background: transparent; cursor: pointer; font: 11px 'Noto Sans SC',sans-serif; } .demo-button:hover:not(:disabled) { color: var(--deep-ink); border-bottom-color: var(--jade); }
-.social-divider { display: flex; align-items: center; gap: 11px; margin: 20px 0 13px; color: rgba(25,63,59,.4); font-size: 10px; white-space: nowrap; } .social-divider::before, .social-divider::after { content: ''; flex: 1; height: 1px; background: rgba(46,117,104,.13); }
-.social-actions { display: flex; justify-content: center; gap: 12px; } .social-button { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border: 1px solid rgba(46,117,104,.16); border-radius: 99px; color: rgba(25,63,59,.66); background: rgba(255,255,255,.42); cursor: pointer; font: 11px 'Noto Sans SC',sans-serif; transition: border-color .2s ease,transform .2s ease; } .social-button:hover { border-color: rgba(46,117,104,.42); transform: translateY(-1px); } .social-dot { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 50%; color: white; font: 10px 'Noto Serif SC',serif; } .wechat-dot { background: #64a87d; } .ding-dot { background: #7caed1; }
 .register-note { margin: 18px 0 0; color: rgba(25,63,59,.5); text-align: center; font: 11px 'Noto Sans SC',sans-serif; } .register-note a { color: #a86d3b; text-decoration: none; font-weight: 600; } .register-note a:hover { text-decoration: underline; } .notice-line { min-height: 15px; margin: 7px 0 -5px; color: rgba(46,117,104,.7); text-align: center; font-size: 10px; }
 .login-footer { position: absolute; z-index: 4; left: 50%; bottom: 20px; transform: translateX(-50%); color: rgba(25,63,59,.45); font: 11px 'Noto Serif SC',serif; letter-spacing: .08em; white-space: nowrap; }
 .login-footer span { display: inline-block; width: 3px; height: 3px; margin: 0 9px 2px; border-radius: 50%; background: rgba(184,137,76,.7); }
 
 .is-success .book-stage { animation: book-success .75s ease-in-out both; } .is-success .login-panel { animation: panel-success .75s ease-in-out both; }
 @keyframes reveal-up { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes book-page-turn { from { transform: rotateY(0deg) skewY(0deg); } to { transform: rotateY(-180deg) skewY(-2deg); } }
+@keyframes book-page-turn { from { transform: perspective(800px) rotateY(-3deg) skewY(0deg); } to { transform: perspective(800px) rotateY(-177deg) skewY(-2deg); } }
 @keyframes landscape-drift { from { transform: scale(1.04) translate3d(-.5%,-.3%,0); } to { transform: scale(1.08) translate3d(.7%,.4%,0); } } @keyframes mist-drift { from { transform: translate3d(-2%,0,0) rotate(-4deg); opacity: .32; } to { transform: translate3d(4%,-8px,0) rotate(-2deg); opacity: .62; } } @keyframes sun-breathe { 0%,100% { transform: scale(.96); opacity: .65; } 50% { transform: scale(1.04); opacity: 1; } } @keyframes ripple { 0%,100% { transform: scaleX(.85); opacity: .18; } 50% { transform: scaleX(1.1); opacity: .44; } } @keyframes ink-float { 0%,100% { transform: translateY(0); opacity: .6; } 50% { transform: translateY(-15px); opacity: 1; } } @keyframes petal-fall { 0% { transform: translate3d(0,-10vh,0) rotate(0); opacity: 0; } 12% { opacity: .55; } 54% { transform: translate3d(5vw,48vh,0) rotate(180deg); } 100% { transform: translate3d(-4vw,112vh,0) rotate(390deg); opacity: 0; } } @keyframes book-success { 50% { transform: scale(1.025) rotate(-.5deg); } 100% { transform: translateX(-8vw) scale(.95) rotate(-2deg); opacity: .35; } } @keyframes panel-success { to { transform: translateX(9vw); opacity: 0; } }
 
 @media (max-width: 1120px) { .login-shell { grid-template-columns: minmax(460px,1fr) 350px; gap: 36px; width: min(1000px,calc(100vw - 56px)); } .login-panel { width: 350px; } .brand-lockup { left: 28px; } .scene-mark { right: 28px; } }

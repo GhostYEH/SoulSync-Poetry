@@ -31,6 +31,8 @@ const EXPLICIT_SURFACES = [
 const INTERACTIVE_TAGS = new Set(['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT'])
 const SKIP_TAGS = new Set(['HTML', 'BODY', 'SVG', 'PATH', 'CANVAS', 'IMG', 'VIDEO', 'SCRIPT', 'STYLE'])
 const STRUCTURAL_TAGS = new Set(['DIV', 'SECTION', 'ARTICLE', 'ASIDE', 'NAV', 'HEADER', 'FORM', 'LI'])
+const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'image'])
+const BUTTON_CLASS_PATTERN = /(^|[-_])(btn|button|action|cta|toggle|trigger|chip|pill|tab|choice|option)([-_]|$)/i
 
 function classLooksLikeSurface(element) {
   return [...element.classList].some((token) => {
@@ -66,6 +68,76 @@ function getBackdropFilter(style) {
   return style.backdropFilter || style.webkitBackdropFilter || 'none'
 }
 
+function isButtonLike(element) {
+  if (element.tagName === 'BUTTON' || element.getAttribute('role') === 'button') return true
+  if (element.tagName === 'INPUT') {
+    return BUTTON_INPUT_TYPES.has((element.getAttribute('type') || 'text').toLowerCase())
+  }
+  return ['A', 'LABEL'].includes(element.tagName) && [...element.classList].some((token) => BUTTON_CLASS_PATTERN.test(token))
+}
+
+function parseCssColor(value) {
+  if (!value || value === 'transparent') return null
+  const match = value.match(/rgba?\([^)]*\)/i)
+  if (!match) return null
+  const channels = match[0].match(/[\d.]+/g)?.map(Number) || []
+  if (channels.length < 3) return null
+  const alpha = channels.length > 3 ? channels[3] : 1
+  return { r: channels[0], g: channels[1], b: channels[2], alpha }
+}
+
+function colorScore(color) {
+  const chroma = Math.max(color.r, color.g, color.b) - Math.min(color.r, color.g, color.b)
+  const luminance = color.r * .2126 + color.g * .7152 + color.b * .0722
+  return chroma * 2.1 + Math.max(0, 224 - luminance)
+}
+
+function readControlTint(style) {
+  const gradientColors = [...(style.backgroundImage || '').matchAll(/rgba?\([^)]*\)/gi)]
+    .map((match) => parseCssColor(match[0]))
+    .filter((color) => color && color.alpha > .04)
+  const backgroundColor = parseCssColor(style.backgroundColor)
+  const candidates = backgroundColor?.alpha > .04
+    ? [...gradientColors, backgroundColor]
+    : gradientColors
+  if (!candidates.length) return null
+  return candidates.sort((a, b) => colorScore(b) - colorScore(a))[0]
+}
+
+function tintSignature(element) {
+  const classes = [...element.classList].filter((name) => name !== 'is-liquid-pressed').sort().join(' ')
+  return [classes, element.disabled, element.getAttribute('aria-pressed'), element.getAttribute('aria-selected')].join('|')
+}
+
+function updateControlTint(element) {
+  const signature = tintSignature(element)
+  if (element.dataset.liquidTintSignature === signature) return
+
+  const previousGlass = element.getAttribute('data-liquid-glass')
+  const previousTone = element.getAttribute('data-liquid-tone')
+  element.removeAttribute('data-liquid-glass')
+  element.removeAttribute('data-liquid-tone')
+  const tint = readControlTint(window.getComputedStyle(element))
+  if (previousGlass) element.setAttribute('data-liquid-glass', previousGlass)
+  if (previousTone) element.setAttribute('data-liquid-tone', previousTone)
+
+  const chroma = tint ? Math.max(tint.r, tint.g, tint.b) - Math.min(tint.r, tint.g, tint.b) : 0
+  const luminance = tint ? tint.r * .2126 + tint.g * .7152 + tint.b * .0722 : 255
+  const hasSemanticTint = /(^|[-_\s])(active|selected|primary|success|danger|warning)([-_\s]|$)/i.test(
+    [...element.classList].join(' ')
+  )
+  const isTinted = Boolean(tint && (hasSemanticTint || chroma >= 18 || luminance < 205))
+  const resolved = isTinted ? tint : { r: 235, g: 249, b: 244, alpha: 1 }
+  const alpha = isTinted
+    ? (luminance < 125 ? .7 : Math.min(.62, Math.max(.42, resolved.alpha * .6)))
+    : .16
+
+  element.style.setProperty('--liquid-control-tint-rgb', `${Math.round(resolved.r)}, ${Math.round(resolved.g)}, ${Math.round(resolved.b)}`)
+  element.style.setProperty('--liquid-control-tint-alpha', alpha.toFixed(2))
+  element.dataset.liquidTone = isTinted ? 'tinted' : 'neutral'
+  element.dataset.liquidTintSignature = signature
+}
+
 function isTransparentSurface(element, style) {
   const alpha = alphaFromColor(style.backgroundColor)
   const hasBlur = getBackdropFilter(style) !== 'none'
@@ -83,8 +155,9 @@ function shouldEnhance(element) {
   if (!(element instanceof HTMLElement)) return false
   if (SKIP_TAGS.has(element.tagName)) return false
   if (element.classList.contains('liquid-glass-optics') || element.getAttribute('aria-hidden') === 'true') return false
+  const buttonLike = isButtonLike(element)
   if (element.hasAttribute('data-liquid-ignore') || element.hasAttribute('data-liquid-glass-component')) return false
-  if (element.closest('[data-liquid-glass-component]')) return false
+  if (element.closest('[data-liquid-glass-component]') && !buttonLike) return false
 
   const interactive = INTERACTIVE_TAGS.has(element.tagName)
   const explicitSurface = element.matches(EXPLICIT_SURFACES)
@@ -92,6 +165,8 @@ function shouldEnhance(element) {
   const style = window.getComputedStyle(element)
   const ownsBackdrop = getBackdropFilter(style) !== 'none' && !['P', 'SPAN', 'I', 'SMALL'].includes(element.tagName)
   if (style.display === 'none' || style.visibility === 'hidden') return false
+  // Buttons are always glass, including fully opaque primary/danger controls.
+  if (buttonLike) return true
   const explicitOpaqueSurface = explicitSurface && !/url\(/i.test(style.backgroundImage) && (hasVisibleBorder(style) || (style.boxShadow && style.boxShadow !== 'none'))
   if (!isTransparentSurface(element, style) && !explicitOpaqueSurface) return false
 
@@ -109,7 +184,7 @@ function shouldEnhance(element) {
 }
 
 function classifySurface(element) {
-  if (INTERACTIVE_TAGS.has(element.tagName)) return 'control'
+  if (isButtonLike(element)) return 'control'
   if (element.matches('.modal,.modal-content,.dialog,.drawer,.popover,.score-modal,.login-panel,.register-form')) return 'strong'
   return 'surface'
 }
@@ -136,9 +211,11 @@ function removeOptics(element) {
 
 function enhanceElement(element) {
   if (shouldEnhance(element)) {
-    element.dataset.liquidGlass = classifySurface(element)
+    const surfaceType = classifySurface(element)
+    if (surfaceType === 'control') updateControlTint(element)
+    element.dataset.liquidGlass = surfaceType
     const style = window.getComputedStyle(element)
-    const shouldUseOptics = INTERACTIVE_TAGS.has(element.tagName) || element.matches(EXPLICIT_SURFACES) || classLooksLikeSurface(element) || getBackdropFilter(style) !== 'none'
+    const shouldUseOptics = isButtonLike(element) || INTERACTIVE_TAGS.has(element.tagName) || element.matches(EXPLICIT_SURFACES) || classLooksLikeSurface(element) || getBackdropFilter(style) !== 'none'
     if (shouldUseOptics) ensureOptics(element)
     else removeOptics(element)
   } else if (element.hasAttribute('data-liquid-glass')) {
@@ -171,18 +248,21 @@ export function installLiquidGlass(router) {
   }
 
   const observer = new MutationObserver((mutations) => {
-    const hasRelevantAddition = mutations.some((mutation) => {
+    const hasRelevantChange = mutations.some((mutation) => {
+      if (mutation.type === 'attributes') return true
       if (mutation.target instanceof HTMLElement && mutation.target.closest('.dynamic-elements')) return false
       return [...mutation.addedNodes].some((node) => (
         !(node instanceof HTMLElement) || !node.classList.contains('liquid-glass-optics')
       ))
     })
-    if (hasRelevantAddition) scheduleScan()
+    if (hasRelevantChange) scheduleScan()
   })
 
   observer.observe(document.getElementById('app') || document.body, {
     childList: true,
-    subtree: true
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class', 'disabled', 'aria-pressed', 'aria-selected']
   })
 
   const applyPointer = () => {
