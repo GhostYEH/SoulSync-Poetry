@@ -106,11 +106,8 @@ async function main() {
   console.log('API Smoke Test (SQLite 模式 — 临时数据库)');
   console.log('========================================');
 
-  const fs = require('fs');
-  const path = require('path');
-  const realDbPath = path.join(BACKEND_DIR, 'db', 'poetry.db');
-  const tempDbPath = path.join(BACKEND_DIR, 'tests', `tmp-smoke-${Date.now()}.db`);
-  fs.copyFileSync(realDbPath, tempDbPath);
+  const { createTestDb, removeTestDb } = require('./_testDb');
+  const tempDbPath = await createTestDb('tmp-smoke');
   console.log(`  临时数据库: ${tempDbPath}`);
 
   const server = spawn('node', ['server.js'], {
@@ -143,7 +140,8 @@ async function main() {
 
   server.kill();
   setTimeout(() => {
-    try { fs.unlinkSync(tempDbPath); console.log(`  临时数据库已清理: ${tempDbPath}`); } catch (e) {}
+    removeTestDb(tempDbPath);
+    console.log(`  临时数据库已清理: ${tempDbPath}`);
     process.exit(failed > 0 ? 1 : 0);
   }, 1500);
 }

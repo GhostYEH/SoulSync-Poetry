@@ -12,7 +12,6 @@
  */
 const { spawn } = require('child_process');
 const http = require('http');
-const fs = require('fs');
 const path = require('path');
 
 const BACKEND_DIR = path.join(__dirname, '..');
@@ -211,9 +210,8 @@ async function main() {
   console.log('防作弊 + 输入验证测试');
   console.log('========================================');
 
-  const realDbPath = path.join(BACKEND_DIR, 'db', 'poetry.db');
-  const tempDbPath = path.join(BACKEND_DIR, 'tests', `tmp-cheat-${Date.now()}.db`);
-  fs.copyFileSync(realDbPath, tempDbPath);
+  const { createTestDb, removeTestDb } = require('./_testDb');
+  const tempDbPath = await createTestDb('tmp-cheat');
   console.log(`  临时数据库: ${tempDbPath}`);
 
   const server = spawn('node', ['server.js'], {
@@ -246,7 +244,7 @@ async function main() {
 
   server.kill();
   setTimeout(() => {
-    try { fs.unlinkSync(tempDbPath); } catch (e) {}
+    removeTestDb(tempDbPath);
     process.exit(failed > 0 ? 1 : 0);
   }, 1500);
 }

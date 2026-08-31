@@ -110,10 +110,12 @@ async function main() {
   console.log('Transaction + Migration Tests');
   console.log('========================================\n');
 
-  const db = require('../src/utils/db');
+  // 注意：db.js 在模块加载时就读取 DB_PATH 并固化路径，
+  // 所以必须先设置环境变量，再 require
   const tmpDb = path.join(__dirname, 'tmp-tx-' + Date.now() + '.db');
   process.env.DB_TYPE = 'sqlite';
   process.env.DB_PATH = tmpDb;
+  const db = require('../src/utils/db');
 
   await testTransactionCommit(db);
   await testTransactionRollback(db);
