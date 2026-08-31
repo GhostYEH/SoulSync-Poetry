@@ -56,18 +56,23 @@ async function createFixtures() {
   const studentUsername = `security_student_${ts}`;
   const teacherUsername = `security_teacher_${ts}`;
   const pwdHash = await bcrypt.hash('123456', 10);
-  
+  const now = new Date().toISOString();
+
+  // users 表没有 role 列（角色由 class_members 表维护），
+  // 插入时必须提供 email / created_at / updated_at（均为 NOT NULL）
   // create student
   const resStudent = await db.query(
-    `INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'student') RETURNING id`,
-    [studentUsername, pwdHash]
+    `INSERT INTO users (username, email, password_hash, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [studentUsername, `${studentUsername}@test.local`, pwdHash, now, now]
   );
   const studentId = resStudent.rows[0].id;
-  
+
   // create teacher
   const resTeacher = await db.query(
-    `INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'teacher') RETURNING id`,
-    [teacherUsername, pwdHash]
+    `INSERT INTO users (username, email, password_hash, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [teacherUsername, `${teacherUsername}@test.local`, pwdHash, now, now]
   );
   const teacherId = resTeacher.rows[0].id;
   
