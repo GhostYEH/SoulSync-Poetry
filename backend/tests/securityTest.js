@@ -81,6 +81,9 @@ async function createFixtures() {
 
 async function cleanupFixtures(fixtures) {
   if (!fixtures) return;
+  // 防作弊提交会在 user_challenge_* 表留下引用记录（无级联删除），需先清理
+  await db.query(`DELETE FROM user_challenge_records WHERE user_id IN ($1, $2)`, [fixtures.studentId, fixtures.teacherId]);
+  await db.query(`DELETE FROM user_challenge_progress WHERE user_id IN ($1, $2)`, [fixtures.studentId, fixtures.teacherId]);
   await db.query(`DELETE FROM users WHERE id IN ($1, $2)`, [fixtures.studentId, fixtures.teacherId]);
 }
 
@@ -178,11 +181,12 @@ async function runTests(fixtures) {
   assert(fakeRes.status === 401, `伪造JWT返回401 (实际 ${fakeRes.status})`);
 
   console.log('\n--- 健康检查 ---');
-  const healthRes = await fetch('http://localhost:3000/api/health');
+  // 本分支的健康检查接口是 /health/ready（无 /api/health 路由）
+  const healthRes = await fetch('http://localhost:3000/health/ready');
   assert(healthRes.status === 200, `健康检查 HTTP 200 (实际 ${healthRes.status})`);
   const healthData = healthRes.json();
-  assert(healthData.status === 'ok' || healthData.status === 'degraded', `健康检查status有效: ${healthData.status}`);
-  assert(!!healthData.databaseType, `健康检查返回databaseType: ${healthData.databaseType}`);
+  assert(healthData.status === 'ok', `健康检查status有效: ${healthData.status}`);
+  assert(healthData.database === 'ok', `数据库健康: ${healthData.database}`);
 }
 
 async function main() {

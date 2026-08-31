@@ -71,6 +71,9 @@ async function createFixtures() {
 
 async function cleanupFixtures(fixtures) {
   if (!fixtures) return;
+  // 防作弊提交会在 user_challenge_* 表留下引用记录（无级联删除），需先清理
+  await db.query(`DELETE FROM user_challenge_records WHERE user_id = $1`, [fixtures.studentId]);
+  await db.query(`DELETE FROM user_challenge_progress WHERE user_id = $1`, [fixtures.studentId]);
   await db.query(`DELETE FROM users WHERE id = $1`, [fixtures.studentId]);
 }
 
