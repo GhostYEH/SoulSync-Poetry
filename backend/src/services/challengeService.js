@@ -5,7 +5,10 @@
  * 2. 严格难度梯度：1-50简单、51-100中等、101-150困难、151-200挑战
  * 3. 答案判断直接用数据匹配，O(1)查找
  */
+const fs = require('fs');
+const path = require('path');
 const db = require('../utils/db');
+const { ApiError } = require('../utils/apiResponse');
 
 // ============================================================
 // 诗词数据：200首不同诗词，按难度分4段
@@ -1222,34 +1225,71 @@ const POEMS = [
 ];
 
 // ============================================================
-// 构建 level -> 所有题目的索引（支持 couplet / choice / author / emotion / meaning 等类型）
+// 前后端共用前端题库作为唯一事实来源。
+// 开发环境从 frontend/src/data 读取；发布包由 build.js 复制到 backend/src/data。
 // ============================================================
-const LEVEL_QUESTIONS = {}; // level -> [{ question, answer, type, options? }, ...]
-POEMS.forEach(poem => {
-  // 去重：同 level 只建一次
-  if (!LEVEL_QUESTIONS[poem.level]) {
-    LEVEL_QUESTIONS[poem.level] = {
-      level: poem.level,
-      title: poem.title,
-      author: poem.author,
-      difficulty: poem.difficulty,
-      full_poem: poem.full_poem,
-      questions: []
-    };
+function loadCanonicalLevels() {
+  const candidates = [
+    path.resolve(__dirname, '../data/poetryLevels.json'),
+    path.resolve(__dirname, '../../../frontend/src/data/poetryLevels.json')
+  ];
+  const sourcePath = candidates.find(candidate => fs.existsSync(candidate));
+  if (!sourcePath) {
+    throw new Error('诗词闯关题库不存在，请检查 backend/src/data/poetryLevels.json');
   }
-  // 填句题（每个 couplet 一题）
-  poem.couplets.forEach(c => {
-    LEVEL_QUESTIONS[poem.level].questions.push({
-      type: 'fill',
-      question: c.question,
-      answer: c.answer
-    });
-  });
+
+  const levels = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
+  if (!Array.isArray(levels) || levels.length !== 200) {
+    throw new Error('诗词闯关题库必须包含 200 个关卡');
+  }
+  return levels;
+}
+
+const CANONICAL_LEVELS = loadCanonicalLevels();
+const CANONICAL_POEMS = CANONICAL_LEVELS.map(level => {
+  const poem = level.poems?.[0] || {};
+  return {
+    title: poem.title || level.title || '未命名诗篇',
+    author: poem.author || '佚名',
+    level: Number(level.level),
+    difficulty: level.difficulty,
+    full_poem: poem.content || ''
+  };
+});
+
+function toCanonicalQuestion(question) {
+  const answerIndex = Number.isInteger(question.answer) ? question.answer : null;
+  const answer = answerIndex === null
+    ? String(question.answer || '')
+    : String(question.options?.[answerIndex] || '');
+  return {
+    type: question.type || (question.options?.length ? 'choice' : 'fill'),
+    question: String(question.question || ''),
+    answer,
+    answerIndex,
+    options: Array.isArray(question.options) ? question.options.map(String) : undefined,
+    hint: question.hint || '',
+    analysis: question.analysis || ''
+  };
+}
+
+const LEVEL_QUESTIONS = {}; // level -> { title, author, questions: [{ question, answer, ... }] }
+CANONICAL_LEVELS.forEach(level => {
+  const poem = level.poems?.[0] || {};
+  const levelNumber = Number(level.level);
+  LEVEL_QUESTIONS[levelNumber] = {
+    level: levelNumber,
+    title: poem.title || level.title || '未命名诗篇',
+    author: poem.author || '佚名',
+    difficulty: level.difficulty,
+    full_poem: poem.content || '',
+    questions: (level.questions || []).map(toCanonicalQuestion).filter(q => q.question && q.answer)
+  };
 });
 
 // 构建 level -> 随机一题（与前端 loadQuestions 逻辑一致）
 function buildRandomQuestion(level) {
-  const block = LEVEL_QUESTIONS[level];
+  const block = LEVEL_QUESTIONS[Number(level)];
   if (!block || block.questions.length === 0) return null;
   const q = block.questions[Math.floor(Math.random() * block.questions.length)];
   return {
@@ -1259,14 +1299,18 @@ function buildRandomQuestion(level) {
     difficulty: block.difficulty,
     question: q.question,
     answer: q.answer,
+    answerIndex: q.answerIndex,
+    options: q.options,
+    type: q.type,
+    hint: q.hint,
     full_poem: block.full_poem,
-    analysis: `此句出自${block.author}的《${block.title}》，考察对经典诗句的掌握。`
+    analysis: q.analysis || `此题出自${block.author}的《${block.title}》，考察对经典诗句的掌握。`
   };
 }
 
 // 按 level 精确查找题目（用于后端判题）
 function findQuestionByLevelAndText(level, questionText) {
-  const block = LEVEL_QUESTIONS[level];
+  const block = LEVEL_QUESTIONS[Number(level)];
   if (!block) return null;
   return block.questions.find(q => q.question === questionText) || null;
 }
@@ -1275,17 +1319,9 @@ function findQuestionByLevelAndText(level, questionText) {
 // 答案规范化：去空格、标点、全角转半角
 // ============================================================
 function normalize(str) {
-  if (!str) return '';
-  return str
-    .replace(/\s/g, '')
-    .replace(/[，。！？；：""''（）【】、,.!?;:"'()\[\]\\/]/g, '')
-    .split('')
-    .map(ch => {
-      const code = ch.charCodeAt(0);
-      if (code >= 65281 && code <= 65374) return String.fromCharCode(code - 65248);
-      return ch;
-    })
-    .join('');
+  return String(str ?? '')
+    .normalize('NFKC')
+    .replace(/[\s\p{P}\p{S}]/gu, '');
 }
 
 // ============================================================
@@ -1306,39 +1342,82 @@ function getQuestionByLevel(level) {
 // 获取用户闯关进度
 // ============================================================
 async function getUserProgress(userId) {
-  const row = await db.get('SELECT * FROM user_challenge_progress WHERE user_id = $1', [userId]);
-  if (row) {
-    return row;
+  let row = await db.get('SELECT * FROM user_challenge_progress WHERE user_id = $1', [userId]);
+  if (!row) {
+    const now = new Date().toISOString();
+    await db.run(
+      `INSERT INTO user_challenge_progress
+       (user_id, highest_level, current_challenge_level, last_challenge_time)
+       VALUES ($1, 0, 1, $2)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [userId, now]
+    );
+    row = await db.get('SELECT * FROM user_challenge_progress WHERE user_id = $1', [userId]);
   }
-  await db.run(
-    'INSERT INTO user_challenge_progress (user_id, highest_level, current_challenge_level, last_challenge_time) VALUES ($1, 0, 1, $2)',
-    [userId, new Date().toISOString()]
-  );
+
+  const highestLevel = Math.min(Math.max(Number(row?.highest_level) || 0, 0), 200);
   return {
-    user_id: userId,
-    highest_level: 0,
-    current_challenge_level: 1,
-    last_challenge_time: new Date().toISOString()
+    ...row,
+    highest_level: highestLevel,
+    current_challenge_level: Math.min(highestLevel + 1, 200)
   };
 }
 
+// 返回某关已答对的题目，用于用户离开后恢复到下一道未完成题。
+async function getLevelAnswerProgress(userId, level) {
+  const levelNumber = Number(level);
+  if (!Number.isInteger(levelNumber) || !LEVEL_QUESTIONS[levelNumber]) {
+    throw ApiError.validation('关卡必须是 1-200 之间的整数');
+  }
+
+  const rows = await db.all(
+    `SELECT question_content
+     FROM user_challenge_records
+     WHERE user_id = $1 AND level = $2 AND is_correct = 1`,
+    [userId, levelNumber]
+  );
+  return { level: levelNumber, correctQuestions: [...new Set(rows.map(row => row.question_content))] };
+}
+
 // ============================================================
-// 更新用户闯关进度
+// 更新用户闯关进度：必须按顺序完成整关后才能推进
 // ============================================================
 async function updateUserProgress(userId, level) {
-  const row = await db.get('SELECT * FROM user_challenge_progress WHERE user_id = $1', [userId]);
-  const newHighest = row ? Math.max(row.highest_level, level) : level;
-  if (row) {
-    await db.run(
-      'UPDATE user_challenge_progress SET highest_level = $1, current_challenge_level = $2, last_challenge_time = $3 WHERE user_id = $4',
-      [newHighest, level + 1, new Date().toISOString(), userId]
+  const levelNumber = Number(level);
+  const block = LEVEL_QUESTIONS[levelNumber];
+  if (!Number.isInteger(levelNumber) || !block) {
+    throw ApiError.validation('关卡必须是 1-200 之间的整数');
+  }
+
+  const progress = await getUserProgress(userId);
+  const highestLevel = Number(progress.highest_level) || 0;
+  if (levelNumber > highestLevel + 1) {
+    throw ApiError.forbidden(`第 ${levelNumber} 关尚未解锁，请先完成第 ${highestLevel + 1} 关`);
+  }
+
+  // 重玩已完成关卡不改变进度；首次完成必须有每一道题的正确答题记录。
+  if (levelNumber > highestLevel) {
+    const correctRows = await db.all(
+      `SELECT question_content FROM user_challenge_records
+       WHERE user_id = $1 AND level = $2 AND is_correct = 1`,
+      [userId, levelNumber]
     );
-  } else {
+    const correctQuestions = new Set(correctRows.map(row => row.question_content));
+    const missingQuestion = block.questions.find(question => !correctQuestions.has(question.question));
+    if (missingQuestion) {
+      throw ApiError.conflict('本关还有题目未答对，暂不能完成关卡');
+    }
+
+    const now = new Date().toISOString();
     await db.run(
-      'INSERT INTO user_challenge_progress (user_id, highest_level, current_challenge_level, last_challenge_time) VALUES ($1, $2, $3, $4)',
-      [userId, newHighest, level + 1, new Date().toISOString()]
+      `UPDATE user_challenge_progress
+       SET highest_level = $1, current_challenge_level = $2, last_challenge_time = $3
+       WHERE user_id = $4`,
+      [levelNumber, Math.min(levelNumber + 1, 200), now, userId]
     );
   }
+
+  return getUserProgress(userId);
 }
 
 // ============================================================
@@ -1357,62 +1436,70 @@ async function generateQuestions(userId, startLevel, count = 20) {
 // 提交答案（直接用静态数据校验，不依赖前端传来的答案）
 // ============================================================
 async function submitAnswer(userId, level, questionText, userAnswer, frontendCorrect, poemTitle, poemAuthor, clientCorrectAnswer) {
-  const matched = findQuestionByLevelAndText(level, questionText);
-  const now = new Date().toISOString();
-  const block = LEVEL_QUESTIONS[level];
-
-  let isCorrect;
-  let serverCorrectAnswer;
-  if (matched) {
-    serverCorrectAnswer = matched.answer;
-    isCorrect = checkAnswer(userAnswer, matched.answer);
-  } else if (clientCorrectAnswer) {
-    serverCorrectAnswer = clientCorrectAnswer;
-    isCorrect = checkAnswer(userAnswer, clientCorrectAnswer);
-  } else {
-    isCorrect = false;
-    serverCorrectAnswer = '';
+  const levelNumber = Number(level);
+  const block = LEVEL_QUESTIONS[levelNumber];
+  if (!Number.isInteger(levelNumber) || !block) {
+    throw ApiError.validation('关卡必须是 1-200 之间的整数');
   }
+
+  const progress = await getUserProgress(userId);
+  if (levelNumber > Number(progress.highest_level) + 1) {
+    throw ApiError.forbidden(`第 ${levelNumber} 关尚未解锁，请先完成第 ${Number(progress.highest_level) + 1} 关`);
+  }
+
+  const matched = findQuestionByLevelAndText(levelNumber, questionText);
+  if (!matched) {
+    throw ApiError.badRequest('题目不属于该关卡，请刷新题目后重试');
+  }
+
+  const now = new Date().toISOString();
+  const serverCorrectAnswer = matched.answer;
+  const isCorrect = checkAnswer(userAnswer, serverCorrectAnswer);
 
   const result = await db.run(
     `INSERT INTO user_challenge_records
     (user_id, level, question_content, user_answer, correct_answer, is_correct, answered_at, poem_title, poem_author)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING id`,
-    [userId, level, questionText, userAnswer, serverCorrectAnswer, isCorrect ? 1 : 0, now, block?.title || poemTitle, block?.author || poemAuthor]
+    [userId, levelNumber, questionText, userAnswer, serverCorrectAnswer, isCorrect ? 1 : 0, now, block.title || poemTitle, block.author || poemAuthor]
   );
   const recordId = result.rows[0].id;
-  if (isCorrect) {
-    await updateUserProgress(userId, level);
-    try {
-      const progress = await getUserProgress(userId);
-      return { correct: true, recordId, highestLevel: progress.highest_level, currentLevel: progress.current_challenge_level };
-    } catch {
-      return { correct: true, recordId };
-    }
-  } else {
+  if (!isCorrect) {
     await db.run(
       'UPDATE user_challenge_progress SET total_errors = total_errors + 1 WHERE user_id = $1',
       [userId]
     );
     try {
-      const progress = await getUserProgress(userId);
-      return { correct: false, recordId, highestLevel: progress.highest_level, currentLevel: progress.current_challenge_level };
-    } catch {
-      return { correct: false, recordId };
+      await addToErrorBook(userId, recordId, questionText, userAnswer, serverCorrectAnswer, matched.analysis);
+    } catch (error) {
+      console.warn('[challenge] 自动写入错题本失败:', error.message);
     }
   }
+
+  const latestProgress = await getUserProgress(userId);
+  return {
+    correct: isCorrect,
+    recordId,
+    highestLevel: latestProgress.highest_level,
+    currentLevel: latestProgress.current_challenge_level
+  };
 }
 
 // ============================================================
 // 错题本
 // ============================================================
 async function addToErrorBook(userId, recordId, question, userAnswer, correctAnswer, explanation) {
-  await db.run(
-    `INSERT INTO user_error_book (user_id, record_id, question_content, user_answer, correct_answer, explanation, added_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [userId, recordId, question, userAnswer, correctAnswer, explanation, new Date().toISOString()]
+  const existing = await db.get(
+    'SELECT id FROM user_error_book WHERE user_id = $1 AND question_content = $2 LIMIT 1',
+    [userId, question]
   );
+  if (!existing) {
+    await db.run(
+      `INSERT INTO user_error_book (user_id, record_id, question_content, user_answer, correct_answer, explanation, added_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [userId, recordId, question, userAnswer, correctAnswer, explanation, new Date().toISOString()]
+    );
+  }
   await db.run('UPDATE user_challenge_records SET added_to_error_book = 1 WHERE id = $1', [recordId]);
 }
 
@@ -1450,6 +1537,7 @@ async function getLeaderboard() {
 
 module.exports = {
   getUserProgress,
+  getLevelAnswerProgress,
   updateUserProgress,
   generateQuestions,
   submitAnswer,
@@ -1460,7 +1548,7 @@ module.exports = {
   checkAnswer,
   normalize,
   getQuestionByLevel,
-  POEMS,
+  POEMS: CANONICAL_POEMS,
   getStaticQuestionBank: () => Object.values(LEVEL_QUESTIONS).map(b => ({
     level: b.level, title: b.title, author: b.author,
     difficulty: b.difficulty, questions: b.questions

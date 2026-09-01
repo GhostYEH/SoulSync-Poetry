@@ -15,7 +15,7 @@
       <Transition name="scene-switch" mode="out-in">
         <div v-if="stage === 'modes'" key="modes" class="view modes-view">
           <div class="view-intro"><span class="eyebrow">ENTER THE POETRY GATHERING</span><h2>择一席，入雅集</h2><p>今夜不论胜负，只问一句诗是否恰好落在心上。</p></div>
-          <div class="mode-layout"><div class="mode-orbit"><div class="orbit-ring orbit-ring-a"></div><div class="orbit-ring orbit-ring-b"></div><div class="orbit-plaque"><span>雅</span><small>集</small></div><div class="orbit-note note-top">墨韵流觞</div><div class="orbit-note note-bottom">诗以会友</div></div><div class="mode-list"><button v-for="mode in modes" :key="mode.id" class="mode-tile" :class="{ selected: selectedMode === mode.id }" @click="selectMode(mode.id)"><span class="mode-marker">{{ mode.mark }}</span><span class="mode-copy"><strong>{{ mode.name }}</strong><small>{{ mode.description }}</small></span><span class="mode-meta"><em>{{ mode.tag }}</em><i>›</i></span></button></div></div>
+          <div class="mode-layout"><div class="mode-orbit"><div class="orbit-ring orbit-ring-a"></div><div class="orbit-ring orbit-ring-b"></div><div class="orbit-plaque"><span>雅</span><small>集</small></div><div class="orbit-note note-top">墨韵流觞</div><div class="orbit-note note-bottom">诗以会友</div></div><div class="mode-list"><button v-for="mode in modes" :key="mode.id" class="mode-tile" :class="{ selected: selectedMode === mode.id }" :aria-pressed="selectedMode === mode.id" @click="selectMode(mode.id)"><span class="mode-marker">{{ mode.mark }}</span><span class="mode-copy"><strong>{{ mode.name }}</strong><small>{{ mode.description }}</small></span><span class="mode-meta"><em class="mode-picked" :class="{ visible: selectedMode === mode.id }" aria-hidden="true">已选</em><em>{{ mode.tag }}</em><i>›</i></span></button><div class="mode-selection-summary" aria-live="polite"><span class="summary-mark">✓</span><div><small>当前选择</small><strong>{{ selectedModeName }}</strong><p>{{ selectedModeHint }}</p></div></div></div></div>
           <div class="view-actions centered-actions"><button class="ink-button primary" @click="goToKeywords">择令入席 <span>→</span></button><span class="action-caption">已选：{{ selectedModeName }} · {{ selectedModeTime }}</span></div>
         </div>
 
@@ -38,9 +38,44 @@
 
         <div v-else-if="stage === 'matching'" key="matching" class="view matching-view">
           <div class="view-topline"><button class="text-button" @click="cancelMatching">← 返回定规</button><span>诗友雅集 · {{ selectedKeyword }}</span></div>
-          <div class="matching-scene"><div class="matching-seat left-seat"><div class="seat-lantern"></div><div class="seat-avatar mine">{{ userInitial }}</div><strong>{{ currentUserName }}</strong><small>候席中 · {{ rankName }}</small></div><div class="matching-center"><div class="search-seal" :class="{ found: opponent }"><span>{{ selectedKeyword }}</span></div><p>{{ opponent ? '诗友已至，对席成章' : '正在寻觅诗友……' }}</p><small>{{ onlineUsers.length ? `${onlineUsers.length} 位诗友在线` : '墨线正沿湖岸寻觅' }}</small></div><div class="matching-seat right-seat" :class="{ found: opponent }"><div class="seat-lantern"></div><div v-if="opponent" class="seat-avatar rival">{{ opponent.initial }}</div><div v-else class="empty-seat">？</div><strong>{{ opponent?.name || '空席待客' }}</strong><small>{{ opponent ? `${opponent.rank} · Lv.${opponent.level}` : '等待一位诗友' }}</small></div></div>
-          <div v-if="onlineUsers.length" class="online-invitations"><div class="mini-label">附近诗友 · 可邀对席</div><button v-for="player in availablePlayers" :key="player.userId" @click="invitePlayer(player)"><span class="mini-avatar">{{ player.username?.slice(0, 1) }}</span><span>{{ player.username }}<small>Lv.{{ player.level || 8 }} · {{ player.inGame ? '对局中' : '闲候' }}</small></span><em>{{ player.inGame ? '忙' : '邀请' }}</em></button></div>
-          <div class="matching-actions"><button class="ink-button ghost" @click="refreshPlayers">换一批诗友</button><button class="ink-button primary" @click="simulateOpponent">{{ opponent ? '进入对席' : '自动寻友' }}</button></div>
+
+          <div class="matching-layout">
+            <div class="matching-intro">
+              <span class="eyebrow">在线对战 · 选择诗友</span>
+              <h2>挑一位在线诗友，对席成章</h2>
+              <p>查看当前在线的诗友，向你想挑战的人发出邀请。对方接受后，诗会即刻开席。</p>
+              <div class="matching-seat-row">
+                <div class="matching-seat compact-seat">
+                  <div class="seat-avatar mine">{{ userInitial }}</div>
+                  <div><strong>{{ currentUserName }}</strong><small>你的席位 · {{ rankName }}</small></div>
+                </div>
+                <div class="matching-connector"><span>令</span><i></i><span>友</span></div>
+                <div class="matching-seat compact-seat target-seat" :class="{ found: opponent }">
+                  <div v-if="opponent" class="seat-avatar rival">{{ opponent.initial }}</div><div v-else class="empty-seat">？</div>
+                  <div><strong>{{ opponent?.name || '等待诗友' }}</strong><small>{{ opponent ? '邀请已接受，准备入席' : '从右侧名单发出邀请' }}</small></div>
+                </div>
+              </div>
+              <div v-if="waitingInvite" class="invite-waiting"><span class="waiting-mark">等</span><div><strong>已向 {{ waitingInvite.username }} 发出邀请</strong><small>等待对方回应，期间可以继续查看在线状态。</small></div><button class="text-button" @click="cancelInvitation">取消邀请</button></div>
+              <div v-if="matchingNotice" class="matching-notice" :class="matchingNoticeType">{{ matchingNotice }}</div>
+            </div>
+
+            <section class="online-roster" aria-live="polite">
+              <div class="roster-header"><div><span class="eyebrow">在线用户</span><h3>当前在线诗友</h3></div><div class="roster-count"><strong>{{ availablePlayers.length }}</strong><span>位诗友</span></div></div>
+              <div class="roster-toolbar"><span><i class="presence-dot"></i>{{ onlineUsers.length ? `${onlineUsers.length} 人在线` : '正在查找在线用户' }}</span><button class="text-button" :disabled="isRefreshingPlayers" @click="refreshPlayers">{{ isRefreshingPlayers ? '刷新中...' : '刷新名单' }}</button></div>
+              <div v-if="isRefreshingPlayers && !onlineUsers.length" class="roster-skeleton" aria-label="正在加载在线用户"><span v-for="item in 3" :key="item"></span></div>
+              <div v-else-if="!availablePlayers.length" class="roster-empty"><span class="empty-roster-mark">席</span><strong>暂时没有可邀请的诗友</strong><p>保持在线，新的诗友入席后会出现在这里。</p><button class="ink-button ghost" @click="refreshPlayers">重新查找</button></div>
+              <div v-else class="roster-list">
+                <article v-for="player in availablePlayers" :key="player.userId" class="roster-player" :class="{ busy: player.inGame, inviting: invitingPlayerId === player.userId }">
+                  <div class="roster-avatar">{{ player.username?.slice(0, 1) || '友' }}<i :class="['presence-dot', player.inGame ? 'busy-dot' : '']"></i></div>
+                  <div class="roster-player-info"><strong>{{ player.username || '在线诗友' }}</strong><span>{{ playerLevel(player) }} · {{ player.inGame ? '正在对局' : '可接受邀请' }}</span></div>
+                  <button class="roster-invite" :disabled="player.inGame || !!waitingInvite || !!invitingPlayerId" @click="invitePlayer(player)">{{ invitingPlayerId === player.userId ? '已发出' : player.inGame ? '对局中' : '邀请' }}</button>
+                </article>
+              </div>
+              <p class="roster-footnote">在线状态每次进入页面都会同步，邀请只对当前在线的诗友有效。</p>
+            </section>
+          </div>
+
+          <div class="matching-actions"><button class="ink-button ghost" @click="cancelMatching">稍后再选</button><button class="ink-button primary" :disabled="!opponent" @click="startBattle">{{ opponent ? '进入对席' : '等待对方接受' }} <span>→</span></button></div>
         </div>
 
         <div v-else-if="stage === 'ready'" key="ready" class="view ready-view"><div class="ready-curtain"><span class="eyebrow">THE DUEL BEGINS</span><h2>以诗会友</h2><p>「{{ selectedKeyword }}」一字入局，今夜各尽风雅。</p></div><div class="ready-players"><div class="ready-player"><div class="large-avatar mine">{{ userInitial }}</div><strong>{{ currentUserName }}</strong><small>{{ rankName }} · Lv.12</small></div><div class="ready-jade"><small>本局令字</small><strong>{{ selectedKeyword }}</strong><span>{{ difficultyName }} · {{ difficultyTime }} 秒</span></div><div class="ready-player"><div class="large-avatar rival">{{ opponent?.initial || '友' }}</div><strong>{{ opponent?.name || '墨染江南' }}</strong><small>{{ opponent?.rank || '松风雅士' }} · Lv.9</small></div></div><div class="ready-ruleline"><span>回合制</span><i>·</i><span>句不重出</span><i>·</i><span>提示三次</span></div><button class="ink-button primary ready-start" @click="startBattle">第一回合 <span>→</span></button></div>
@@ -55,6 +90,8 @@
       </Transition>
     </div>
 
+    <div v-if="receivedInvitation" class="invite-overlay" @click.self="rejectInvitation"><section class="invite-dialog" role="dialog" aria-modal="true" aria-labelledby="invite-title"><span class="eyebrow">收到诗友邀请</span><div class="invite-dialog-avatar">{{ invitationFromName.slice(0, 1) }}</div><h2 id="invite-title">{{ invitationFromName }} 邀你对席</h2><p>对方想以「{{ receivedInvitation.keyword || selectedKeyword }}」为令，与你进行一局飞花令。</p><div class="invite-dialog-meta"><span>令字 <strong>{{ receivedInvitation.keyword || selectedKeyword }}</strong></span><span>节奏 <strong>{{ invitationDifficultyName }}</strong></span></div><div class="invite-dialog-actions"><button class="ink-button ghost" @click="rejectInvitation">暂不应邀</button><button class="ink-button primary" @click="acceptInvitation">接受邀请 <span>→</span></button></div></section></div>
+
     <div v-if="showRecordPanel" class="record-overlay" @click.self="showRecordPanel = false"><section class="record-panel"><button class="close-panel" @click="showRecordPanel = false">×</button><span class="eyebrow">THE POETRY SCROLL</span><h2>本局诗句长卷</h2><p>每一句，都留下了今晚的对席痕迹。</p><div class="full-record-list"><div v-for="item in history" :key="item.id" class="full-record"><span>{{ item.round }}</span><div><strong>{{ item.poem }}</strong><small>—— {{ item.author }}《{{ item.title }}》</small></div><em :class="item.side">{{ item.side === 'me' ? '我' : item.side === 'hint' ? '提示' : '友' }}</em></div></div></section></div>
   </section>
 </template>
@@ -67,25 +104,737 @@ import api from '../services/api'
 import feihualingSocket from '../services/feihualingSocket'
 import sceneImage from '../assets/jade-paper-ambient.png'
 
-const router = useRouter(); const stage = ref('modes'); const selectedMode = ref('single'); const selectedKeyword = ref('花'); const customKeyword = ref(''); const difficulty = ref('medium'); const opponent = ref(null); const onlineUsers = ref([]); const poemInput = ref(''); const inputRef = ref(null); const isSubmitting = ref(false); const hintLoading = ref(false); const hintPoem = ref(null); const hintsUsed = ref(0); const showReference = ref(false); const showRecordPanel = ref(false); const feedback = ref(null); const roundNumber = ref(1); const timeLeft = ref(45); const turn = ref('me'); const score = ref({ me: 0, opponent: 0 }); const streak = ref(0); const correctCount = ref(0); const history = ref([]); const usedPoems = ref([]); const hintedPoems = ref([]); const lastPoem = ref(null); const resultSaved = ref(false); const gameSessionId = ref(''); let timerId = null; let matchTimer = null
-const modes = [{ id: 'single', mark: '笺', name: '单人练习', description: '与 AI 对弈，温故知新', tag: '静心 · 入门' }, { id: 'online', mark: '席', name: '在线对战', description: '与诗友对席，以诗会友', tag: '实时 · 雅集' }, { id: 'timed', mark: '漏', name: '限时挑战', description: '在一炷香里尽展诗才', tag: '60 秒 · 连击' }, { id: 'ranking', mark: '印', name: '排位赛', description: '以诗论道，登风雅榜', tag: '积分 · 晋阶' }]
-const difficulties = [{ id: 'easy', name: '清赏', description: '诗句宽裕，适合温习手感', time: 60 }, { id: 'medium', name: '雅集', description: '从容有度，今晚正好', time: 45 }, { id: 'hard', name: '问鼎', description: '留白更少，诗心更快', time: 30 }]
-const flowSteps = [{ key: 'modes', label: '择席' }, { key: 'keywords', label: '择令' }, { key: 'rules', label: '定规' }, { key: 'matching', label: '寻友' }, { key: 'playing', label: '对诗' }, { key: 'result', label: '曲终' }]
-const petals = Array.from({ length: 14 }, (_, index) => ({ id: index, style: { left: `${8 + (index * 17) % 88}%`, top: `${12 + (index * 23) % 76}%`, animationDelay: `${index * -1.3}s`, animationDuration: `${7 + index % 5}s` } })); const sceneStyle = { '--scene-image': `url(${sceneImage})` }
-let currentUser = {}; try { currentUser = JSON.parse(localStorage.getItem('user') || localStorage.getItem('userInfo') || '{}') } catch { currentUser = {} }
-const currentUserName = currentUser.username || currentUser.name || '青衫烟雨'; const currentUserId = currentUser.id || currentUser.userId; const userInitial = currentUserName.slice(0, 1); const selectedModeName = computed(() => modes.find(mode => mode.id === selectedMode.value)?.name || '单人练习'); const selectedModeTime = computed(() => selectedMode.value === 'timed' ? '60秒连击' : selectedMode.value === 'ranking' ? '积分排位' : `${difficultyTime.value}秒/回合`); const isOnlineMode = computed(() => ['online', 'ranking'].includes(selectedMode.value)); const popularKeywords = computed(() => ['春', '花', '月', '风', '雨', '山', '水', '云'].filter(char => feihuaPoems[char]).map(char => ({ char, count: getKeywordCount(char) }))); const moreKeywords = computed(() => getAvailableKeywords().filter(char => !popularKeywords.value.some(item => item.char === char)).slice(0, 16)); const keywordCount = computed(() => getKeywordCount(selectedKeyword.value)); const difficultyTime = computed(() => selectedMode.value === 'timed' ? 60 : difficulties.find(item => item.id === difficulty.value)?.time || 45); const difficultyName = computed(() => selectedMode.value === 'timed' ? '限时挑战' : difficulties.find(item => item.id === difficulty.value)?.name || '雅集'); const rankName = computed(() => selectedMode.value === 'ranking' ? '清谈客 · 晋阶中' : '松风雅士'); const flowIndex = computed(() => Math.max(0, flowSteps.findIndex(item => item.key === stage.value))); const recentHistory = computed(() => history.value.slice(-5).reverse()); const referencePoem = computed(() => getPoemsForKeyword(selectedKeyword.value, [...usedPoems.value, ...hintedPoems.value])[0] || getPoemsForKeyword(selectedKeyword.value)[0]); const highlightPoem = computed(() => history.value.filter(item => item.side === 'me' && item.result === 'success').slice(-1)[0]); const didWin = computed(() => score.value.me >= score.value.opponent); const timerAngle = computed(() => Math.max(0, (1 - timeLeft.value / difficultyTime.value) * 360)); const availablePlayers = computed(() => onlineUsers.value.filter(player => String(player.userId) !== String(currentUserId)).slice(0, 4))
-function selectMode(mode) { selectedMode.value = mode } function goToKeywords() { stage.value = 'keywords' } function selectKeyword(char) { selectedKeyword.value = char; hintPoem.value = null; feedback.value = null } function useCustomKeyword() { if (customKeyword.value && (feihuaPoems[customKeyword.value] || customKeyword.value.length === 1)) { selectKeyword(customKeyword.value); customKeyword.value = '' } } function randomKeyword() { const list = getAvailableKeywords(); selectKeyword(list[Math.floor(Math.random() * list.length)] || '花') } function goToRules() { stage.value = 'rules' }
-function enterGathering() { resetBattleState(); if (isOnlineMode.value) startMatching(); else { opponent.value = { name: '灵犀 AI', initial: '灵', rank: '云水客', level: 10, winRate: '—' }; stage.value = 'ready' } }
-function startMatching() { stage.value = 'matching'; try { const token = localStorage.getItem('token'); if (token) { feihualingSocket.connect(token); feihualingSocket.refreshOnlineUsers(); feihualingSocket.on('online-list-update', updateOnlineUsers); feihualingSocket.on('online-users', updateOnlineUsers); feihualingSocket.on('game-start', handleSocketGameStart) } } catch (error) { console.warn('[飞花令] Socket连接不可用', error) } matchTimer = window.setTimeout(() => { if (stage.value === 'matching' && !opponent.value) simulateOpponent() }, 2200) }
-function updateOnlineUsers(users) { onlineUsers.value = Array.isArray(users) ? users : [] } function handleSocketGameStart(data) { if (!data?.room) return; opponent.value = { name: data.room.players?.find(player => String(player.id) !== String(currentUserId))?.username || '在线诗友', initial: '友', rank: '松风雅士', level: 9 }; stage.value = 'ready' } function invitePlayer(player) { opponent.value = { name: player.username || '在线诗友', initial: (player.username || '友').slice(0, 1), rank: player.rankLevel || '松风雅士', level: player.level || 8, winRate: player.winRate || '—' }; try { feihualingSocket.sendInvitation(player.userId, selectedKeyword.value, difficulty.value) } catch { /* 本地演示仍可继续 */ } window.setTimeout(() => { if (stage.value === 'matching') stage.value = 'ready' }, 700) } function simulateOpponent() { opponent.value = opponent.value || { name: '墨染江南', initial: '墨', rank: '松风雅士', level: 9, winRate: '68%' }; stage.value = 'ready' } function refreshPlayers() { try { feihualingSocket.refreshOnlineUsers() } catch { /* noop */ } } function cancelMatching() { if (matchTimer) window.clearTimeout(matchTimer); opponent.value = null; stage.value = 'rules' }
-function resetBattleState() { stopTimer(); gameSessionId.value = `feihua-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; poemInput.value = ''; hintPoem.value = null; hintsUsed.value = 0; showReference.value = false; feedback.value = null; roundNumber.value = 1; timeLeft.value = difficultyTime.value; turn.value = 'me'; score.value = { me: 0, opponent: 0 }; streak.value = 0; correctCount.value = 0; history.value = []; usedPoems.value = []; hintedPoems.value = []; lastPoem.value = null; resultSaved.value = false }
-function startBattle() { stage.value = 'playing'; timeLeft.value = difficultyTime.value; startTimer(); nextTick(() => inputRef.value?.focus()) } function startTimer() { stopTimer(); timerId = window.setInterval(() => { if (stage.value !== 'playing' || turn.value !== 'me') return; timeLeft.value -= 1; if (timeLeft.value <= 0) { feedback.value = { type: 'error', message: '香尽，本回合未能接上。' }; finishBattle() } }, 1000) } function stopTimer() { if (timerId) { window.clearInterval(timerId); timerId = null } }
-async function submitPoem() { if (!poemInput.value.trim() || isSubmitting.value || turn.value !== 'me') return; isSubmitting.value = true; feedback.value = null; const input = poemInput.value.trim(); try { const result = await validatePoemWithAI(input, selectedKeyword.value, [...usedPoems.value, ...hintedPoems.value]); if (!result.valid) { await addWrongAnswer(input); feedback.value = { type: 'error', message: result.message === 'NOT_IN_DATABASE' ? '未找到此句，已收进错题本。' : `${result.message} · 已收进错题本。` }; return } const poem = { ...(result.poem || {}), poem: result.poem?.poem || input }; usedPoems.value.push(poem.poem); history.value.push({ ...poem, id: `${Date.now()}-me`, round: roundNumber.value, side: 'me', result: 'success' }); lastPoem.value = poem; score.value.me += 10; correctCount.value += 1; streak.value += 1; poemInput.value = ''; feedback.value = { type: 'success', message: '墨落成句，有效。' }; if (correctCount.value >= 5) { finishBattle(); return } turn.value = 'opponent'; timeLeft.value = difficultyTime.value; window.setTimeout(aiRespond, 800) } catch (error) { feedback.value = { type: 'error', message: error.message || '验证未完成，请稍后再试。' } } finally { isSubmitting.value = false } }
-async function addWrongAnswer(input) { const fallback = getPoemsForKeyword(selectedKeyword.value, [...usedPoems.value, ...hintedPoems.value])[0] || { poem: `含「${selectedKeyword.value}」的经典诗句`, author: '待复习', title: '飞花令' }; try { await api.wrongQuestions.add({ question: `飞花令·${selectedKeyword.value}：${input}`, answer: fallback.poem, user_answer: input, level: 3, full_poem: fallback.poem, author: fallback.author, title: fallback.title, source: 'feihualing_answer' }) } catch (error) { console.warn('[飞花令] 错题入本失败', error) } }
-function aiRespond() { if (stage.value !== 'playing') return; const candidate = getPoemsForKeyword(selectedKeyword.value, [...usedPoems.value, ...hintedPoems.value])[0]; if (!candidate) { finishBattle(); return } usedPoems.value.push(candidate.poem); history.value.push({ ...candidate, id: `${Date.now()}-opponent`, round: roundNumber.value, side: 'opponent' }); lastPoem.value = candidate; score.value.opponent += 9; roundNumber.value += 1; turn.value = 'me'; timeLeft.value = difficultyTime.value; feedback.value = { type: 'success', message: '诗友已接：轮到你了。' }; nextTick(() => inputRef.value?.focus()) }
-async function requestHint() { if (hintLoading.value || hintsUsed.value >= 3) return; hintLoading.value = true; feedback.value = null; try { const response = await api.feihua.hint({ keyword: selectedKeyword.value, usedPoems: [...usedPoems.value, ...hintedPoems.value], sessionId: gameSessionId.value }); const picked = response.poem || response.data?.poem; if (picked) { hintPoem.value = picked; hintedPoems.value.push(picked.poem); hintsUsed.value = response.count || hintsUsed.value + 1; history.value.push({ ...picked, id: `${Date.now()}-hint`, round: roundNumber.value, side: 'hint', result: 'hint' }); feedback.value = { type: 'success', message: `提示诗句已收入错题本，剩余 ${response.remaining ?? 3 - hintsUsed.value} 次。` } } } catch (error) { feedback.value = { type: 'error', message: error.message || '提示暂未抵达，请稍后再试。' } } finally { hintLoading.value = false } }
-function finishBattle() { stopTimer(); stage.value = 'result'; if (!resultSaved.value) { resultSaved.value = true; api.feihua.save({ keyword: selectedKeyword.value, score: score.value.me, poemCount: correctCount.value, history: history.value, gameSessionId: gameSessionId.value }).catch(error => console.warn('[飞花令] 保存对局失败', error)) } } function quitBattle() { finishBattle() } function rematch() { resetBattleState(); if (isOnlineMode.value) startMatching(); else { stage.value = 'ready' } } function resetToModes() { stopTimer(); stage.value = 'modes'; opponent.value = null; resetBattleState() } function openErrorBook() { router.push('/error-book') }
-onMounted(() => { if (!selectedKeyword.value) selectedKeyword.value = '花' }); onUnmounted(() => { stopTimer(); if (matchTimer) window.clearTimeout(matchTimer); feihualingSocket.off('online-list-update', updateOnlineUsers); feihualingSocket.off('online-users', updateOnlineUsers); feihualingSocket.off('game-start', handleSocketGameStart) })
+const router = useRouter()
+const stage = ref('modes')
+const selectedMode = ref('single')
+const selectedKeyword = ref('花')
+const customKeyword = ref('')
+const difficulty = ref('medium')
+const opponent = ref(null)
+const onlineUsers = ref([])
+const isRefreshingPlayers = ref(false)
+const invitingPlayerId = ref(null)
+const waitingInvite = ref(null)
+const receivedInvitation = ref(null)
+const matchingNotice = ref('')
+const matchingNoticeType = ref('success')
+const poemInput = ref('')
+const inputRef = ref(null)
+const isSubmitting = ref(false)
+const hintLoading = ref(false)
+const hintPoem = ref(null)
+const hintsUsed = ref(0)
+const showReference = ref(false)
+const showRecordPanel = ref(false)
+const feedback = ref(null)
+const roundNumber = ref(1)
+const timeLeft = ref(45)
+const turn = ref('me')
+const score = ref({ me: 0, opponent: 0 })
+const streak = ref(0)
+const correctCount = ref(0)
+const history = ref([])
+const usedPoems = ref([])
+const hintedPoems = ref([])
+const lastPoem = ref(null)
+const resultSaved = ref(false)
+const gameSessionId = ref('')
+const onlineRoomId = ref(null)
+const onlineOpponentId = ref(null)
+const onlineWinnerId = ref(null)
+let timerId = null
+let matchTimer = null
+
+const modes = [
+  { id: 'single', mark: '笺', name: '单人练习', description: '与 AI 对弈，温故知新', tag: '静心 · 入门' },
+  { id: 'online', mark: '席', name: '在线对战', description: '与诗友对席，以诗会友', tag: '实时 · 雅集' },
+  { id: 'timed', mark: '漏', name: '限时挑战', description: '在一炷香里尽展诗才', tag: '60 秒 · 连击' },
+  { id: 'ranking', mark: '印', name: '排位赛', description: '以诗论道，登风雅榜', tag: '积分 · 晋阶' }
+]
+const difficulties = [
+  { id: 'easy', name: '清赏', description: '诗句宽裕，适合温习手感', time: 60 },
+  { id: 'medium', name: '雅集', description: '从容有度，今晚正好', time: 45 },
+  { id: 'hard', name: '问鼎', description: '留白更少，诗心更快', time: 30 }
+]
+const flowSteps = [
+  { key: 'modes', label: '择席' },
+  { key: 'keywords', label: '择令' },
+  { key: 'rules', label: '定规' },
+  { key: 'matching', label: '寻友' },
+  { key: 'playing', label: '对诗' },
+  { key: 'result', label: '曲终' }
+]
+const selectedModeHint = computed(() => selectedMode.value === 'online'
+  ? '下一步选择令字，随后进入在线匹配。'
+  : selectedMode.value === 'ranking'
+    ? '下一步选择令字，随后进入排位对战。'
+    : selectedMode.value === 'timed'
+      ? '下一步选择令字，开始限时连击。'
+      : '下一步选择令字，进入 AI 练习。')
+const petals = Array.from({ length: 14 }, (_, index) => ({
+  id: index,
+  style: {
+    left: `${8 + (index * 17) % 88}%`,
+    top: `${12 + (index * 23) % 76}%`,
+    animationDelay: `${index * -1.3}s`,
+    animationDuration: `${7 + index % 5}s`
+  }
+}))
+const sceneStyle = { '--scene-image': `url(${sceneImage})` }
+
+let currentUser = {}
+try {
+  currentUser = JSON.parse(localStorage.getItem('user') || localStorage.getItem('userInfo') || '{}')
+} catch {
+  currentUser = {}
+}
+const currentUserName = currentUser.username || currentUser.name || '青衫烟雨'
+const currentUserId = currentUser.id || currentUser.userId
+const userInitial = currentUserName.slice(0, 1)
+
+const selectedModeName = computed(() => modes.find(mode => mode.id === selectedMode.value)?.name || '单人练习')
+const selectedModeTime = computed(() => selectedMode.value === 'timed'
+  ? '60秒连击'
+  : selectedMode.value === 'ranking'
+    ? '积分排位'
+    : `${difficultyTime.value}秒/回合`)
+const isOnlineMode = computed(() => ['online', 'ranking'].includes(selectedMode.value))
+const matchDifficulty = computed(() => selectedMode.value === 'ranking' ? 'ranking' : difficulty.value)
+const popularKeywords = computed(() => ['春', '花', '月', '风', '雨', '山', '水', '云']
+  .filter(char => feihuaPoems[char])
+  .map(char => ({ char, count: getKeywordCount(char) })))
+const moreKeywords = computed(() => getAvailableKeywords()
+  .filter(char => !popularKeywords.value.some(item => item.char === char))
+  .slice(0, 16))
+const keywordCount = computed(() => getKeywordCount(selectedKeyword.value))
+const difficultyTime = computed(() => selectedMode.value === 'timed'
+  ? 60
+  : selectedMode.value === 'ranking'
+    ? 30
+    : difficulties.find(item => item.id === difficulty.value)?.time || 45)
+const difficultyName = computed(() => selectedMode.value === 'timed'
+  ? '限时挑战'
+  : selectedMode.value === 'ranking'
+    ? '排位赛'
+    : difficulties.find(item => item.id === difficulty.value)?.name || '雅集')
+const rankName = computed(() => selectedMode.value === 'ranking' ? '清谈客 · 晋阶中' : '松风雅士')
+const flowIndex = computed(() => Math.max(0, flowSteps.findIndex(item => item.key === stage.value)))
+const recentHistory = computed(() => history.value.slice(-5).reverse())
+const referencePoem = computed(() => getPoemsForKeyword(
+  selectedKeyword.value,
+  [...usedPoems.value, ...hintedPoems.value]
+)[0] || getPoemsForKeyword(selectedKeyword.value)[0])
+const highlightPoem = computed(() => history.value
+  .filter(item => item.side === 'me' && item.result === 'success')
+  .slice(-1)[0])
+const didWin = computed(() => isOnlineMode.value && onlineWinnerId.value != null
+  ? String(onlineWinnerId.value) === String(currentUserId)
+  : score.value.me >= score.value.opponent)
+const timerAngle = computed(() => Math.max(0, (1 - timeLeft.value / Math.max(difficultyTime.value, 1)) * 360))
+const availablePlayers = computed(() => onlineUsers.value
+  .filter(player => String(player.userId) !== String(currentUserId)))
+const invitationFromName = computed(() => receivedInvitation.value?.from?.username
+  || receivedInvitation.value?.from?.name
+  || '在线诗友')
+const invitationDifficultyName = computed(() => receivedInvitation.value?.difficulty === 'ranking'
+  ? '排位赛'
+  : difficulties.find(item => item.id === receivedInvitation.value?.difficulty)?.name || '雅集')
+
+function isMine(userId) {
+  return String(userId) === String(currentUserId)
+}
+function getPlayerId(player) {
+  return player?.id ?? player?.userId
+}
+function normalizeServerPoems(poems = []) {
+  return poems.map(item => typeof item === 'string' ? item : item?.original || item?.poem || '').filter(Boolean)
+}
+function syncOnlineScores(players = []) {
+  const mine = players.find(player => isMine(getPlayerId(player)))
+  const rival = players.find(player => !isMine(getPlayerId(player)))
+  score.value = {
+    me: Number(mine?.score || 0),
+    opponent: Number(rival?.score || 0)
+  }
+}
+function setTurnFromPlayerId(playerId) {
+  turn.value = isMine(playerId) ? 'me' : 'opponent'
+}
+function appendOnlineHistory(data, result = 'success') {
+  const rawPoem = typeof data?.poem === 'string' ? data.poem : data?.poem?.poem
+  if (!rawPoem) return
+  const submittedById = data.submittedById
+  const side = submittedById == null
+    ? (data.submittedBy === currentUserName ? 'me' : 'opponent')
+    : (isMine(submittedById) ? 'me' : 'opponent')
+  const serverRound = data.currentRound ?? data.totalRounds ?? roundNumber.value
+  const alreadyAdded = history.value.some(item =>
+    item.serverPoem === rawPoem && item.serverRound === serverRound)
+  if (alreadyAdded) return
+  const poemInfo = data.aiResult?.poemInfo || (typeof data.poem === 'object' ? data.poem : null)
+  const item = {
+    poem: rawPoem,
+    author: poemInfo?.author || (side === 'me' ? currentUserName : data.submittedBy || '在线诗友'),
+    title: poemInfo?.title || '飞花令',
+    id: `${Date.now()}-${side}-${Math.random().toString(36).slice(2, 7)}`,
+    round: Math.max(1, Number(serverRound) - (result === 'success' ? 1 : 0)),
+    side,
+    result,
+    serverPoem: rawPoem,
+    serverRound
+  }
+  history.value.push(item)
+  lastPoem.value = item
+}
+
+function selectMode(mode) { selectedMode.value = mode }
+function goToKeywords() { stage.value = 'keywords' }
+function selectKeyword(char) {
+  selectedKeyword.value = char
+  hintPoem.value = null
+  feedback.value = null
+}
+function useCustomKeyword() {
+  if (customKeyword.value && (feihuaPoems[customKeyword.value] || customKeyword.value.length === 1)) {
+    selectKeyword(customKeyword.value)
+    customKeyword.value = ''
+  }
+}
+function randomKeyword() {
+  const list = getAvailableKeywords()
+  selectKeyword(list[Math.floor(Math.random() * list.length)] || '花')
+}
+function goToRules() { stage.value = 'rules' }
+function enterGathering() {
+  resetBattleState()
+  if (isOnlineMode.value) startMatching()
+  else {
+    opponent.value = { name: '灵犀 AI', initial: '灵', rank: '云水客', level: 10, winRate: '—' }
+    stage.value = 'ready'
+  }
+}
+
+function bindSocketEvents() {
+  const events = [
+    ['online-list-update', updateOnlineUsers],
+    ['online-users', updateOnlineUsers],
+    ['game-start', handleSocketGameStart],
+    ['receive-invitation', handleReceivedInvitation],
+    ['invitation-rejected', handleInvitationRejected],
+    ['invitation-cancelled', handleInvitationCancelled],
+    ['poem-submitted', handleOnlinePoemSubmitted],
+    ['game-result', handleOnlineGameResult],
+    ['opponent-disconnected', handleOpponentDisconnected],
+    ['validating', handleOnlineValidating],
+    ['timer-tick', handleOnlineTimerTick],
+    ['error', handleSocketError]
+  ]
+  events.forEach(([event, handler]) => {
+    feihualingSocket.off(event, handler)
+    feihualingSocket.on(event, handler)
+  })
+  return events
+}
+let boundSocketEvents = []
+
+function startMatching() {
+  stage.value = 'matching'
+  opponent.value = null
+  waitingInvite.value = null
+  invitingPlayerId.value = null
+  matchingNotice.value = ''
+  isRefreshingPlayers.value = true
+  const token = localStorage.getItem('token')
+  if (!token) {
+    isRefreshingPlayers.value = false
+    matchingNotice.value = '登录后才能查看实时在线用户并邀请诗友。'
+    matchingNoticeType.value = 'error'
+    return
+  }
+  try {
+    boundSocketEvents.forEach(([event, handler]) => feihualingSocket.off(event, handler))
+    boundSocketEvents = bindSocketEvents()
+    feihualingSocket.connect(token)
+    feihualingSocket.refreshOnlineUsers()
+  } catch (error) {
+    isRefreshingPlayers.value = false
+    matchingNotice.value = error.message || 'Socket连接不可用'
+    matchingNoticeType.value = 'error'
+  }
+}
+
+function updateOnlineUsers(users) {
+  onlineUsers.value = Array.isArray(users) ? users : []
+  isRefreshingPlayers.value = false
+}
+function playerLevel(player) {
+  return `Lv.${player.level || Math.max(1, Math.min(30, Number(player.maxRounds || 8)))}`
+}
+function handleSocketGameStart(data) {
+  const room = data?.room
+  if (!room) return
+  onlineRoomId.value = room.id
+  onlineWinnerId.value = null
+  selectedKeyword.value = room.keyword || selectedKeyword.value
+  difficulty.value = room.difficulty === 'ranking' ? 'medium' : (room.difficulty || difficulty.value)
+  timeLeft.value = Number(room.turnTimeLimit || difficultyTime.value)
+  roundNumber.value = Number(room.currentRound || 1)
+  usedPoems.value = normalizeServerPoems(room.usedPoems)
+  syncOnlineScores(room.players)
+  setTurnFromPlayerId(room.players?.[room.currentTurn]?.id)
+  const rival = room.players?.find(player => !isMine(getPlayerId(player)))
+  onlineOpponentId.value = getPlayerId(rival)
+  opponent.value = {
+    id: onlineOpponentId.value,
+    name: rival?.username || '在线诗友',
+    initial: (rival?.username || '友').slice(0, 1),
+    rank: '松风雅士',
+    level: 9,
+    winRate: '—'
+  }
+  waitingInvite.value = null
+  invitingPlayerId.value = null
+  receivedInvitation.value = null
+  matchingNotice.value = '对方已接受邀请，诗会准备开席。'
+  matchingNoticeType.value = 'success'
+  stage.value = 'ready'
+}
+function handleReceivedInvitation(data) {
+  selectedMode.value = data?.difficulty === 'ranking' ? 'ranking' : 'online'
+  receivedInvitation.value = data
+  if (stage.value !== 'matching') stage.value = 'matching'
+}
+function handleInvitationRejected() {
+  waitingInvite.value = null
+  invitingPlayerId.value = null
+  matchingNotice.value = '对方暂未应邀，可以换一位诗友。'
+  matchingNoticeType.value = 'error'
+}
+function handleInvitationCancelled() {
+  receivedInvitation.value = null
+  matchingNotice.value = '对方已取消邀请。'
+  matchingNoticeType.value = 'error'
+}
+function handleOnlineValidating() {
+  if (isOnlineMode.value && stage.value === 'playing') {
+    feedback.value = { type: 'success', message: '正在由服务端核验诗句…' }
+  }
+}
+function handleOnlineTimerTick(data) {
+  if (!isOnlineMode.value || !onlineRoomId.value) return
+  timeLeft.value = Math.max(0, Number(data?.remaining ?? timeLeft.value))
+  if (data?.currentPlayerId != null) setTurnFromPlayerId(data.currentPlayerId)
+  if (data?.currentRound != null) roundNumber.value = Number(data.currentRound)
+}
+function handleOnlinePoemSubmitted(data) {
+  if (!isOnlineMode.value || !onlineRoomId.value) return
+  syncOnlineScores(data.players)
+  usedPoems.value = normalizeServerPoems(data.usedPoems)
+  appendOnlineHistory(data, 'success')
+  const mine = data.submittedById == null
+    ? data.submittedBy === currentUserName
+    : isMine(data.submittedById)
+  if (mine) {
+    correctCount.value += 1
+    streak.value += 1
+    poemInput.value = ''
+    feedback.value = { type: 'success', message: '服务端判定有效，轮到诗友接句。' }
+  } else {
+    streak.value = 0
+    feedback.value = { type: 'success', message: `${data.submittedBy || '诗友'} 已接诗，轮到你了。` }
+  }
+  setTurnFromPlayerId(data.currentTurn != null
+    ? data.players?.[data.currentTurn]?.id
+    : (mine ? onlineOpponentId.value : currentUserId))
+  roundNumber.value = Number(data.currentRound || roundNumber.value + 1)
+  isSubmitting.value = false
+  nextTick(() => { if (turn.value === 'me') inputRef.value?.focus() })
+}
+function handleOnlineGameResult(data) {
+  if (!isOnlineMode.value || !onlineRoomId.value) return
+  syncOnlineScores(data.players)
+  const submittedPoem = typeof data.poem === 'string' ? data.poem : data.poem?.poem
+  if (submittedPoem) appendOnlineHistory(data, 'failure')
+  const mine = data.submittedById == null
+    ? data.submittedBy === currentUserName
+    : isMine(data.submittedById)
+  if (mine && submittedPoem) void addWrongAnswer(submittedPoem)
+  onlineWinnerId.value = data.winnerId
+  isSubmitting.value = false
+  stopTimer()
+  feedback.value = { type: 'error', message: data.reason || '本局结束' }
+  roundNumber.value = Number(data.currentRound || data.totalRounds || roundNumber.value)
+  usedPoems.value = normalizeServerPoems(data.usedPoems)
+  stage.value = 'result'
+  onlineRoomId.value = null
+}
+function handleOpponentDisconnected(data) {
+  if (!isOnlineMode.value || !onlineRoomId.value) return
+  const winner = data?.winner
+  if (winner) {
+    onlineWinnerId.value = winner.userId
+    score.value = {
+      me: isMine(winner.userId) ? Number(winner.score || score.value.me) : score.value.me,
+      opponent: isMine(winner.userId) ? score.value.opponent : Number(winner.score || score.value.opponent)
+    }
+  } else {
+    onlineWinnerId.value = currentUserId
+  }
+  isSubmitting.value = false
+  stopTimer()
+  feedback.value = { type: 'success', message: data?.message || '对手已离席，本局获胜。' }
+  stage.value = 'result'
+  onlineRoomId.value = null
+}
+function handleSocketError(error) {
+  isSubmitting.value = false
+  if (stage.value === 'playing' && isOnlineMode.value) {
+    feedback.value = { type: 'error', message: error?.error || '服务端判题失败，请重试。' }
+    return
+  }
+  opponent.value = null
+  waitingInvite.value = null
+  invitingPlayerId.value = null
+  matchingNotice.value = error?.error || '邀请未能送达，请稍后再试。'
+  matchingNoticeType.value = 'error'
+}
+function invitePlayer(player) {
+  if (player.inGame || waitingInvite.value || invitingPlayerId.value) return
+  try {
+    invitingPlayerId.value = player.userId
+    waitingInvite.value = player
+    matchingNotice.value = `已向 ${player.username || '诗友'} 发出邀请，等待对方回应。`
+    matchingNoticeType.value = 'success'
+    feihualingSocket.sendInvitation(player.userId, selectedKeyword.value, matchDifficulty.value)
+  } catch {
+    invitingPlayerId.value = null
+    waitingInvite.value = null
+    matchingNotice.value = '邀请未能送达，请检查网络连接。'
+    matchingNoticeType.value = 'error'
+  }
+}
+function refreshPlayers() {
+  isRefreshingPlayers.value = true
+  try {
+    feihualingSocket.refreshOnlineUsers()
+  } catch {
+    isRefreshingPlayers.value = false
+    matchingNotice.value = '暂时无法刷新在线名单。'
+    matchingNoticeType.value = 'error'
+  }
+}
+function cancelInvitation() {
+  if (waitingInvite.value) {
+    try { feihualingSocket.cancelInvitation() } catch { /* noop */ }
+  }
+  waitingInvite.value = null
+  invitingPlayerId.value = null
+  matchingNotice.value = '已取消邀请，可以重新选择诗友。'
+  matchingNoticeType.value = 'success'
+}
+function acceptInvitation() {
+  if (!receivedInvitation.value) return
+  const invitation = receivedInvitation.value
+  selectedKeyword.value = invitation.keyword || selectedKeyword.value
+  if (invitation.difficulty && invitation.difficulty !== 'ranking') difficulty.value = invitation.difficulty
+  opponent.value = {
+    name: invitationFromName.value,
+    initial: invitationFromName.value.slice(0, 1),
+    rank: '松风雅士',
+    level: 9,
+    winRate: '—'
+  }
+  try {
+    feihualingSocket.acceptInvitation(
+      invitation.inviteId,
+      invitation.from?.userId,
+      invitation.keyword,
+      invitation.difficulty
+    )
+  } catch {
+    opponent.value = null
+    matchingNotice.value = '接受邀请失败，请稍后再试。'
+    matchingNoticeType.value = 'error'
+    return
+  }
+  receivedInvitation.value = null
+  matchingNotice.value = '已接受邀请，正在准备对席。'
+  matchingNoticeType.value = 'success'
+}
+function rejectInvitation() {
+  if (!receivedInvitation.value) return
+  const invitation = receivedInvitation.value
+  try {
+    feihualingSocket.rejectInvitation(invitation.inviteId, invitation.from?.userId)
+  } catch { /* noop */ }
+  receivedInvitation.value = null
+  matchingNotice.value = '已婉拒这次邀请。'
+  matchingNoticeType.value = 'success'
+}
+function cancelMatching() {
+  if (matchTimer) window.clearTimeout(matchTimer)
+  cancelInvitation()
+  opponent.value = null
+  onlineRoomId.value = null
+  stage.value = 'rules'
+}
+
+function resetBattleState() {
+  stopTimer()
+  gameSessionId.value = `feihua-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  onlineRoomId.value = null
+  onlineOpponentId.value = null
+  onlineWinnerId.value = null
+  poemInput.value = ''
+  hintPoem.value = null
+  hintsUsed.value = 0
+  showReference.value = false
+  feedback.value = null
+  roundNumber.value = 1
+  timeLeft.value = difficultyTime.value
+  turn.value = 'me'
+  score.value = { me: 0, opponent: 0 }
+  streak.value = 0
+  correctCount.value = 0
+  history.value = []
+  usedPoems.value = []
+  hintedPoems.value = []
+  lastPoem.value = null
+  resultSaved.value = false
+}
+function startBattle() {
+  if (isOnlineMode.value && !onlineRoomId.value) {
+    feedback.value = { type: 'error', message: '在线房间尚未准备好，请重新匹配。' }
+    return
+  }
+  stage.value = 'playing'
+  if (isOnlineMode.value) {
+    nextTick(() => { if (turn.value === 'me') inputRef.value?.focus() })
+  } else {
+    timeLeft.value = difficultyTime.value
+    startTimer()
+    nextTick(() => inputRef.value?.focus())
+  }
+}
+function startTimer() {
+  stopTimer()
+  timerId = window.setInterval(() => {
+    if (stage.value !== 'playing' || turn.value !== 'me') return
+    timeLeft.value -= 1
+    if (timeLeft.value <= 0) {
+      feedback.value = { type: 'error', message: '香尽，本回合未能接上。' }
+      finishBattle()
+    }
+  }, 1000)
+}
+function stopTimer() {
+  if (timerId) {
+    window.clearInterval(timerId)
+    timerId = null
+  }
+}
+
+async function submitPoem() {
+  if (!poemInput.value.trim() || isSubmitting.value || turn.value !== 'me') return
+  const input = poemInput.value.trim()
+  feedback.value = null
+
+  if (isOnlineMode.value) {
+    if (!onlineRoomId.value) {
+      feedback.value = { type: 'error', message: '在线房间尚未准备好，请重新匹配。' }
+      return
+    }
+    isSubmitting.value = true
+    try {
+      feihualingSocket.submitAnswer(onlineRoomId.value, input)
+    } catch (error) {
+      isSubmitting.value = false
+      feedback.value = { type: 'error', message: error.message || '提交未能送达，请检查网络连接。' }
+    }
+    return
+  }
+
+  isSubmitting.value = true
+  try {
+    const result = await validatePoemWithAI(
+      input,
+      selectedKeyword.value,
+      [...usedPoems.value, ...hintedPoems.value]
+    )
+    if (!result.valid) {
+      await addWrongAnswer(input)
+      feedback.value = {
+        type: 'error',
+        message: result.message === 'NOT_IN_DATABASE'
+          ? '未找到此句，已收进错题本。'
+          : `${result.message} · 已收进错题本。`
+      }
+      return
+    }
+    const poem = { ...(result.poem || {}), poem: result.poem?.poem || input }
+    usedPoems.value.push(poem.poem)
+    history.value.push({
+      ...poem,
+      id: `${Date.now()}-me`,
+      round: roundNumber.value,
+      side: 'me',
+      result: 'success'
+    })
+    lastPoem.value = poem
+    score.value.me += 10
+    correctCount.value += 1
+    streak.value += 1
+    poemInput.value = ''
+    feedback.value = { type: 'success', message: '墨落成句，有效。' }
+    if (correctCount.value >= 5) {
+      finishBattle()
+      return
+    }
+    turn.value = 'opponent'
+    timeLeft.value = difficultyTime.value
+    window.setTimeout(aiRespond, 800)
+  } catch (error) {
+    feedback.value = { type: 'error', message: error.message || '验证未完成，请稍后再试。' }
+  } finally {
+    isSubmitting.value = false
+  }
+}
+async function addWrongAnswer(input) {
+  const fallback = getPoemsForKeyword(
+    selectedKeyword.value,
+    [...usedPoems.value, ...hintedPoems.value]
+  )[0] || {
+    poem: `含「${selectedKeyword.value}」的经典诗句`,
+    author: '待复习',
+    title: '飞花令'
+  }
+  try {
+    await api.wrongQuestions.add({
+      question: `飞花令·${selectedKeyword.value}：${input}`,
+      answer: fallback.poem,
+      user_answer: input,
+      level: 3,
+      full_poem: fallback.poem,
+      author: fallback.author,
+      title: fallback.title,
+      source: 'feihualing_answer'
+    })
+  } catch (error) {
+    console.warn('[飞花令] 错题入本失败', error)
+  }
+}
+function aiRespond() {
+  if (isOnlineMode.value || stage.value !== 'playing') return
+  const candidate = getPoemsForKeyword(
+    selectedKeyword.value,
+    [...usedPoems.value, ...hintedPoems.value]
+  )[0]
+  if (!candidate) {
+    finishBattle()
+    return
+  }
+  usedPoems.value.push(candidate.poem)
+  history.value.push({
+    ...candidate,
+    id: `${Date.now()}-opponent`,
+    round: roundNumber.value,
+    side: 'opponent'
+  })
+  lastPoem.value = candidate
+  score.value.opponent += 9
+  roundNumber.value += 1
+  turn.value = 'me'
+  timeLeft.value = difficultyTime.value
+  feedback.value = { type: 'success', message: '诗友已接：轮到你了。' }
+  nextTick(() => inputRef.value?.focus())
+}
+async function requestHint() {
+  if (hintLoading.value || hintsUsed.value >= 3) return
+  hintLoading.value = true
+  feedback.value = null
+  try {
+    const response = await api.feihua.hint({
+      keyword: selectedKeyword.value,
+      usedPoems: [...usedPoems.value, ...hintedPoems.value],
+      sessionId: gameSessionId.value
+    })
+    const picked = response.poem || response.data?.poem
+    if (picked) {
+      hintPoem.value = picked
+      hintedPoems.value.push(picked.poem)
+      hintsUsed.value = response.count || hintsUsed.value + 1
+      history.value.push({
+        ...picked,
+        id: `${Date.now()}-hint`,
+        round: roundNumber.value,
+        side: 'hint',
+        result: 'hint'
+      })
+      feedback.value = {
+        type: 'success',
+        message: `提示诗句已收入错题本，剩余 ${response.remaining ?? 3 - hintsUsed.value} 次。`
+      }
+    }
+  } catch (error) {
+    feedback.value = { type: 'error', message: error.message || '提示暂未抵达，请稍后再试。' }
+  } finally {
+    hintLoading.value = false
+  }
+}
+function finishBattle() {
+  stopTimer()
+  stage.value = 'result'
+  if (isOnlineMode.value) return
+  if (!resultSaved.value) {
+    resultSaved.value = true
+    api.feihua.save({
+      keyword: selectedKeyword.value,
+      score: score.value.me,
+      poemCount: correctCount.value,
+      history: history.value,
+      gameSessionId: gameSessionId.value
+    }).catch(error => console.warn('[飞花令] 保存对局失败', error))
+  }
+}
+function quitBattle() {
+  if (isOnlineMode.value && onlineRoomId.value) {
+    isSubmitting.value = true
+    try {
+      feihualingSocket.gameOver(
+        onlineRoomId.value,
+        onlineOpponentId.value,
+        currentUserId,
+        '主动离开'
+      )
+    } catch (error) {
+      isSubmitting.value = false
+      feedback.value = { type: 'error', message: error.message || '离席请求未能送达。' }
+    }
+    return
+  }
+  finishBattle()
+}
+function rematch() {
+  resetBattleState()
+  if (isOnlineMode.value) startMatching()
+  else stage.value = 'ready'
+}
+function resetToModes() {
+  stopTimer()
+  stage.value = 'modes'
+  opponent.value = null
+  resetBattleState()
+}
+function openErrorBook() { router.push('/error-book') }
+
+onMounted(() => {
+  if (!selectedKeyword.value) selectedKeyword.value = '花'
+})
+onUnmounted(() => {
+  stopTimer()
+  if (matchTimer) window.clearTimeout(matchTimer)
+  boundSocketEvents.forEach(([event, handler]) => feihualingSocket.off(event, handler))
+})
 </script>
 
 <style scoped>
@@ -98,4 +847,340 @@ onMounted(() => { if (!selectedKeyword.value) selectedKeyword.value = '花' }); 
 .battle-lower { display: grid; grid-template-columns: 1fr minmax(270px, .42fr); gap: 26px; align-items: start; }.poetry-sheet { padding: 22px; border: 1px solid rgba(179,138,74,.32); background: rgba(255,252,243,.75); box-shadow: 0 12px 28px rgba(64,83,70,.08); position: relative; }.poetry-sheet::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--gold); opacity: .55; }.sheet-heading,.sheet-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }.sheet-heading { color: var(--ink); font: 15px 'Noto Serif SC', serif; }.sheet-heading small { color: var(--ink-soft); font: 11px monospace; }.poetry-sheet textarea { width: 100%; min-height: 88px; margin: 16px 0; resize: vertical; border: 0; border-bottom: 1px solid rgba(23,63,57,.22); outline: none; color: var(--ink); background: transparent; font: 17px/1.8 'Noto Serif SC', serif; }.poetry-sheet textarea::placeholder { color: rgba(87,120,110,.48); }.helper-links { display: flex; gap: 12px; }.helper-links button { padding: 4px 0; border: 0; color: var(--ink-soft); background: transparent; cursor: pointer; font-size: 11px; }.helper-links button:disabled { opacity: .45; }.helper-links small { color: var(--cinnabar); }.submit-ink { min-width: 140px; }.reference-note,.hint-note,.feedback-note { margin-top: 16px; padding: 12px 14px; font-size: 13px; }.reference-note { color: var(--ink-soft); background: rgba(225,240,229,.55); }.reference-note small,.hint-note small { display: block; margin-top: 5px; font-size: 11px; }.hint-note { border-left: 3px solid var(--gold); color: var(--ink); background: rgba(249,240,215,.78); }.hint-note span { display: block; color: var(--gold); font-size: 11px; margin-bottom: 5px; }.feedback-note { color: var(--jade-deep); background: rgba(222,241,227,.7); }.feedback-note.error { color: var(--cinnabar); background: rgba(245,227,220,.76); }.feedback-note span { margin-right: 8px; font-weight: 700; }.history-scroll { min-height: 250px; padding: 18px 20px; border-left: 1px solid rgba(23,63,57,.16); background: linear-gradient(90deg, rgba(241,233,211,.48), rgba(255,250,238,.42)); }.scroll-title { display: flex; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid rgba(179,138,74,.35); font: 16px 'Noto Serif SC', serif; }.scroll-title small { color: var(--ink-soft); font: 11px monospace; }.scroll-list { display: grid; gap: 12px; padding-top: 12px; }.history-line { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: start; }.history-line > span { display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid rgba(47,138,120,.3); border-radius: 50%; color: var(--jade-deep); font-size: 10px; }.history-line.hint > span { border-color: rgba(179,138,74,.4); color: var(--gold); }.history-line div { display: grid; gap: 3px; }.history-line strong { font: 13px/1.6 'Noto Serif SC', serif; }.history-line small { color: var(--ink-soft); font-size: 10px; }.history-line em { color: var(--jade); font-style: normal; }.scroll-empty { padding: 36px 0; color: rgba(87,120,110,.65); text-align: center; font-size: 12px; }.scroll-more { width: 100%; margin-top: 18px; padding: 9px; border: 1px solid rgba(23,63,57,.16); color: var(--ink-soft); background: transparent; cursor: pointer; font-size: 11px; }
 .result-seal { width: 112px; height: 112px; display: grid; place-items: center; margin: 24px auto; border: 1px solid rgba(179,138,74,.7); color: var(--gold); background: rgba(238,245,226,.78); font: 72px 'Noto Serif SC', serif; transform: rotate(-5deg); box-shadow: 0 0 0 8px rgba(255,255,255,.4); }.result-seal.win { color: var(--jade-deep); background: #d6ecdc; }.result-view h2 { margin-bottom: 6px; }.result-score { display: flex; justify-content: center; align-items: center; gap: 42px; margin: 34px 0; }.result-score div { display: grid; gap: 5px; }.result-score strong { color: var(--cinnabar); font: 48px 'Noto Serif SC', serif; }.result-score small { color: var(--ink-soft); font-size: 11px; }.result-score > span { color: var(--gold); font-size: 25px; }.result-stats { display: grid; grid-template-columns: repeat(4,1fr); max-width: 680px; margin: auto; border-top: 1px solid rgba(23,63,57,.15); border-bottom: 1px solid rgba(23,63,57,.15); padding: 18px 0; }.result-stats div { display: grid; gap: 5px; border-right: 1px solid rgba(23,63,57,.12); }.result-stats div:last-child { border: 0; }.result-stats strong { color: var(--jade-deep); font: 24px 'Noto Serif SC', serif; }.result-stats span { color: var(--ink-soft); font-size: 11px; }.highlight-line { display: grid; gap: 6px; width: min(100%, 480px); margin: 24px auto 0; padding: 16px; background: rgba(245,238,216,.66); }.highlight-line span { color: var(--gold); font-size: 11px; }.highlight-line strong { font: 17px 'Noto Serif SC', serif; }.highlight-line small { color: var(--ink-soft); font-size: 11px; }.result-view .view-actions { justify-content: center; }
 .record-overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; z-index: 30; background: rgba(23,63,57,.32); backdrop-filter: blur(7px); }.record-panel { width: min(760px, 100%); max-height: 86vh; overflow: auto; padding: 38px 42px; border: 1px solid rgba(179,138,74,.56); background: #f9f5e8; box-shadow: 0 24px 80px rgba(23,63,57,.28); position: relative; }.record-panel h2 { margin-top: 12px; }.close-panel { position: absolute; top: 16px; right: 20px; border: 0; color: var(--ink-soft); background: transparent; font-size: 26px; cursor: pointer; }.full-record-list { display: grid; gap: 0; margin-top: 28px; }.full-record { display: grid; grid-template-columns: 52px 1fr auto; gap: 15px; align-items: center; padding: 14px 0; border-bottom: 1px solid rgba(23,63,57,.12); }.full-record > span { color: var(--gold); font: 12px monospace; }.full-record div { display: grid; gap: 4px; }.full-record strong { font: 16px 'Noto Serif SC', serif; }.full-record small { color: var(--ink-soft); font-size: 11px; }.full-record em { color: var(--jade); font-size: 11px; font-style: normal; }.full-record em.hint { color: var(--gold); }.scene-switch-enter-active,.scene-switch-leave-active { transition: opacity .34s ease, transform .34s ease; }.scene-switch-enter-from { opacity: 0; transform: translateY(10px); }.scene-switch-leave-to { opacity: 0; transform: translateY(-10px); }@keyframes breathe { 0%,100% { transform: translateY(0) rotate(-5deg); } 50% { transform: translateY(-5px) rotate(-3deg); } }@keyframes sealFound { 0% { transform: scale(.85); } 70% { transform: scale(1.08); } 100% { transform: scale(1); } }@keyframes drift { 0%,100% { transform: translateX(0); } 50% { transform: translateX(50px); } }@keyframes floatPetal { 0%,100% { transform: translate3d(0,0,0) rotate(0); opacity: .25; } 50% { transform: translate3d(18px,-22px,0) rotate(35deg); opacity: .8; } }@media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; } }@media (max-width: 980px) { .mode-layout,.battle-lower { grid-template-columns: 1fr; }.mode-orbit { height: 230px; }.keyword-grid { grid-template-columns: repeat(4, 1fr); }.battle-arena { gap: 12px; }.player-card { grid-template-columns: 48px 1fr; }.player-score { grid-column: 2; justify-items: start; }.player-avatar { width: 48px; height: 48px; }.player-rail { padding-top: 20px; }.history-scroll { border-left: 0; border-top: 1px solid rgba(23,63,57,.16); } }@media (max-width: 700px) { .feihua-frame { width: min(100% - 24px, 1440px); padding-top: 26px; }.module-heading,.keyword-hero,.rules-head { align-items: start; flex-direction: column; }.header-links { padding: 0; }.flow-step { font-size: 0; }.flow-step span { font-size: 10px; }.view { padding: 25px 17px; }.mode-layout { margin-top: 20px; }.mode-orbit { display: none; }.keyword-grid { grid-template-columns: repeat(4, 1fr); }.keyword-token { min-height: 70px; }.keyword-token span { font-size: 25px; }.rule-notes,.ready-players,.matching-scene { grid-template-columns: 1fr; }.rule-notes div { padding: 10px 0; border-right: 0; border-bottom: 1px solid rgba(23,63,57,.12); }.ready-jade { order: -1; }.matching-scene { gap: 18px; }.matching-seat { min-height: 140px; }.battle-toolbar { gap: 8px; }.toolbar-title { font-size: 0; }.battle-arena { grid-template-columns: 1fr 1fr; padding: 25px 0 10px; }.duel-center { grid-column: 1 / -1; grid-row: 1; order: -1; margin-bottom: 14px; }.jade-plaque { width: 150px; height: 170px; }.plaque-inner { font-size: 90px; }.branch { display: none; }.player-rail { grid-row: 2; padding-top: 0; }.player-card { display: flex; flex-wrap: wrap; }.player-name { flex: 1; }.player-score { margin-left: auto; }.player-stats { display: none; }.sheet-actions { align-items: start; flex-direction: column; }.submit-ink { width: 100%; }.helper-links { width: 100%; justify-content: space-between; }.result-stats { grid-template-columns: repeat(2,1fr); gap: 15px; }.result-stats div:nth-child(2) { border-right: 0; }.result-stats div:nth-child(-n+2) { padding-bottom: 12px; border-bottom: 1px solid rgba(23,63,57,.12); }.result-score { gap: 20px; }.record-panel { padding: 30px 22px; }.full-record { grid-template-columns: 34px 1fr auto; } }
+.mode-tile { position: relative; transform-origin: center right; }
+.mode-tile:focus-visible { outline: 3px solid rgba(47,138,120,.35); outline-offset: 3px; }
+.mode-tile.selected { transform: translateX(12px) scale(1.035); padding-top: 22px; padding-bottom: 22px; border-width: 2px; border-color: var(--jade); background: rgba(226,244,232,.94); box-shadow: 0 14px 30px rgba(47,138,120,.16), inset 4px 0 0 var(--jade); z-index: 2; }
+.mode-tile.selected .mode-marker { width: 50px; height: 50px; color: var(--jade-deep); background: rgba(255,255,255,.56); font-size: 26px; box-shadow: 0 0 0 5px rgba(47,138,120,.1); }
+.mode-tile.selected .mode-copy strong { font-size: 23px; }
+.mode-tile.selected .mode-copy small { color: var(--jade-deep); font-size: 13px; }
+.mode-tile.selected .mode-meta i { font-size: 29px; }
+.mode-picked { padding: 4px 8px; color: var(--jade-deep) !important; background: rgba(47,138,120,.13); font-weight: 700; }
+.mode-selection-summary { display: flex; align-items: center; gap: 13px; margin: 4px 0 0 12px; padding: 12px 15px; border-left: 3px solid var(--jade); background: rgba(226,244,232,.62); color: var(--ink); }
+.summary-mark { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; color: white; background: var(--jade); font-weight: 700; }
+.mode-selection-summary div { display: grid; gap: 3px; }
+.mode-selection-summary small { color: var(--gold); font-size: 10px; letter-spacing: .12em; }
+.mode-selection-summary strong { font: 600 16px 'Noto Serif SC', serif; }
+.mode-selection-summary p { margin: 0; color: var(--ink-soft); font-size: 12px; }
+@media (max-width: 980px) { .mode-tile.selected { transform: translateX(6px) scale(1.02); } }
+@media (max-width: 700px) { .mode-tile.selected { transform: scale(1.02); } .mode-selection-summary { margin-left: 0; } }
+/* 在线诗友大厅：让名单成为在线对战的主要入口 */
+.matching-view { text-align: left; }
+.matching-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, .95fr); gap: clamp(28px, 5vw, 76px); align-items: start; max-width: 1160px; margin: 42px auto 0; }
+.matching-intro { padding: 12px 0 0; }
+.matching-intro h2 { max-width: 560px; margin-top: 14px; font-size: clamp(30px, 4vw, 50px); }
+.matching-intro > p { max-width: 520px; margin: 14px 0 0; line-height: 1.9; }
+.matching-seat-row { display: grid; grid-template-columns: 1fr 72px 1fr; align-items: center; gap: 12px; max-width: 620px; margin-top: 44px; padding-top: 22px; border-top: 1px solid rgba(23,63,57,.15); }
+.matching-seat.compact-seat { display: flex; align-items: center; gap: 13px; min-height: 0; border: 0; text-align: left; }
+.matching-seat.compact-seat::after { display: none; }
+.matching-seat.compact-seat .seat-avatar,.matching-seat.compact-seat .empty-seat { width: 64px; height: 64px; flex: 0 0 64px; font-size: 28px; }
+.matching-seat.compact-seat > div:last-child { display: grid; gap: 5px; }
+.matching-seat.compact-seat strong { font-size: 16px; }
+.matching-seat.compact-seat small { line-height: 1.5; }
+.matching-seat.target-seat { justify-content: flex-end; }
+.matching-seat.target-seat > div:last-child { text-align: right; }
+.matching-connector { display: grid; justify-items: center; gap: 5px; color: var(--gold); font: 18px 'Noto Serif SC', serif; }
+.matching-connector i { display: block; width: 52px; height: 1px; background: rgba(179,138,74,.55); }
+.invite-waiting { display: flex; align-items: center; gap: 12px; max-width: 620px; margin-top: 28px; padding: 14px 16px; border-left: 3px solid var(--gold); background: rgba(249,240,215,.68); }
+.waiting-mark { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid rgba(179,138,74,.5); color: var(--gold); font: 17px 'Noto Serif SC', serif; }
+.invite-waiting div { display: grid; gap: 4px; flex: 1; }
+.invite-waiting strong { font: 14px 'Noto Serif SC', serif; }
+.invite-waiting small { color: var(--ink-soft); font-size: 11px; }
+.matching-notice { max-width: 620px; margin-top: 16px; color: var(--jade-deep); font-size: 12px; }
+.matching-notice.error { color: var(--cinnabar); }
+.online-roster { padding: 24px; border: 1px solid rgba(47,138,120,.22); background: rgba(247,251,244,.72); box-shadow: 0 16px 35px rgba(31,75,66,.08); }
+.roster-header { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(23,63,57,.14); }
+.roster-header h3 { margin: 9px 0 0; color: var(--ink); font: 24px 'Noto Serif SC', serif; letter-spacing: .05em; }
+.roster-count { display: grid; justify-items: end; gap: 2px; color: var(--ink-soft); }
+.roster-count strong { color: var(--jade-deep); font: 30px 'Noto Serif SC', serif; line-height: 1; }
+.roster-count span { font-size: 10px; }
+.roster-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0 10px; color: var(--ink-soft); font-size: 11px; }
+.roster-toolbar > span { display: inline-flex; align-items: center; gap: 7px; }
+.presence-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--jade); box-shadow: 0 0 0 4px rgba(47,138,120,.12); }
+.roster-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.roster-player { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 70px; padding: 10px; border: 1px solid rgba(47,138,120,.16); background: rgba(255,255,255,.65); transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease; }
+.roster-player:hover:not(.busy) { transform: translateY(-2px); border-color: rgba(47,138,120,.45); box-shadow: 0 8px 18px rgba(47,138,120,.09); }
+.roster-player.busy { opacity: .68; }
+.roster-avatar { position: relative; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; color: #f8f3e4; background: #5d8b7a; font: 20px 'Noto Serif SC', serif; }
+.roster-avatar .presence-dot { position: absolute; right: -1px; bottom: 1px; width: 8px; height: 8px; border: 2px solid #f7fbf4; box-shadow: none; }
+.roster-avatar .busy-dot { background: var(--gold); }
+.roster-player-info { display: grid; min-width: 0; gap: 4px; }
+.roster-player-info strong { overflow: hidden; color: var(--ink); font: 14px 'Noto Serif SC', serif; text-overflow: ellipsis; white-space: nowrap; }
+.roster-player-info span { overflow: hidden; color: var(--ink-soft); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.roster-invite { min-width: 48px; padding: 7px 8px; border: 1px solid rgba(47,138,120,.32); color: var(--jade-deep); background: rgba(232,247,238,.72); cursor: pointer; font-size: 11px; transition: background .2s ease, color .2s ease, transform .2s ease; }
+.roster-invite:hover:not(:disabled) { color: #f8f4e8; background: var(--jade); transform: translateY(-1px); }
+.roster-invite:disabled { color: rgba(87,120,110,.55); background: rgba(235,240,233,.55); cursor: not-allowed; }
+.roster-footnote { margin: 16px 0 0; color: rgba(87,120,110,.8); font-size: 10px; line-height: 1.6; }
+.roster-empty { display: grid; justify-items: center; gap: 8px; padding: 42px 20px 34px; text-align: center; }
+.empty-roster-mark { display: grid; place-items: center; width: 56px; height: 56px; border: 1px solid rgba(179,138,74,.5); color: var(--gold); font: 27px 'Noto Serif SC', serif; }
+.roster-empty strong { color: var(--ink); font: 16px 'Noto Serif SC', serif; }
+.roster-empty p { margin: 0 0 8px; color: var(--ink-soft); font-size: 11px; }
+.roster-skeleton { display: grid; gap: 10px; padding: 8px 0 14px; }
+.roster-skeleton span { display: block; height: 70px; border: 1px solid rgba(47,138,120,.12); background: linear-gradient(90deg, rgba(226,240,230,.58), rgba(255,255,255,.72), rgba(226,240,230,.58)); background-size: 200% 100%; animation: rosterShimmer 1.5s ease-in-out infinite; }
+.matching-actions { margin-top: 30px; }
+.invite-overlay { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 22px; background: rgba(23,63,57,.28); backdrop-filter: blur(8px); }
+.invite-dialog { width: min(460px, 100%); padding: 34px 38px 32px; border: 1px solid rgba(179,138,74,.55); background: #f9f5e8; box-shadow: 0 24px 70px rgba(23,63,57,.22); text-align: center; }
+.invite-dialog-avatar { display: grid; place-items: center; width: 72px; height: 72px; margin: 18px auto 14px; border-radius: 50%; color: #f8efe2; background: #a96d62; font: 30px 'Noto Serif SC', serif; box-shadow: 0 0 0 7px rgba(169,109,98,.13); }
+.invite-dialog h2 { margin: 0; color: var(--ink); font: 27px 'Noto Serif SC', serif; }
+.invite-dialog p { margin: 12px auto 0; color: var(--ink-soft); font-size: 13px; line-height: 1.8; }
+.invite-dialog-meta { display: flex; justify-content: center; gap: 24px; margin: 22px 0; padding: 14px; border-top: 1px solid rgba(23,63,57,.13); border-bottom: 1px solid rgba(23,63,57,.13); color: var(--ink-soft); font-size: 11px; }
+.invite-dialog-meta strong { margin-left: 5px; color: var(--jade-deep); font: 15px 'Noto Serif SC', serif; }
+.invite-dialog-actions { display: flex; justify-content: center; gap: 12px; }
+@keyframes rosterShimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+@media (max-width: 980px) { .matching-layout { grid-template-columns: 1fr; }.matching-intro { padding-top: 0; }.online-roster { max-width: none; }.matching-seat-row { max-width: none; } }
+@media (max-width: 700px) { .matching-layout { margin-top: 26px; }.matching-intro h2 { font-size: 32px; }.matching-seat-row { grid-template-columns: 1fr; gap: 16px; margin-top: 28px; }.matching-seat.target-seat { justify-content: flex-start; }.matching-seat.target-seat > div:last-child { text-align: left; }.matching-connector { display: flex; justify-content: flex-start; gap: 9px; }.matching-connector i { width: 20px; }.roster-list { grid-template-columns: 1fr; }.online-roster { padding: 18px 14px; }.roster-header h3 { font-size: 21px; }.invite-waiting { align-items: flex-start; flex-wrap: wrap; }.invite-waiting .text-button { margin-left: 44px; }.invite-dialog { padding: 28px 20px 24px; }.invite-dialog-actions { flex-direction: column-reverse; }.invite-dialog-actions .ink-button { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .roster-skeleton span { animation: none; } }
+
+/* ===== 细腻动效层：固定几何尺寸，以合成属性作为主反馈 ===== */
+.feihua-rebuild {
+  --feihua-fast: var(--motion-fast, 160ms);
+  --feihua-base: var(--motion-base, 240ms);
+  --feihua-slow: var(--motion-slow, 380ms);
+  --feihua-ease: var(--motion-ease-out, cubic-bezier(.22, 1, .36, 1));
+}
+
+.flow-step::after {
+  content: '';
+  position: absolute;
+  right: 20%;
+  bottom: -1px;
+  left: 20%;
+  height: 2px;
+  background: var(--jade);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform var(--feihua-slow) var(--feihua-ease);
+}
+
+.flow-step.current::after { transform: scaleX(1); }
+
+.mode-list { isolation: isolate; }
+
+.mode-tile {
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 74px;
+  padding: 18px 22px;
+  border-width: 1px;
+  background-color: rgba(255,255,255,.52);
+  transform: translate3d(0, 0, 0);
+  transform-origin: center right;
+  transition:
+    transform var(--feihua-slow) var(--feihua-ease),
+    border-color var(--feihua-fast) ease-out,
+    background-color var(--feihua-base) ease-out,
+    box-shadow var(--feihua-slow) var(--feihua-ease);
+}
+
+.mode-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 50%, rgba(255,255,255,.82), transparent 32%),
+    linear-gradient(90deg, rgba(47,138,120,.10), transparent 58%);
+  opacity: 0;
+  transform: translate3d(-4%, 0, 0);
+  transition:
+    opacity var(--feihua-base) ease-out,
+    transform var(--feihua-slow) var(--feihua-ease);
+}
+
+.mode-tile::after {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--jade);
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform var(--feihua-slow) var(--feihua-ease);
+}
+
+.mode-tile:hover,
+.mode-tile.selected {
+  padding: 18px 22px;
+  border-width: 1px;
+  background-color: rgba(232,247,238,.82);
+  transform: translate3d(6px, 0, 0);
+}
+
+.mode-tile.selected {
+  border-color: rgba(47,138,120,.78);
+  background-color: rgba(226,244,232,.92);
+  box-shadow: 0 12px 28px rgba(47,138,120,.14);
+  z-index: 2;
+}
+
+.mode-tile:hover::before,
+.mode-tile.selected::before { opacity: 1; transform: translate3d(0, 0, 0); }
+.mode-tile.selected::after { transform: scaleY(1); }
+
+.mode-marker,
+.mode-copy strong,
+.mode-copy small,
+.mode-meta i {
+  transition:
+    color var(--feihua-fast) ease-out,
+    background-color var(--feihua-base) ease-out,
+    box-shadow var(--feihua-slow) var(--feihua-ease),
+    transform var(--feihua-slow) var(--feihua-ease);
+}
+
+.mode-tile.selected .mode-marker {
+  width: 42px;
+  height: 42px;
+  color: var(--jade-deep);
+  background: rgba(255,255,255,.56);
+  font-size: 22px;
+  box-shadow: 0 0 0 4px rgba(47,138,120,.1);
+  transform: rotate(-4deg);
+}
+
+.mode-tile.selected .mode-copy strong { font-size: 20px; }
+.mode-tile.selected .mode-copy small { color: var(--jade-deep); font-size: 12px; }
+.mode-tile:hover .mode-meta i,
+.mode-tile.selected .mode-meta i { font-size: 24px; transform: translate3d(3px, 0, 0); }
+
+.mode-picked {
+  width: 34px;
+  padding: 4px 0;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate3d(4px, 0, 0);
+  transition:
+    opacity var(--feihua-fast) ease-out,
+    transform var(--feihua-slow) var(--feihua-ease),
+    visibility 0s linear var(--feihua-fast);
+}
+
+.mode-picked.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate3d(0, 0, 0);
+  transition-delay: 0s;
+}
+
+.mode-selection-summary,
+.summary-mark {
+  transition:
+    background-color var(--feihua-base) ease-out,
+    box-shadow var(--feihua-base) var(--feihua-ease),
+    transform var(--feihua-base) var(--feihua-ease);
+}
+
+.keyword-token,
+.more-keywords button,
+.difficulty-row,
+.difficulty-dot,
+.selected-jade,
+.rule-jade,
+.roster-player,
+.roster-invite,
+.ink-button,
+.text-button,
+.small-button,
+.helper-links button,
+.scroll-more,
+.close-panel {
+  transition:
+    transform var(--feihua-base) var(--feihua-ease),
+    border-color var(--feihua-fast) ease-out,
+    background-color var(--feihua-base) ease-out,
+    color var(--feihua-fast) ease-out,
+    box-shadow var(--feihua-base) var(--feihua-ease),
+    opacity var(--feihua-fast) ease-out;
+}
+
+.keyword-token { transform: translate3d(0, 0, 0); }
+.keyword-token.chosen { transform: translate3d(0, -3px, 0); }
+.more-keywords button.chosen { box-shadow: 0 5px 12px rgba(47,138,120,.16); transform: translate3d(0, -1px, 0); }
+.difficulty-row { transform: translate3d(0, 0, 0); }
+.difficulty-row.selected { transform: translate3d(4px, 0, 0); }
+.difficulty-row.selected .difficulty-dot { transform: scale(1.08); }
+
+.ink-button span {
+  display: inline-block;
+  transition: transform var(--feihua-base) var(--feihua-ease);
+}
+
+.ink-button:hover:not(:disabled) span { transform: translate3d(3px, 0, 0); }
+.ink-button:active:not(:disabled) { transform: translate3d(0, 0, 0) scale(.985); }
+
+.custom-keyword input:focus,
+.poetry-sheet textarea:focus {
+  border-color: var(--jade);
+  box-shadow: 0 4px 0 -3px rgba(47,138,120,.36);
+}
+
+.scene-switch-enter-active {
+  transition:
+    opacity var(--feihua-base) ease-out,
+    transform var(--feihua-slow) var(--feihua-ease);
+}
+
+.scene-switch-leave-active {
+  pointer-events: none;
+  transition:
+    opacity var(--feihua-fast) ease-in,
+    transform var(--feihua-base) ease-in;
+}
+
+.scene-switch-enter-from { opacity: 0; transform: translate3d(0, 12px, 0) scale(.998); }
+.scene-switch-leave-to { opacity: 0; transform: translate3d(0, -5px, 0) scale(.999); }
+
+.record-overlay,
+.invite-overlay {
+  transition:
+    opacity var(--feihua-base) ease-out,
+    backdrop-filter var(--feihua-slow) ease-out;
+}
+
+.record-panel,
+.invite-dialog {
+  transform: translate3d(0, 0, 0) scale(1);
+  transform-origin: 50% 42%;
+  transition:
+    opacity var(--feihua-base) ease-out,
+    transform var(--feihua-slow) var(--feihua-ease);
+}
+
+@starting-style {
+  .record-overlay,
+  .invite-overlay { opacity: 0; backdrop-filter: blur(0); }
+  .record-panel,
+  .invite-dialog { opacity: 0; transform: translate3d(0, 12px, 0) scale(.985); }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .keyword-token:hover { transform: translate3d(0, -3px, 0); }
+  .more-keywords button:hover,
+  .difficulty-row:hover:not(.selected) { border-color: rgba(47,138,120,.48); background: rgba(239,248,241,.8); transform: translate3d(2px, 0, 0); }
+  .text-button:hover,
+  .helper-links button:hover:not(:disabled),
+  .scroll-more:hover,
+  .close-panel:hover { color: var(--jade-deep); }
+}
+
+@media (max-width: 980px) {
+  .mode-tile:hover,
+  .mode-tile.selected { transform: translate3d(4px, 0, 0); }
+}
+
+@media (max-width: 700px) {
+  .mode-tile:hover,
+  .mode-tile.selected { transform: translate3d(0, -2px, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-tile:hover,
+  .mode-tile.selected,
+  .keyword-token:hover,
+  .keyword-token.chosen,
+  .difficulty-row.selected { transform: none; }
+}
 </style>

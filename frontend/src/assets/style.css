@@ -45,8 +45,9 @@
 
 body {
   font-family: var(--font-ancient);
-  font-size: 16px;
-  line-height: 1.6;
+  /* 基准字号提高一个层级；组件中的 rem / inherit 文本会同步增大。 */
+  font-size: 17px;
+  line-height: 1.68;
   color: var(--text-primary);
   background-color: #f9f3e9;
   background-attachment: fixed;
@@ -119,15 +120,15 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 h1 {
-  font-size: 24px;
+  font-size: 28px;
 }
 
 h2 {
-  font-size: 20px;
+  font-size: 23px;
 }
 
 h3 {
-  font-size: 18px;
+  font-size: 20px;
 }
 
 /* 按钮样式 - 液态玻璃风格 */
@@ -136,7 +137,7 @@ h3 {
   padding: 12px 24px;
   border: 1px solid var(--glass-border);
   border-radius: var(--border-radius);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 500;
   cursor: pointer;
   transition: var(--transition);
@@ -434,7 +435,7 @@ h3 {
   margin-bottom: 8px;
   font-weight: 500;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 15px;
   transition: var(--transition);
 }
 
@@ -443,7 +444,7 @@ h3 {
   padding: 12px 16px;
   border: 1px solid var(--glass-border);
   border-radius: var(--border-radius);
-  font-size: 14px;
+  font-size: 16px;
   transition: var(--transition);
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(8px);

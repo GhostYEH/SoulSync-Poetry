@@ -186,8 +186,11 @@ function setupSocket(io) {
     });
 
     socket.on('cancel-invitation', () => {
-      feihualingService.cancelInvitation(currentUserId);
+      const result = feihualingService.cancelInvitation(currentUserId);
       socket.emit('invitation-cancelled');
+      if (result.toSocketId) {
+        io.to(result.toSocketId).emit('invitation-cancelled');
+      }
       io.emit('online-users', feihualingService.getOnlineUsers());
     });
 
@@ -227,12 +230,58 @@ function setupSocket(io) {
         }
         if (verifyResult.isCorrect) {
           console.log('[飞花令] 判题正确，发送poem-submitted事件');
-          room.players.forEach(player => {
-            if (player.socketId) io.to(player.socketId).emit('poem-submitted', {
-              ...verifyResult, submittedBy: currentPlayer.username, poem, aiResult: finalResult, isValid: true
-            });
-          });
-          startTurnTimer(roomId, io);
+              // 达到规则要求的 5 句后结束本局，胜负由服务端统一落盘。
+              if (currentPlayer.score >= 5) {
+                const finishResult = feihualingService.endGame(
+                  roomId,
+                  currentPlayer.id,
+                  room.players.find(player => player.id !== currentPlayer.id)?.id,
+                  '累计答对5句，获胜'
+                );
+                if (finishResult && finishResult.winner && finishResult.loser) {
+                  if (room.isRanking) {
+                    try {
+                      const rankingResult = await feihuaRankingService.updateRankingAfterBattle(
+                        finishResult.winner.userId,
+                        finishResult.loser.userId
+                      );
+                      finishResult.rankingChange = rankingResult;
+                    } catch (e) { console.error('[飞花令] 达成5句后更新排位分失败:', e); }
+                  }
+                  room.players.forEach(player => {
+                    if (player.socketId) io.to(player.socketId).emit('game-result', {
+                      winnerId: finishResult.winner.userId,
+                      winnerName: finishResult.winner.username,
+                      loserId: finishResult.loser.userId,
+                      loserName: finishResult.loser.username,
+                      reason: finishResult.reason,
+                      totalRounds: finishResult.totalRounds,
+                      usedPoems: finishResult.usedPoems,
+                      players: finishResult.players,
+                      currentRound: finishResult.totalRounds,
+                      aiResult: finalResult,
+                      poem,
+                      submittedBy: currentPlayer.username,
+                      submittedById: currentPlayer.id,
+                      isRanking: room.isRanking,
+                      rankingChange: finishResult.rankingChange
+                    });
+                  });
+                  io.emit('online-users', feihualingService.getOnlineUsers());
+                }
+              } else {
+                room.players.forEach(player => {
+                  if (player.socketId) io.to(player.socketId).emit('poem-submitted', {
+                    ...verifyResult,
+                    submittedBy: currentPlayer.username,
+                    submittedById: currentPlayer.id,
+                    poem,
+                    aiResult: finalResult,
+                    isValid: true
+                  });
+                });
+                startTurnTimer(roomId, io);
+              }
         } else {
           console.log('[飞花令] 判题失败，发送game-result事件');
           if (room.isRanking) {
@@ -247,7 +296,9 @@ function setupSocket(io) {
               loserId: verifyResult.loser.userId, loserName: verifyResult.loser.username,
               reason: verifyResult.reason,
               totalRounds: verifyResult.totalRounds, usedPoems: verifyResult.usedPoems,
-              players: verifyResult.players, aiResult: finalResult, poem, isRanking: room.isRanking, rankingChange: verifyResult.rankingChange
+              players: verifyResult.players, aiResult: finalResult, poem,
+              submittedBy: currentPlayer.username, submittedById: currentPlayer.id,
+              isRanking: room.isRanking, rankingChange: verifyResult.rankingChange
             });
           });
         }

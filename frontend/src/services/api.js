@@ -265,6 +265,7 @@ export const api = {
   // 闯关相关
   challenge: {
     getProgress: () => request('/challenge/progress'),
+    getLevelProgress: (level) => request(`/challenge/progress/${level}`),
     updateProgress: (level) => request('/challenge/progress/update', {
       method: 'POST',
       body: JSON.stringify({ level })

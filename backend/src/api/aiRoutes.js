@@ -732,13 +732,13 @@ async function generateImage(poemId, title, author, content, socket) {
   });
 
   try {
-    const SILICON_FLOW_API_KEY = process.env.SILICONFLOW_API_KEY;
+    const ZHIPU_API_KEY = process.env.ZHIPU_API_KEY;
 
-    if (!SILICON_FLOW_API_KEY || SILICON_FLOW_API_KEY === 'your-siliconflow-api-key-here') {
-      console.error('硅基流动API密钥未配置，请在backend/.env文件中设置SILICONFLOW_API_KEY');
+    if (!ZHIPU_API_KEY) {
+      console.error('智谱API密钥未配置，请在backend/.env文件中设置ZHIPU_API_KEY');
       socket.emit('image-generate-fail', {
         poemId: poemId,
-        error: 'API密钥未配置，请联系管理员配置SILICONFLOW_API_KEY'
+        error: 'API密钥未配置，请联系管理员配置ZHIPU_API_KEY'
       });
       return null;
     }
@@ -746,56 +746,29 @@ async function generateImage(poemId, title, author, content, socket) {
     const promptText = '根据古诗词《' + title + '》（作者：' + author + '）的内容生成一幅中国风图像，画面要准确描绘诗中所描述的场景和意境，' + content + '，中国传统风格，高清细腻，氛围感强，无任何文字、无水印、无logo，画面干净统一，适合做网页背景图';
 
     console.log('生成图像的prompt:', promptText);
-    console.log('使用硅基流动API密钥: 已配置');
+    console.log('使用智谱GLM-Image生成意境图');
 
-    const response = await axios.post('https://api.siliconflow.cn/v1/images/generations', {
-      model: 'Kwai-Kolors/Kolors',
+    const response = await axios.post('https://open.bigmodel.cn/api/paas/v4/images/generations', {
+      model: 'cogview-3-flash',
       prompt: promptText,
-      image_size: '1440x720',
-      batch_size: 1,
-      num_inference_steps: 20,
-      guidance_scale: 7.5
+      size: '1440x720'
     }, {
       headers: {
-        'Authorization': 'Bearer ' + SILICON_FLOW_API_KEY,
+        'Authorization': 'Bearer ' + ZHIPU_API_KEY,
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 120000
     });
 
-    console.log('API响应:', response.data);
+    console.log('API响应:', JSON.stringify(response.data).slice(0, 500));
 
-    if (response.data && response.data.images && response.data.images[0]) {
-      let imageData = response.data.images[0];
-      let imageUrl = '';
+    const imageUrl = response.data
+      && Array.isArray(response.data.data)
+      && response.data.data[0]
+      && response.data.data[0].url;
 
-      if (typeof imageData === 'object' && imageData !== null) {
-        console.log('API返回对象结构:', JSON.stringify(imageData));
-
-        if (imageData.url) {
-          imageUrl = imageData.url;
-          console.log('使用API返回的URL:', imageUrl);
-        } else if (imageData.data) {
-          imageUrl = 'data:image/png;base64,' + imageData.data;
-          console.log('使用API返回的Base64数据');
-        } else if (imageData.base64) {
-          imageUrl = 'data:image/png;base64,' + imageData.base64;
-          console.log('使用API返回的Base64数据');
-        } else {
-          console.error('无法识别的图片数据格式:', imageData);
-          throw new Error('API返回的图片数据格式不正确');
-        }
-      } else if (typeof imageData === 'string') {
-        if (imageData.indexOf('http://') === 0 || imageData.indexOf('https://') === 0) {
-          imageUrl = imageData;
-          console.log('使用API返回的URL:', imageUrl);
-        } else {
-          imageUrl = 'data:image/png;base64,' + imageData;
-          console.log('使用API返回的Base64数据');
-        }
-      } else {
-        console.error('无法识别的图片数据类型:', typeof imageData);
-        throw new Error('API返回的图片数据类型不正确');
-      }
+    if (imageUrl) {
+      console.log('使用智谱API返回的URL:', imageUrl);
 
       const cacheEntry = {};
       cacheEntry.url = imageUrl;
@@ -933,49 +906,34 @@ router.post('/image/carousel', aiRateLimiter, async function(req, res) {
 
     const promptText = '根据古诗词《' + title + '》（作者：' + author + '）的内容生成一幅' + randomStyle + '的中国风图像，画面要准确描绘诗中所描述的场景和意境，' + content + '，中国传统风格，高清细腻，氛围感强，无任何文字、无水印、无logo，画面干净统一，适合做网页背景图';
 
-    let SILICON_FLOW_API_KEY = process.env.SILICONFLOW_API_KEY;
-    if (!SILICON_FLOW_API_KEY) {
-      SILICON_FLOW_API_KEY = 'YOUR-API-KEY';
+    const ZHIPU_API_KEY = process.env.ZHIPU_API_KEY;
+    if (!ZHIPU_API_KEY) {
+      throw new Error('智谱API密钥未配置，请在backend/.env文件中设置ZHIPU_API_KEY');
     }
 
     console.log('轮播图生成的prompt:', promptText);
 
-    const response = await axios.post('https://api.siliconflow.cn/v1/images/generations', {
-      model: 'Kwai-Kolors/Kolors',
+    const response = await axios.post('https://open.bigmodel.cn/api/paas/v4/images/generations', {
+      model: 'cogview-3-flash',
       prompt: promptText,
-      image_size: '1440x720',
-      batch_size: 1,
-      num_inference_steps: 20,
-      guidance_scale: 7.5
+      size: '1440x720'
     }, {
       headers: {
-        'Authorization': 'Bearer ' + SILICON_FLOW_API_KEY,
+        'Authorization': 'Bearer ' + ZHIPU_API_KEY,
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 120000
     });
 
-    console.log('轮播图API响应:', response.data);
+    console.log('轮播图API响应:', JSON.stringify(response.data).slice(0, 500));
 
-    if (response.data && response.data.images && response.data.images[0]) {
-      let base64Image = response.data.images[0];
+    const generatedUrl = response.data
+      && Array.isArray(response.data.data)
+      && response.data.data[0]
+      && response.data.data[0].url;
 
-      if (typeof base64Image === 'object' && base64Image !== null) {
-        if (base64Image.data) {
-          base64Image = base64Image.data;
-        } else if (base64Image.base64) {
-          base64Image = base64Image.base64;
-        } else {
-          console.log('base64Image对象结构:', JSON.stringify(base64Image));
-          throw new Error('API返回的图片数据格式不正确');
-        }
-      }
-
-      if (typeof base64Image !== 'string') {
-        console.error('base64Image不是字符串:', typeof base64Image);
-        throw new Error('API返回的图片数据不是字符串');
-      }
-
-      const imageUrl = 'data:image/png;base64,' + base64Image;
+    if (generatedUrl) {
+      const imageUrl = generatedUrl;
 
       socket.emit('image-generate-success', {
         poemId: poemId,
@@ -1080,8 +1038,9 @@ router.post('/feihua-validate', aiRateLimiter, async function(req, res) {
       return;
     }
 
-    const normalizedPoem = poem.replace(/[，。！？；：、""''（）【】]/g, '').trim();
-    const feihuaPoems = require('../data/feihuaPoems');
+    const normalizedPoem = String(poem).replace(/[，。！？；：、""''（）【】《》\s]/g, '').trim();
+    const feihuaData = require('../data/feihuaPoems');
+    const feihuaPoems = feihuaData.feihuaPoems || feihuaData;
     const poems = feihuaPoems[keyword];
     let poemsArray = [];
     if (poems) {
@@ -1108,15 +1067,26 @@ router.post('/feihua-validate', aiRateLimiter, async function(req, res) {
       return;
     }
 
-    const result = await aiService.validateFeihuaPoem(normalizedPoem, keyword);
+    // 先查主诗词库，再按需调用 AI。此前调用了不存在的
+    // validateFeihuaPoem 方法，所有未命中本地题库的诗句都会 500。
+    const result = await aiService.evaluateFeihua(normalizedPoem, keyword);
 
     if (result.valid && result.poem) {
       res.json({
         valid: true,
         message: '诗句正确（AI验证）',
-        poem: result.poem,
+        poem: {
+          ...result.poem,
+          poem: result.poem.poem || result.poem.content || poem
+        },
         analysis: result.analysis,
         source: 'ai'
+      });
+    } else if (result.valid === null) {
+      res.status(503).json({
+        valid: false,
+        message: result.message || 'AI验证服务暂时不可用，请稍后重试',
+        source: 'unavailable'
       });
     } else {
       res.json({
@@ -1127,7 +1097,7 @@ router.post('/feihua-validate', aiRateLimiter, async function(req, res) {
     }
   } catch (error) {
     console.error('飞花令验证失败:', error);
-    res.status(500).json({ message: '验证失败，请稍后重试' });
+    res.status(503).json({ message: 'AI验证服务暂时不可用，请稍后重试' });
   }
 });
 

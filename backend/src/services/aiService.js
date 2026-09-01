@@ -123,8 +123,8 @@ function extractJSON(text) {
 
 // 调用AI生成JSON
 async function callAIGenerateJSON(prompt, systemContent, options = {}) {
-  if (!config.ai.apiKey) {
-    console.log('[aiService] 缺少API密钥，返回null');
+  if (!config.zhipu.apiKey && !config.spark.apiPassword) {
+    console.log('[aiService] 未配置可用的文本AI密钥，返回null');
     return null;
   }
 
@@ -153,8 +153,8 @@ module.exports.callAIGenerateJSON = callAIGenerateJSON;
 
 // 调用智谱生成 JSON（诗词创作模块专用）
 async function callZhipuGenerateJSON(prompt, systemContent, options = {}) {
-  if (!config.zhipu.apiKey) {
-    console.log('[aiService] 缺少智谱API密钥，返回null');
+  if (!config.zhipu.apiKey && !config.spark.apiPassword) {
+    console.log('[aiService] 未配置可用的文本AI密钥，返回null');
     return null;
   }
 
@@ -371,15 +371,14 @@ async function getAIExplanation(poem, title, author, explanationType) {
       return cachedData;
     }
     
-    const apiKey = config.zhipu.apiKey;
-    if (!apiKey) {
-      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
+    if (!config.zhipu.apiKey && !config.spark.apiPassword) {
+      throw new AIError(AI_ERRORS.AUTH_FAILED, '未配置可用的文本AI密钥');
     }
     
     console.log('[aiService] 发送AI讲解请求（智谱）:', {
       title: title || '无标题',
       explanationType: explanationType,
-      hasApiKey: !!apiKey
+      hasApiKey: Boolean(config.zhipu.apiKey || config.spark.apiPassword)
     });
 
     const systemContent = "你是一位精通中国古典文学的专家，善于简洁明了地分析古诗文。你的分析应该具体、简洁，控制在50-100字之间，避免冗长和模板化语言。请严格按照JSON格式返回结果。";
@@ -521,8 +520,7 @@ async function handleAIExplanation(req, res, explanationType) {
     return res.status(400).json({ message: '缺少诗词内容' });
   }
 
-  const apiKey = config.ai.apiKey;
-  if (!apiKey) {
+  if (!config.zhipu.apiKey && !config.spark.apiPassword) {
     return res.status(503).json({
       success: false,
       code: 'AI_UNAVAILABLE',
@@ -956,9 +954,8 @@ async function getSimplifiedExplanation(poem, title, author, originalExplanation
 // 字符信息
 async function getCharInfo(prompt) {
   try {
-    const apiKey = config.ai.apiKey;
-    if (!apiKey) {
-      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
+    if (!config.zhipu.apiKey && !config.spark.apiPassword) {
+      throw new AIError(AI_ERRORS.AUTH_FAILED, '未配置可用的文本AI密钥');
     }
     
     const requestData = {
@@ -999,9 +996,8 @@ async function getCharInfo(prompt) {
 // 生成闯关题目
 async function generateChallengeQuestion(level, difficulty, questionType, userId) {
   try {
-    const apiKey = config.ai.apiKey;
-    if (!apiKey) {
-      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
+    if (!config.zhipu.apiKey && !config.spark.apiPassword) {
+      throw new AIError(AI_ERRORS.AUTH_FAILED, '未配置可用的文本AI密钥');
     }
 
     const prompt = `
@@ -1146,9 +1142,9 @@ async function getAIGeneratedQuestions(prompt) {
 // 生成意境图
 async function generatePoemImage(poem, title, author) {
   try {
-    const apiKey = config.ai.apiKey;
+    const apiKey = process.env.ZHIPU_API_KEY;
     if (!apiKey) {
-      console.log('[aiService] 缺少硅基流动API密钥，无法生成图片');
+      console.log('[aiService] 缺少智谱API密钥，无法生成图片');
       return null;
     }
 
@@ -1156,19 +1152,16 @@ async function generatePoemImage(poem, title, author) {
 
     console.log('[aiService] 生成诗词意境图:', { title, author, promptLength: imagePrompt.length });
 
-    const response = await fetch('https://api.siliconflow.cn/v1/images/generations', {
+    const response = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'Kwai-Kolors/Kolors',
+        model: 'cogview-3-flash',
         prompt: imagePrompt,
-        image_size: '1024x1024',
-        batch_size: 1,
-        num_inference_steps: 30,
-        guidance_scale: 7.5
+        size: '1024x1024'
       })
     });
 
@@ -1181,10 +1174,15 @@ async function generatePoemImage(poem, title, author) {
     const responseData = await response.json();
     console.log('[aiService] 图片生成成功:', responseData);
 
-    if (responseData.images && responseData.images.length > 0) {
+    const imageUrl = responseData
+      && Array.isArray(responseData.data)
+      && responseData.data[0]
+      && responseData.data[0].url;
+
+    if (imageUrl) {
       return {
         success: true,
-        imageUrl: responseData.images[0].url,
+        imageUrl: imageUrl,
         prompt: imagePrompt,
         message: '图片生成成功'
       };
@@ -1290,9 +1288,8 @@ async function evaluateFeihua(poem, keyword) {
       console.error('[aiService] DB 查询匹配失败:', dbErr.message);
     }
 
-    const apiKey = config.ai.apiKey;
-    if (!apiKey) {
-      throw new AIError(AI_ERRORS.AUTH_FAILED, 'API密钥缺失');
+    if (!config.zhipu.apiKey && !config.spark.apiPassword) {
+      throw new AIError(AI_ERRORS.AUTH_FAILED, '未配置可用的文本AI密钥');
     }
 
     const prompt = `你是一位飞花令诗句验证专家。请严格验证以下诗句。
@@ -2302,6 +2299,7 @@ module.exports = {
   getAIGeneratedQuestions,
   generatePoemImage,
   evaluateFeihuaPoem,
+  evaluateFeihua,
   generateDuelQuestions,
   repairDuelQuestionFromFullPoem,
   generatePoemSceneImage,
@@ -2320,9 +2318,9 @@ module.exports = {
 // 生成诗句意境图
 async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumber = null, totalLines = null) {
   try {
-    const apiKey = process.env.ALIYUN_BAILIAN_API_KEY;
+    const apiKey = process.env.ZHIPU_API_KEY;
     if (!apiKey) {
-      console.error('[aiService] 缺少API密钥');
+      console.error('[aiService] 缺少智谱API密钥');
       throw new AIError(AI_ERRORS.AUTH_FAILED, 'AI生图服务未配置API密钥');
     }
 
@@ -2343,99 +2341,46 @@ async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumbe
     console.log('[aiService] 文生图请求:', { title: poemTitle, promptLength: prompt.length });
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), config.ai.timeout || 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
-      const createResponse = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis', {
-        method: "POST",
+      const response = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-          "X-DashScope-Async": "enable"
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: "wanx2.1-t2i-turbo",
-          input: { prompt: prompt },
-          parameters: {
-            style: "<chinese painting>",
-            size: "1024*1024",
-            n: 1
-          }
+          model: 'cogview-3-flash',
+          prompt: prompt,
+          size: '1024x1024'
         }),
         signal: controller.signal
       });
 
-      clearTimeout(timeoutId);
-
-      if (!createResponse.ok) {
-        const errorData = await createResponse.json().catch(() => ({}));
-        console.error('[aiService] 创建任务失败:', createResponse.status, errorData);
-        return { success: false, url: null, message: '创建任务失败' };
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[aiService] 文生图失败:', response.status, errorData);
+        return { success: false, url: null, message: '图像生成请求失败' };
       }
 
-      const createData = await createResponse.json();
-      const taskId = createData.output?.task_id;
+      const data = await response.json();
+      const imageUrl = data
+        && Array.isArray(data.data)
+        && data.data[0]
+        && data.data[0].url;
 
-      if (!taskId) {
-        console.error('[aiService] 未获取到任务ID:', createData);
-        return { success: false, url: null, message: '未获取到任务ID' };
+      if (!imageUrl) {
+        console.error('[aiService] 文生图API返回格式错误:', JSON.stringify(data).slice(0, 500));
+        return { success: false, url: null, message: 'API返回格式错误' };
       }
 
-      console.log('[aiService] 任务已创建，task_id:', taskId);
-
-      const maxRetries = 30;
-      const pollInterval = 2000;
-
-      for (let i = 0; i < maxRetries; i++) {
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-
-        const pollController = new AbortController();
-        const pollTimeoutId = setTimeout(() => pollController.abort(), 10000);
-
-        try {
-          const pollResponse = await fetch(`https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`, {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${apiKey}` },
-            signal: pollController.signal
-          });
-
-          clearTimeout(pollTimeoutId);
-
-          if (!pollResponse.ok) {
-            console.error('[aiService] 轮询任务失败:', pollResponse.status);
-            continue;
-          }
-
-          const pollData = await pollResponse.json();
-          const taskStatus = pollData.output?.task_status;
-
-          console.log(`[aiService] 任务状态 (${i + 1}/${maxRetries}):`, taskStatus);
-
-          if (taskStatus === 'SUCCEEDED') {
-            const imageUrl = pollData.output?.results?.[0]?.url;
-            if (imageUrl) {
-              console.log('[aiService] 文生图成功:', imageUrl);
-              return {
-                success: true,
-                url: imageUrl,
-                model: 'wanx2.1-t2i-turbo'
-              };
-            }
-          } else if (taskStatus === 'FAILED') {
-            console.error('[aiService] 任务执行失败:', pollData);
-            return { success: false, url: null, message: '任务执行失败' };
-          } else if (taskStatus === 'CANCELED') {
-            console.error('[aiService] 任务被取消');
-            return { success: false, url: null, message: '任务被取消' };
-          }
-        } catch (pollError) {
-          clearTimeout(pollTimeoutId);
-          console.error('[aiService] 轮询请求错误:', pollError.message);
-        }
-      }
-
-      console.error('[aiService] 任务超时');
-      return { success: false, url: null, message: '生成超时' };
+      console.log('[aiService] 文生图成功:', imageUrl);
+      return {
+        success: true,
+        url: imageUrl,
+        model: 'cogview-3-flash'
+      };
     } finally {
       clearTimeout(timeoutId);
     }
@@ -2449,9 +2394,9 @@ async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumbe
 
 async function generateAuthorAvatar(author) {
   try {
-    const apiKey = process.env.ALIYUN_BAILIAN_API_KEY || process.env.DASHSCOPE_API_KEY;
+    const apiKey = process.env.ZHIPU_API_KEY;
     if (!apiKey) {
-      console.error('[aiService] 缺少阿里云百炼API密钥');
+      console.error('[aiService] 缺少智谱API密钥');
       return { success: false, url: null, message: 'API密钥未配置' };
     }
 
@@ -2460,99 +2405,46 @@ async function generateAuthorAvatar(author) {
     console.log('[aiService] 生成诗人头像:', { author, promptLength: prompt.length });
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
-      const createResponse = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis', {
-        method: "POST",
+      const response = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-          "X-DashScope-Async": "enable"
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: "wanx2.1-t2i-turbo",
-          input: { prompt: prompt },
-          parameters: {
-            style: "<chinese painting>",
-            size: "1024*1024",
-            n: 1
-          }
+          model: 'cogview-3-flash',
+          prompt: prompt,
+          size: '1024x1024'
         }),
         signal: controller.signal
       });
 
-      clearTimeout(timeoutId);
-
-      if (!createResponse.ok) {
-        const errorData = await createResponse.json().catch(() => ({}));
-        console.error('[aiService] 创建头像任务失败:', createResponse.status, errorData);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[aiService] 生成头像失败:', response.status, errorData);
         return { success: false, url: null, message: '图像生成请求失败' };
       }
 
-      const createData = await createResponse.json();
-      const taskId = createData.output?.task_id;
+      const data = await response.json();
+      const imageUrl = data
+        && Array.isArray(data.data)
+        && data.data[0]
+        && data.data[0].url;
 
-      if (!taskId) {
-        console.error('[aiService] 未获取到任务ID:', createData);
-        return { success: false, url: null, message: '未获取到任务ID' };
+      if (!imageUrl) {
+        console.error('[aiService] 头像API返回格式错误:', JSON.stringify(data).slice(0, 500));
+        return { success: false, url: null, message: 'API返回格式错误' };
       }
 
-      console.log('[aiService] 头像任务已创建，task_id:', taskId);
-
-      const maxRetries = 30;
-      const pollInterval = 2000;
-
-      for (let i = 0; i < maxRetries; i++) {
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-
-        const pollController = new AbortController();
-        const pollTimeoutId = setTimeout(() => pollController.abort(), 10000);
-
-        try {
-          const pollResponse = await fetch(`https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`, {
-            method: "GET",
-            headers: { "Authorization": `Bearer ${apiKey}` },
-            signal: pollController.signal
-          });
-
-          clearTimeout(pollTimeoutId);
-
-          if (!pollResponse.ok) {
-            console.error('[aiService] 轮询头像任务失败:', pollResponse.status);
-            continue;
-          }
-
-          const pollData = await pollResponse.json();
-          const taskStatus = pollData.output?.task_status;
-
-          console.log(`[aiService] 头像任务状态 (${i + 1}/${maxRetries}):`, taskStatus);
-
-          if (taskStatus === 'SUCCEEDED') {
-            const imageUrl = pollData.output?.results?.[0]?.url;
-            if (imageUrl) {
-              console.log('[aiService] 诗人头像生成成功:', imageUrl);
-              return {
-                success: true,
-                url: imageUrl,
-                model: 'wanx2.1-t2i-turbo'
-              };
-            }
-          } else if (taskStatus === 'FAILED') {
-            console.error('[aiService] 头像任务执行失败:', pollData);
-            return { success: false, url: null, message: '图像生成失败' };
-          } else if (taskStatus === 'CANCELED') {
-            console.error('[aiService] 头像任务被取消');
-            return { success: false, url: null, message: '任务被取消' };
-          }
-        } catch (pollError) {
-          clearTimeout(pollTimeoutId);
-          console.error('[aiService] 轮询头像请求错误:', pollError.message);
-        }
-      }
-
-      console.error('[aiService] 头像任务超时');
-      return { success: false, url: null, message: '生成超时，请稍后重试' };
+      console.log('[aiService] 诗人头像生成成功:', imageUrl);
+      return {
+        success: true,
+        url: imageUrl,
+        model: 'cogview-3-flash'
+      };
     } finally {
       clearTimeout(timeoutId);
     }
@@ -2658,6 +2550,7 @@ module.exports = {
   aiPoemSearch,
   generatePoemImage,
   evaluateFeihuaPoem,
+  evaluateFeihua,
   repairDuelQuestionFromFullPoem,
   generateAuthorAvatar,
   generatePoemSceneImage,

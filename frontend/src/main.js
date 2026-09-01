@@ -6,6 +6,7 @@ import router from './router'
 import './assets/style.css'
 import './assets/game-suite.css'
 import './assets/liquid-glass.css'
+import './assets/motion-system.css'
 import { installCustomCursor } from './utils/customCursor'
 import { installLiquidGlass } from './utils/liquidGlass'
 

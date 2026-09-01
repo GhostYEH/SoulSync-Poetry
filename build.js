@@ -149,6 +149,10 @@ async function build() {
   console.log('Copying backend source...');
   copyDir(BACKEND_DIR, DIST_BACKEND_DIR, entry => EXCLUDED_BACKEND_ENTRIES.has(entry.name));
   copyDir(path.join(BACKEND_DIR, 'public'), path.join(DIST_BACKEND_DIR, 'public'));
+  // 闯关服务在运行时需要与前端共用同一份权威题库。
+  const challengeDataTarget = path.join(DIST_BACKEND_DIR, 'src', 'data', 'poetryLevels.json');
+  ensureDir(path.dirname(challengeDataTarget));
+  fs.copyFileSync(path.join(FRONTEND_DIR, 'src', 'data', 'poetryLevels.json'), challengeDataTarget);
   ensureDir(path.join(DIST_BACKEND_DIR, 'db'));
 
   console.log('Installing production dependencies...');

@@ -16,6 +16,15 @@ router.get('/progress', authenticateToken, asyncHandler(async (req, res) => {
   res.json(progress);
 }));
 
+router.get('/progress/:level', authenticateToken, asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  const level = Number(req.params.level);
+  if (!Number.isInteger(level) || level < 1 || level > 200) {
+    throw ApiError.validation('关卡必须是 1-200 之间的整数');
+  }
+  res.json(await challengeService.getLevelAnswerProgress(userId, level));
+}));
+
 router.post('/progress/update', authenticateToken, asyncHandler(async (req, res) => {
   const userId = req.user.userId;
   const { level } = req.body;
@@ -43,9 +52,20 @@ router.post('/questions/generate', authenticateToken, asyncHandler(async (req, r
     }
   }
 
+  const progress = await challengeService.getUserProgress(userId);
+  const nextUnlockedLevel = Math.min(Number(progress.highest_level || 0) + 1, 200);
+  if (Number(startLevel) > nextUnlockedLevel) {
+    throw ApiError.forbidden(`第 ${startLevel} 关尚未解锁，请先完成第 ${nextUnlockedLevel} 关`);
+  }
+
   try {
-    const questions = await challengeService.generateQuestions(userId, startLevel, count);
-    res.json(questions);
+    const questions = await challengeService.generateQuestions(
+      userId,
+      startLevel,
+      Math.min(Number(count), nextUnlockedLevel - Number(startLevel) + 1)
+    );
+    // 出题接口绝不下发答案，判题只能由 answer/submit 在服务端完成。
+    res.json(questions.map(({ answer, answerIndex, ...question }) => question));
   } catch (error) {
     if (error.message === '服务不可用，请稍后再试') {
       throw ApiError.unavailable(error.message);
@@ -59,6 +79,7 @@ router.post('/answer/submit', authenticateToken, asyncHandler(async (req, res) =
   const { level, question, userAnswer, correctAnswer, isCorrect, poemTitle, poemAuthor, usedAiHelp, clientAttemptId } = req.body;
 
   validate(req.body, {
+    level: 'required|int|positive|max:200',
     question: 'required|string|minLen:1',
     userAnswer: 'required|string|minLen:1',
   });

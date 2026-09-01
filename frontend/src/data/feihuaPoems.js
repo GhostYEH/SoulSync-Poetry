@@ -666,9 +666,10 @@ export const validatePoemByAI = async (input, keyword) => {
         analysis: data.analysis || null
       };
     } else {
+      const errorData = await response.json().catch(() => ({}));
       return {
         valid: false,
-        message: 'AI验证服务暂时不可用',
+        message: errorData.message || 'AI验证服务暂时不可用',
         poem: null,
         analysis: null
       };

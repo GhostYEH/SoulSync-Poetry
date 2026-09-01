@@ -152,6 +152,7 @@ export default {
     // 无意义的组件更新。
     this.dynamicElementNodes = new Set()
     this.prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      || window.matchMedia('(update: slow)').matches
     this.hoverPointerStates = new Map()
     // 检测是否在Electron环境中
     this.isElectron = typeof window !== 'undefined' && window.electronAPI;
@@ -173,10 +174,10 @@ export default {
     // 初始化收藏数量
     this.updateCollectionCount()
 
-    // 添加点击和触摸事件监听器以创建涟漪效果
+    // Pointer Events 同时覆盖鼠标、触控笔和触摸，避免 touchstart 后再触发 click
+    // 造成双重涟漪与重复 DOM 写入。
     this.clickHandler = this.createRipple.bind(this)
-    document.addEventListener('click', this.clickHandler)
-    document.addEventListener('touchstart', this.clickHandler)
+    document.addEventListener('pointerdown', this.clickHandler, { passive: true })
 
     // 监听本地存储变化，实时更新收藏数量
     window.addEventListener('storage', this.handleStorageChange)
@@ -202,8 +203,7 @@ export default {
 
     // 移除事件监听器
     if (this.clickHandler) {
-      document.removeEventListener('click', this.clickHandler)
-      document.removeEventListener('touchstart', this.clickHandler)
+      document.removeEventListener('pointerdown', this.clickHandler)
     }
 
     window.removeEventListener('page-transition', this.pageTransitionHandler)
@@ -400,9 +400,13 @@ export default {
       }
     },
     createRipple(event) {
-      // 获取点击或触摸的坐标
-      const clientX = event.touches ? event.touches[0].clientX : event.clientX
-      const clientY = event.touches ? event.touches[0].clientY : event.clientY
+      if (this.prefersReducedMotion || event.isPrimary === false || event.button > 0) return
+
+      // 只为真正可交互的控件反馈，避免在页面任意位置点击都创建装饰节点。
+      const control = event.target.closest?.('button, a[href], [role="button"], input, textarea, select')
+      if (!control || control.matches(':disabled, [aria-disabled="true"]')) return
+
+      const { clientX, clientY } = event
       
       // 创建涟漪元素
       const ripple = document.createElement('div')
@@ -447,8 +451,8 @@ export default {
 .page-forward-leave-active {
   animation: none !important;
   will-change: opacity, transform;
-  transition: opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1),
-              transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity var(--motion-base, 220ms) var(--motion-ease-out, cubic-bezier(0.22, 1, 0.36, 1)),
+              transform var(--motion-base, 220ms) var(--motion-ease-out, cubic-bezier(0.22, 1, 0.36, 1));
 }
 .page-forward-enter-from {
   opacity: 0;
@@ -469,8 +473,8 @@ export default {
 .page-back-leave-active {
   animation: none !important;
   will-change: opacity, transform;
-  transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-              transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity var(--motion-base, 200ms) var(--motion-ease-out, cubic-bezier(0.22, 1, 0.36, 1)),
+              transform var(--motion-base, 200ms) var(--motion-ease-out, cubic-bezier(0.22, 1, 0.36, 1));
 }
 .page-back-enter-from {
   opacity: 0;

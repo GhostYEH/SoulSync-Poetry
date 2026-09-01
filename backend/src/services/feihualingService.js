@@ -383,7 +383,8 @@ class FeihualingService {
     for (const [toUserId, invitation] of this.pendingInvitations) {
       if (invitation.from.userId === userId) {
         this.pendingInvitations.delete(toUserId);
-        return { success: true };
+        const targetUser = this.onlineUsers.get(toUserId);
+        return { success: true, toSocketId: targetUser?.socketId || null };
       }
     }
     return { success: false, error: '没有待处理的邀请' };

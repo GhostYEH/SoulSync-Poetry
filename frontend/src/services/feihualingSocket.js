@@ -135,6 +135,11 @@ class FeihualingSocket {
     });
   }
 
+  // 取消已发出的邀请
+  cancelInvitation() {
+    this.socket?.emit('cancel-invitation');
+  }
+
   // 接受邀请
   acceptInvitation(inviteId, inviterId, keyword, difficulty) {
     this.socket.emit('accept-invitation', {

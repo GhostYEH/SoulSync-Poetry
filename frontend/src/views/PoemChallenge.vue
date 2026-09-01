@@ -278,15 +278,15 @@ const summary = computed(() => [
   { label: '已解锁关卡', value: unlockedThrough.value, suffix: '/ 200', icon: PhFlagBanner, tone: 'green' },
   { label: '当前段位', value: getRankName(completedThrough.value), suffix: '', icon: PhMedal, tone: 'gold' },
   { label: '本章进度', value: visibleLevels.value.filter(level => level.status === 'done').length, suffix: `/ ${visibleLevels.value.length} 关`, icon: PhScroll, tone: 'blue' },
-  { label: '连续闯关天数', value: 7, suffix: '天', icon: PhFire, tone: 'green' }
+  { label: '连续闯关天数', value: 0, suffix: '天', icon: PhFire, tone: 'green' }
 ])
 
-const leaderboard = [{ name: '墨染清风', score: 1280 }, { name: '书山有路', score: 1160 }, { name: '云中客', score: 1040 }]
+const leaderboard = ref([])
 const rewards = [{ threshold: 5, icon: PhMedal }, { threshold: 15, icon: PhScroll }, { threshold: 30, icon: PhFlowerLotus }, { threshold: 50, icon: PhBookOpenText }]
 
 function readStoredProgress() {
   const value = Number(localStorage.getItem('challengeHighestLevel'))
-  return Number.isInteger(value) && value >= 0 ? Math.min(value, TOTAL_LEVELS) : 12
+  return Number.isInteger(value) && value >= 0 ? Math.min(value, TOTAL_LEVELS) : 0
 }
 function getDifficultyLabel(difficulty) { return ({ easy: '启蒙', medium: '进阶', hard: '挑战', challenge: '擂台' })[difficulty] || '进阶' }
 function getRankName(level) { return level >= 160 ? '青云大士' : level >= 80 ? '金榜学士' : level >= 30 ? '砚田秀才' : '青竹学士' }
@@ -328,6 +328,19 @@ async function loadProgress() {
       localStorage.setItem('challengeHighestLevel', String(completedThrough.value))
     }
   } catch { /* 离线或演示模式沿用本地进度 */ }
+
+  try {
+    const response = await api.challenge.getLeaderboard()
+    const rows = Array.isArray(response?.data) ? response.data : response
+    leaderboard.value = Array.isArray(rows)
+      ? rows.slice(0, 3).map(row => ({
+          name: row.username || '匿名用户',
+          score: Number(row.highest_level) || 0
+        }))
+      : []
+  } catch {
+    leaderboard.value = []
+  }
 }
 function showToast(message) { toast.value = message; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.value = '' }, 2800) }
 onMounted(loadProgress)

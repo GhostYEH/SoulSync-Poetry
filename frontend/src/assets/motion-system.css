@@ -1,0 +1,137 @@
+/*
+ * Motion system
+ * Keep feedback quiet and material: short responses, no layout-changing hover,
+ * and a single expressive easing curve across the product.
+ */
+:root {
+  --motion-instant: 90ms;
+  --motion-fast: 160ms;
+  --motion-base: 240ms;
+  --motion-slow: 380ms;
+  --motion-emphasized: 520ms;
+  --motion-ease-out: cubic-bezier(.22, 1, .36, 1);
+  --motion-ease-standard: cubic-bezier(.2, .8, .2, 1);
+  --motion-ease-soft: cubic-bezier(.33, 1, .68, 1);
+  --motion-press-scale: .985;
+  --ripple-color: rgba(47, 138, 120, .22);
+
+  /* Backwards-compatible token used by the original component library. */
+  --transition:
+    transform var(--motion-base) var(--motion-ease-out),
+    box-shadow var(--motion-base) var(--motion-ease-out),
+    border-color var(--motion-fast) ease-out,
+    background-color var(--motion-base) ease-out,
+    color var(--motion-fast) ease-out,
+    opacity var(--motion-fast) ease-out;
+}
+
+.ripple {
+  background: radial-gradient(circle, var(--ripple-color) 0 24%, rgba(47, 138, 120, .08) 38%, transparent 72%);
+  will-change: transform, opacity;
+}
+
+/* Give unstyled native controls the same response curve without overriding
+ * component-level motion declarations (the selector intentionally has zero specificity). */
+:where(button, a[href], input, textarea, select, [role='button']) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(button:not(:disabled), a[href], [role='button']:not([aria-disabled='true'])) {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--motion-ease-out);
+}
+
+:where(input, textarea, select) {
+  transition:
+    border-color var(--motion-fast) ease-out,
+    box-shadow var(--motion-base) var(--motion-ease-out),
+    background-color var(--motion-base) ease-out;
+}
+
+:where(button, a[href], input, textarea, select, [role='button']):focus-visible {
+  outline: 2px solid rgba(47, 138, 120, .52);
+  outline-offset: 3px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :where(button:not(:disabled), [role='button']:not([aria-disabled='true'])):active {
+    transform: translate3d(0, 1px, 0) scale(var(--motion-press-scale));
+    transition-duration: var(--motion-instant);
+  }
+}
+
+/* Navigation feedback stays restrained so moving across the menu feels continuous. */
+.navbar-brand,
+.glass-nav-button,
+.nav-icon,
+.brand-mark {
+  transition-duration: var(--motion-base) !important;
+  transition-timing-function: var(--motion-ease-out) !important;
+}
+
+.glass-nav-button .nav-icon {
+  transform: translate3d(0, 0, 0);
+  transition: transform var(--motion-base) var(--motion-ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .glass-nav-button:hover .nav-icon {
+    transform: translate3d(0, -1px, 0) scale(1.06);
+  }
+}
+
+/* Pop-in content that is inserted with v-if gets a composed entrance in Chromium,
+ * while unsupported browsers simply show the content immediately. */
+.feedback-note,
+.hint-note,
+.reference-note,
+.matching-notice,
+.invite-waiting {
+  transition:
+    opacity var(--motion-base) ease-out,
+    transform var(--motion-slow) var(--motion-ease-out);
+}
+
+@starting-style {
+  .feedback-note,
+  .hint-note,
+  .reference-note,
+  .matching-notice,
+  .invite-waiting {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 1ms;
+    --motion-fast: 1ms;
+    --motion-base: 1ms;
+    --motion-slow: 1ms;
+    --motion-emphasized: 1ms;
+    --motion-press-scale: 1;
+  }
+
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  body::before,
+  .petal,
+  .floating-text,
+  .scene-mist,
+  .petal-field i {
+    animation: none !important;
+  }
+}
+
+/* Battery-conscious fallback for devices that report slow visual updates. */
+@media (update: slow) {
+  body::before,
+  .scene-mist,
+  .petal-field i {
+    animation: none !important;
+  }
+}
