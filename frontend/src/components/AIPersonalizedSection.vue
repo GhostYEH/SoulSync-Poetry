@@ -56,7 +56,7 @@ export default {
   components: { ArrowUpRight, ArrowsClockwise, Brain, ChartLineUp, CheckCircle, Compass, Sparkle, WarningCircle },
   setup() {
     const router = useRouter(); const userStore = useUserStore(); const dashboard = ref(null); const error = ref(''); const dashboardLoading = ref(false); const reviewLoading = ref(false); const learnLoading = ref(false); const reviewItems = ref([]); const learnItems = ref([]); const trendChart = ref(null)
-    let chart = null; let resizeObserver = null
+    let chart = null; let resizeObserver = null; let personalizedLoad = null
     const greeting = computed(() => { const hour = new Date().getHours(); return hour < 9 ? '早上好' : hour < 14 ? '午安' : hour < 18 ? '下午好' : '晚上好' })
     const focusDimension = computed(() => dashboard.value?.profile?.focus || { label: '基础能力', score: 50 })
     const primaryAction = computed(() => dashboard.value?.advice?.quickActions?.[0] || { path: '/', cta: '开始学习' })
@@ -71,9 +71,16 @@ export default {
       chart.setOption({ animationDuration: 650, animationEasing: 'cubicOut', grid: { left: 8, right: 10, top: 20, bottom: 24 }, tooltip: { trigger: 'axis', backgroundColor: '#164b48', borderWidth: 0, textStyle: { color: '#fff', fontSize: 11 }, formatter: params => `${params[0].axisValue}<br/>学习事件 ${params[0].value} 次` }, xAxis: { type: 'category', data: trend.map(day => day.label), boundaryGap: false, axisLine: { lineStyle: { color: 'rgba(47,138,123,.18)' } }, axisTick: { show: false }, axisLabel: { color: '#7a8c87', fontSize: 10, margin: 10 } }, yAxis: { type: 'value', minInterval: 1, splitNumber: 3, axisLabel: { show: false }, axisLine: { show: false }, axisTick: { show: false }, splitLine: { lineStyle: { color: 'rgba(47,138,123,.10)', type: 'dashed' } } }, series: [{ type: 'line', data: trend.map(day => day.activity), smooth: .34, symbol: 'circle', symbolSize: 7, lineStyle: { color: '#2f8a7b', width: 2 }, itemStyle: { color: '#f8fbf6', borderColor: '#2f8a7b', borderWidth: 2 }, areaStyle: { color: 'rgba(83, 160, 142, .12)' } }] }, true)
     }
     const fetchDashboard = async (forceRefresh = false) => { if (!userStore.isLoggedIn) return; dashboardLoading.value = true; error.value = ''; try { const result = await api.personalized.getAISuggestionDashboard(forceRefresh); dashboard.value = result?.success ? result.data : null; if (!dashboard.value) throw new Error('学习建议暂时不可用'); await nextTick(); renderTrend() } catch (err) { error.value = err.message || '暂时无法读取学习建议，请稍后重试' } finally { dashboardLoading.value = false } }
-    onMounted(async () => { await userStore.initUser(); if (userStore.isLoggedIn) { fetchDashboard(); fetchReview(); fetchLearn() }; if (trendChart.value && typeof ResizeObserver !== 'undefined') { resizeObserver = new ResizeObserver(() => chart?.resize()); resizeObserver.observe(trendChart.value) } })
+    const loadPersonalizedData = () => {
+      if (!userStore.isLoggedIn) return Promise.resolve()
+      if (personalizedLoad) return personalizedLoad
+      personalizedLoad = Promise.all([fetchDashboard(), fetchReview(), fetchLearn()])
+        .finally(() => { personalizedLoad = null })
+      return personalizedLoad
+    }
+    onMounted(async () => { await userStore.initUser(); await loadPersonalizedData(); if (trendChart.value && typeof ResizeObserver !== 'undefined') { resizeObserver = new ResizeObserver(() => chart?.resize()); resizeObserver.observe(trendChart.value) } })
     onBeforeUnmount(() => { resizeObserver?.disconnect(); chart?.dispose(); chart = null })
-    watch(() => userStore.isLoggedIn, value => { if (value) { fetchDashboard(); fetchReview(); fetchLearn() } else { dashboard.value = null; reviewItems.value = []; learnItems.value = [] } })
+    watch(() => userStore.isLoggedIn, value => { if (value) { loadPersonalizedData() } else { dashboard.value = null; reviewItems.value = []; learnItems.value = [] } })
     return { userStore, dashboard, dashboardLoading, reviewLoading, learnLoading, reviewItems, learnItems, trendChart, error, greeting, focusDimension, primaryAction, weeklyActivity, fetchDashboard, navigateToDetail, goToAction }
   }
 }

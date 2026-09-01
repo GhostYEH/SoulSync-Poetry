@@ -5,7 +5,7 @@ const learningService = require('../services/learningService');
 const authenticateToken = require('../middleware/auth');
 
 // 记录学习行为接口
-router.post('/record', authenticateToken, (req, res) => {
+router.post('/record', authenticateToken, async (req, res) => {
   try {
     const { poem_id, action, score } = req.body;
     const { userId } = req.user;
@@ -21,7 +21,7 @@ router.post('/record', authenticateToken, (req, res) => {
       return res.status(400).json({ message: '无效的行为类型' });
     }
     
-    const record = learningService.recordLearningAction(userId, poem_id, action, score);
+    const record = await learningService.recordLearningAction(userId, poem_id, action, score);
     
     console.log('学习记录创建/更新成功:', record);
     

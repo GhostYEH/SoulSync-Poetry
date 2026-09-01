@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const db = require('../src/utils/db');
 
 const tables = [
@@ -463,7 +463,8 @@ const tables = [
       question_id TEXT NOT NULL,
       knowledge_point_id INTEGER NOT NULL,
       weight FLOAT DEFAULT 1.0,
-      source TEXT DEFAULT 'inferred',
+      source TEXT DEFAULT 'rule',
+      confidence FLOAT DEFAULT 0.8,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points(id) ON DELETE CASCADE,
       UNIQUE(question_id, knowledge_point_id)
@@ -544,13 +545,20 @@ const tables = [
     name: 'challenge_questions',
     sql: `CREATE TABLE IF NOT EXISTS challenge_questions (
       id SERIAL PRIMARY KEY,
-      challenge_id INTEGER NOT NULL,
-      question_index INTEGER NOT NULL,
+      question_id TEXT UNIQUE,
+      challenge_id INTEGER,
+      question_index INTEGER,
       poem_id INTEGER,
       question_type TEXT,
       question_text TEXT,
       correct_answer TEXT,
-      options TEXT
+      options TEXT,
+      user_answer TEXT,
+      is_correct INTEGER,
+      answered_at TIMESTAMP,
+      source TEXT DEFAULT 'learning_event',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`
   }
 ];
@@ -615,6 +623,16 @@ const alterColumns = [
   { name: 'le_event_key_unique', sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_le_event_key_unique ON learning_events(event_key) WHERE event_key IS NOT NULL` },
   { name: 'qkm_confidence', sql: `ALTER TABLE question_knowledge_mappings ADD COLUMN IF NOT EXISTS confidence FLOAT DEFAULT 0.8` },
   { name: 'qkm_source_default', sql: `ALTER TABLE question_knowledge_mappings ALTER COLUMN source SET DEFAULT 'rule'` },
+  { name: 'cq_question_id', sql: `ALTER TABLE challenge_questions ADD COLUMN IF NOT EXISTS question_id TEXT` },
+  { name: 'cq_challenge_id_nullable', sql: `ALTER TABLE challenge_questions ALTER COLUMN challenge_id DROP NOT NULL` },
+  { name: 'cq_question_index_nullable', sql: `ALTER TABLE challenge_questions ALTER COLUMN question_index DROP NOT NULL` },
+  { name: 'cq_user_answer', sql: `ALTER TABLE challenge_questions ADD COLUMN IF NOT EXISTS user_answer TEXT` },
+  { name: 'cq_is_correct', sql: `ALTER TABLE challenge_questions ADD COLUMN IF NOT EXISTS is_correct INTEGER` },
+  { name: 'cq_answered_at', sql: `ALTER TABLE challenge_questions ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP` },
+  { name: 'cq_source', sql: `ALTER TABLE challenge_questions ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'learning_event'` },
+  { name: 'cq_created_at', sql: `ALTER TABLE challenge_questions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
+  { name: 'cq_updated_at', sql: `ALTER TABLE challenge_questions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
+  { name: 'cq_question_id_unique', sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_challenge_questions_question_id ON challenge_questions(question_id)` },
   { name: 'wq_added_at', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
   { name: 'wq_last_reviewed_at', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS last_reviewed_at TIMESTAMP` },
   { name: 'wq_source', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'challenge'` },

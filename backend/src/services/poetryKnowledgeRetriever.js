@@ -212,6 +212,13 @@ async function retrieveContext(params = {}) {
     return true;
   }).slice(0, limit);
 
+  const seenQuestions = new Set();
+  result.practiceQuestions = result.practiceQuestions.filter(q => {
+    if (seenQuestions.has(q.questionId)) return false;
+    seenQuestions.add(q.questionId);
+    return true;
+  }).slice(0, limit);
+
   for (const p of result.relatedPoems) {
     sources.push({ type: 'related_poem', id: p.id, title: p.title, author: p.author });
   }

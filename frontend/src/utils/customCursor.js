@@ -6,6 +6,7 @@ import cursorFour from '../assets/cursors/ink-pointer-4.png'
 const cursorAssets = [cursorOne, cursorTwo, cursorThree, cursorFour]
 const interactiveSelector = 'a, button, [role="button"], summary, label, select, [tabindex]:not([tabindex="-1"])'
 const textEntrySelector = 'input:not([type="hidden"]), textarea, [contenteditable="true"], [contenteditable=""]'
+const glassSelector = '[data-liquid-glass], [data-liquid-glass-component]'
 
 function canUseCustomCursor(mediaQuery) {
   return mediaQuery.matches
@@ -13,14 +14,6 @@ function canUseCustomCursor(mediaQuery) {
 
 function getClosestElement(target, selector) {
   return target instanceof Element ? target.closest(selector) : null
-}
-
-function preloadCursorAssets() {
-  cursorAssets.forEach((src) => {
-    const image = new Image()
-    image.decoding = 'async'
-    image.src = src
-  })
 }
 
 /**
@@ -47,7 +40,35 @@ export function installCustomCursor(router) {
   let targetX = -120
   let targetY = -120
   let currentAssetIndex = -1
+  let lastModeTarget = null
+  let lastInteractiveMode = false
+  let lastTextMode = false
+  let lastGlassMode = false
+  let cursorWarmupScheduled = false
   let enabled = false
+
+  const scheduleCursorAssetWarmup = (activeAsset) => {
+    if (cursorWarmupScheduled) return
+    cursorWarmupScheduled = true
+
+    const warmRemainingAssets = () => {
+      cursorAssets.filter((src) => src !== activeAsset).forEach((src) => {
+        const image = new Image()
+        image.decoding = 'async'
+        image.src = src
+      })
+    }
+    const scheduleWhenIdle = () => {
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(warmRemainingAssets, { timeout: 3000 })
+      } else {
+        window.setTimeout(warmRemainingAssets, 500)
+      }
+    }
+
+    if (document.readyState === 'complete') scheduleWhenIdle()
+    else window.addEventListener('load', scheduleWhenIdle, { once: true })
+  }
 
   const setCursorArtwork = () => {
     if (!cursorImage) return
@@ -96,10 +117,26 @@ export function installCustomCursor(router) {
   }
 
   const updateCursorMode = (target) => {
+    const glassElement = getClosestElement(target, glassSelector)
+    const nextGlassMode = Boolean(glassElement)
+    if (target === lastModeTarget && nextGlassMode === lastGlassMode) return
+    lastModeTarget = target
     const interactiveElement = getClosestElement(target, interactiveSelector)
     const textEntryElement = getClosestElement(target, textEntrySelector)
-    cursorElement.classList.toggle('custom-cursor-interactive', Boolean(interactiveElement && !textEntryElement))
-    cursorElement.classList.toggle('custom-cursor-text', Boolean(textEntryElement))
+    const nextInteractiveMode = Boolean(interactiveElement && !textEntryElement)
+    const nextTextMode = Boolean(textEntryElement)
+    if (nextInteractiveMode !== lastInteractiveMode) {
+      cursorElement.classList.toggle('custom-cursor-interactive', nextInteractiveMode)
+      lastInteractiveMode = nextInteractiveMode
+    }
+    if (nextTextMode !== lastTextMode) {
+      cursorElement.classList.toggle('custom-cursor-text', nextTextMode)
+      lastTextMode = nextTextMode
+    }
+    if (nextGlassMode !== lastGlassMode) {
+      cursorElement.classList.toggle('custom-cursor-over-glass', nextGlassMode)
+      lastGlassMode = nextGlassMode
+    }
   }
 
   const showCursor = () => {
@@ -107,7 +144,11 @@ export function installCustomCursor(router) {
   }
 
   const hideCursor = () => {
-    cursorElement?.classList.remove('custom-cursor-visible', 'custom-cursor-pressed', 'custom-cursor-interactive', 'custom-cursor-text')
+    cursorElement?.classList.remove('custom-cursor-visible', 'custom-cursor-pressed', 'custom-cursor-interactive', 'custom-cursor-text', 'custom-cursor-over-glass')
+    lastModeTarget = null
+    lastInteractiveMode = false
+    lastTextMode = false
+    lastGlassMode = false
   }
 
   const enableCursor = () => {
@@ -115,7 +156,6 @@ export function installCustomCursor(router) {
     enabled = true
     root.classList.remove('custom-cursor-pending')
     root.classList.add('custom-cursor-enabled')
-    preloadCursorAssets()
 
     cursorElement = document.createElement('div')
     cursorElement.className = 'custom-cursor'
@@ -127,6 +167,7 @@ export function installCustomCursor(router) {
     cursorElement.appendChild(cursorImage)
     document.body.appendChild(cursorElement)
     setCursorArtwork()
+    scheduleCursorAssetWarmup(cursorAssets[currentAssetIndex])
 
     pointerMoveHandler = (event) => {
       targetX = event.clientX
@@ -169,6 +210,10 @@ export function installCustomCursor(router) {
     cursorElement?.remove()
     cursorElement = null
     cursorImage = null
+    lastModeTarget = null
+    lastInteractiveMode = false
+    lastTextMode = false
+    lastGlassMode = false
   }
 
   const syncCursorCapability = () => {

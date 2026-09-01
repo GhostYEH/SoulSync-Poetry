@@ -1,5 +1,5 @@
 <template>
-  <div class="parkour-wrapper">
+  <div class="parkour-wrapper" :class="{ 'game-active': gameState === 'PLAYING' || gameState === 'PAUSED' }">
     <!-- 全屏背景图 -->
     <div class="parkour-bg"></div>
 
@@ -12,17 +12,23 @@
     <div class="game-hud" v-if="gameState !== 'MENU'">
       <!-- 左侧：生命值 -->
       <div class="hud-section hud-lives">
-        <div class="lives-container">
-          <div
-            v-for="i in 5"
-            :key="i"
-            class="life-orb"
-            :class="{ 'life-lost': i > currentLives, 'life-losing': i === currentLives + 1 }"
-          >
-            <span class="life-icon">气</span>
-          </div>
+        <div class="hud-game-name">
+          <strong>诗词跑酷</strong>
+          <span>辨字穿行</span>
         </div>
-        <span class="hud-label">元气</span>
+        <div class="hud-vitals">
+          <div class="lives-container">
+            <div
+              v-for="i in 5"
+              :key="i"
+              class="life-orb"
+              :class="{ 'life-lost': i > currentLives, 'life-losing': i === currentLives + 1 }"
+            >
+              <span class="life-icon">气</span>
+            </div>
+          </div>
+          <span class="hud-label">元气</span>
+        </div>
       </div>
 
       <!-- 中间：当前题目 -->
@@ -300,7 +306,7 @@
               <span class="btn-icon">🔄</span>
               <span class="btn-text">再来一局</span>
             </button>
-            <button class="action-btn secondary-action" @click="quitGame">
+            <button class="action-btn secondary-action" @click="goBack">
               <span class="btn-icon">🏠</span>
               <span class="btn-text">返回首页</span>
             </button>
@@ -332,6 +338,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import questionsData from '@/data/poetryQuestions.json';
 import api, { API_BASE_URL } from '../services/api';
+import scholarAvatarUrl from '@/assets/poets/unknown-scholar.png';
 
 const FPS = 60;
 const PLAYER_ACCEL = 0.32;
@@ -356,6 +363,8 @@ export default {
     const router = useRouter();
     const canvasRef = ref(null);
     const containerRef = ref(null);
+    const scholarAvatar = typeof Image !== 'undefined' ? new Image() : null;
+    if (scholarAvatar) scholarAvatar.src = scholarAvatarUrl;
 
     // 游戏状态
     const gameState = ref('MENU');
@@ -417,7 +426,34 @@ export default {
 
     // 按键状态
     const keys = { up: false, down: false, left: false, right: false };
+    const movementCodes = {
+      ArrowUp: 'up',
+      KeyW: 'up',
+      ArrowDown: 'down',
+      KeyS: 'down',
+      ArrowLeft: 'left',
+      KeyA: 'left',
+      ArrowRight: 'right',
+      KeyD: 'right'
+    };
+    const movementKeyFallbacks = {
+      ArrowUp: 'ArrowUp', w: 'KeyW', W: 'KeyW',
+      ArrowDown: 'ArrowDown', s: 'KeyS', S: 'KeyS',
+      ArrowLeft: 'ArrowLeft', a: 'KeyA', A: 'KeyA',
+      ArrowRight: 'ArrowRight', d: 'KeyD', D: 'KeyD'
+    };
+    const pressedMovementCodes = new Set();
+    const syncMovementKeys = () => {
+      keys.up = pressedMovementCodes.has('ArrowUp') || pressedMovementCodes.has('KeyW');
+      keys.down = pressedMovementCodes.has('ArrowDown') || pressedMovementCodes.has('KeyS');
+      keys.left = pressedMovementCodes.has('ArrowLeft') || pressedMovementCodes.has('KeyA');
+      keys.right = pressedMovementCodes.has('ArrowRight') || pressedMovementCodes.has('KeyD');
+    };
+    const getMovementCode = (event) => (
+      movementCodes[event.code] ? event.code : movementKeyFallbacks[event.key]
+    );
     const resetKeys = () => {
+      pressedMovementCodes.clear();
       keys.up = false;
       keys.down = false;
       keys.left = false;
@@ -486,6 +522,7 @@ export default {
     const resizeCanvas = () => {
       if (!containerRef.value || !canvas) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const hadCanvasSize = containerW > 0 && containerH > 0;
       containerW = containerRef.value.clientWidth;
       containerH = containerRef.value.clientHeight;
       canvas.width = Math.round(containerW * dpr);
@@ -493,8 +530,14 @@ export default {
       canvas.style.width = `${containerW}px`;
       canvas.style.height = `${containerH}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      player.x = Math.round(containerW * 0.12);
-      player.y = Math.round((containerH + 60) / 2);
+      if (!hadCanvasSize) {
+        player.x = Math.round(containerW * 0.12);
+        player.y = Math.round((containerH + 60) / 2);
+      } else {
+        // 窗口或应用标题栏变化时保留当前位置，只把角色收回新的有效边界。
+        player.x = Math.min(Math.max(8, player.x), Math.max(8, containerW - PLAYER_W - 8));
+        player.y = Math.min(Math.max(60, player.y), Math.max(60, containerH - PLAYER_H - 8));
+      }
     };
 
     const initBackground = () => {
@@ -826,10 +869,20 @@ export default {
       // Canvas 覆盖整块舞台，必须每帧清空，否则半透明底色会持续叠加成深色。
       ctx.clearRect(0, 0, containerW, containerH);
       const paperGrad = ctx.createLinearGradient(0, 0, 0, containerH);
-      paperGrad.addColorStop(0, 'rgba(255, 255, 255, .36)');
-      paperGrad.addColorStop(1, 'rgba(237, 247, 242, .54)');
+      paperGrad.addColorStop(0, 'rgba(255, 255, 255, .12)');
+      paperGrad.addColorStop(0.56, 'rgba(244, 250, 246, .22)');
+      paperGrad.addColorStop(1, 'rgba(225, 240, 232, .34)');
       ctx.fillStyle = paperGrad;
       ctx.fillRect(0, 0, containerW, containerH);
+
+      // 飞行走廊只承担空间层级，不影响角色边界或障碍物位置。
+      const laneTop = 126;
+      const laneGrad = ctx.createLinearGradient(0, laneTop, 0, containerH);
+      laneGrad.addColorStop(0, 'rgba(255, 255, 255, 0.1)');
+      laneGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.02)');
+      laneGrad.addColorStop(1, 'rgba(26, 111, 94, 0.08)');
+      ctx.fillStyle = laneGrad;
+      ctx.fillRect(0, laneTop, containerW, containerH - laneTop);
 
       // 飘浮装饰字符
       ctx.font = `bold ${16}px 'STSong', 'SimSun', serif`;
@@ -904,7 +957,7 @@ export default {
       // 玩家光晕
       const glowSize = 1 + Math.sin(player.pulsePhase) * 0.1;
       const haloGrad = ctx.createRadialGradient(0, 0, w * 0.2, 0, 0, w * 0.8 * glowSize);
-      haloGrad.addColorStop(0, 'rgba(96, 165, 250, 0.15)');
+      haloGrad.addColorStop(0, 'rgba(45, 157, 138, 0.2)');
       haloGrad.addColorStop(1, 'transparent');
       ctx.fillStyle = haloGrad;
       ctx.beginPath();
@@ -923,80 +976,56 @@ export default {
         ctx.shadowBlur = 35;
       }
 
-      // 翅膀 - 霓虹风格
+      // 纸翼采用项目现有的玉青与暖金，替换原来的蓝色霓虹。
       ctx.save();
       ctx.rotate(player.wingAngle);
       const wingGradL = ctx.createLinearGradient(-w * 0.5, 0, 0, 0);
-      wingGradL.addColorStop(0, 'rgba(45, 157, 138, 0.0)');
-      wingGradL.addColorStop(1, 'rgba(45, 157, 138, 0.8)');
+      wingGradL.addColorStop(0, 'rgba(176, 140, 92, 0.08)');
+      wingGradL.addColorStop(1, 'rgba(255, 253, 244, 0.9)');
       ctx.fillStyle = wingGradL;
       ctx.beginPath();
-      ctx.ellipse(-w * 0.35, -h * 0.05, w * 0.4, h * 0.2, -0.25, 0, Math.PI * 2);
+      ctx.ellipse(-w * 0.46, 0, w * 0.54, h * 0.24, -0.28, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = 'rgba(176, 140, 92, 0.42)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
 
       ctx.save();
       ctx.rotate(-player.wingAngle);
       const wingGradR = ctx.createLinearGradient(0, 0, w * 0.5, 0);
-      wingGradR.addColorStop(0, 'rgba(45, 157, 138, 0.8)');
-      wingGradR.addColorStop(1, 'rgba(45, 157, 138, 0.0)');
+      wingGradR.addColorStop(0, 'rgba(255, 253, 244, 0.9)');
+      wingGradR.addColorStop(1, 'rgba(176, 140, 92, 0.08)');
       ctx.fillStyle = wingGradR;
       ctx.beginPath();
-      ctx.ellipse(w * 0.35, -h * 0.05, w * 0.4, h * 0.2, 0.25, 0, Math.PI * 2);
+      ctx.ellipse(w * 0.46, 0, w * 0.54, h * 0.24, 0.28, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = 'rgba(176, 140, 92, 0.42)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
 
-      // 身体（发光圆形）
-      const bodyGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, w * 0.42);
-      bodyGrad.addColorStop(0, '#ffffff');
-      bodyGrad.addColorStop(0.5, '#e0f2fe');
-      bodyGrad.addColorStop(1, '#93c5fd');
-      ctx.fillStyle = bodyGrad;
-      ctx.shadowColor = '#60a5fa';
-      ctx.shadowBlur = 15;
+      // 水墨书生头像。绘制范围略大于碰撞盒，碰撞中心和判定逻辑保持不变。
+      const avatarR = w * 0.58;
+      ctx.fillStyle = '#faf6eb';
+      ctx.shadowColor = 'rgba(25, 91, 77, 0.3)';
+      ctx.shadowBlur = 16;
       ctx.beginPath();
-      ctx.arc(0, 0, w * 0.38, 0, Math.PI * 2);
+      ctx.arc(0, 0, avatarR + 4, 0, Math.PI * 2);
       ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, avatarR, 0, Math.PI * 2);
+      ctx.clip();
+      if (scholarAvatar?.complete && scholarAvatar.naturalWidth) {
+        ctx.drawImage(scholarAvatar, -avatarR, -avatarR, avatarR * 2, avatarR * 2);
+      }
+      ctx.restore();
       ctx.strokeStyle = '#197666';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-
-      // 发光书生帽子
-      const hatGrad = ctx.createLinearGradient(0, -h * 0.5, 0, -h * 0.2);
-      hatGrad.addColorStop(0, '#1e3a8a');
-      hatGrad.addColorStop(1, '#197666');
-      ctx.fillStyle = hatGrad;
-      ctx.shadowColor = '#60a5fa';
-      ctx.shadowBlur = 10;
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.ellipse(0, -h * 0.22, w * 0.32, h * 0.08, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillRect(-w * 0.14, -h * 0.38, w * 0.28, h * 0.16);
-      ctx.fillStyle = '#1d4ed8';
-      ctx.beginPath();
-      ctx.arc(0, -h * 0.38, w * 0.12, Math.PI, 0);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      // 脸
-      ctx.fillStyle = '#1e3a8a';
-      // 眼睛
-      ctx.beginPath();
-      ctx.arc(-w * 0.12, -h * 0.05, 3.5, 0, Math.PI * 2);
-      ctx.arc(w * 0.12, -h * 0.05, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-      // 眼睛光点
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(-w * 0.1, -h * 0.07, 1.5, 0, Math.PI * 2);
-      ctx.arc(w * 0.14, -h * 0.07, 1.5, 0, Math.PI * 2);
-      ctx.fill();
-      // 微笑
-      ctx.beginPath();
-      ctx.arc(0, h * 0.06, 4, 0.2, Math.PI - 0.2);
-      ctx.strokeStyle = '#1e3a8a';
-      ctx.lineWidth = 2;
+      ctx.arc(0, 0, avatarR + 3, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.restore();
@@ -1008,42 +1037,48 @@ export default {
 
         ctx.save();
 
-        // 方块光晕 - 统一样式
+        const visualX = x - 4;
+        const visualY = y - 2;
+        const visualW = w + 8;
+        const visualH = h + 4;
+
+        // 方块光晕只标记仍可选择的字块。
         if (!hit) {
           const blockGlow = ctx.createRadialGradient(x + w / 2, y + h / 2, 0, x + w / 2, y + h / 2, w);
-          blockGlow.addColorStop(0, 'rgba(96, 165, 250, 0.15)');
+          blockGlow.addColorStop(0, 'rgba(45, 157, 138, 0.13)');
           blockGlow.addColorStop(1, 'transparent');
           ctx.fillStyle = blockGlow;
           ctx.fillRect(x - 10, y - 10, w + 20, h + 20);
         }
 
         // 方块阴影
-        ctx.shadowColor = 'rgba(0,0,0,0.3)';
-        ctx.shadowBlur = 12;
-        ctx.shadowOffsetY = 6;
+        ctx.shadowColor = 'rgba(30, 77, 65, 0.24)';
+        ctx.shadowBlur = 14;
+        ctx.shadowOffsetY = 7;
 
         // 方块背景 - 统一样式
         let bg, border, textColor;
         if (hit) {
-          bg = 'rgba(45, 157, 138, 0.2)';
-          border = '#2d9d8a';
-          textColor = '#197666';
+          bg = 'rgba(215, 232, 224, 0.62)';
+          border = 'rgba(45, 121, 105, 0.42)';
+          textColor = 'rgba(25, 118, 102, 0.58)';
         } else {
-          const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
-          bgGrad.addColorStop(0, 'rgba(255, 255, 255, 0.96)');
-          bgGrad.addColorStop(1, 'rgba(232, 245, 239, 0.94)');
+          const bgGrad = ctx.createLinearGradient(visualX, visualY, visualX, visualY + visualH);
+          bgGrad.addColorStop(0, '#fffdf5');
+          bgGrad.addColorStop(0.6, '#f5faf5');
+          bgGrad.addColorStop(1, '#dcebe3');
           bg = bgGrad;
-          border = '#9bb7ae';
-          textColor = '#315d55';
+          border = '#6f998d';
+          textColor = '#173f39';
         }
 
         ctx.fillStyle = bg;
         ctx.strokeStyle = border;
         ctx.lineWidth = 2.5;
 
-        const radius = 12;
+        const radius = 13;
         ctx.beginPath();
-        ctx.roundRect(x, y, w, h, radius);
+        ctx.roundRect(visualX, visualY, visualW, visualH, radius);
         ctx.fill();
         ctx.stroke();
 
@@ -1054,16 +1089,19 @@ export default {
         ctx.fillStyle = textColor;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const fontSize = Math.min(28, Math.max(20, h * 0.52));
-        ctx.font = `bold ${fontSize}px 'STSong', 'SimSun', 'Noto Serif SC', serif`;
-
-        // 文字光晕
-        if (!hit) {
-          ctx.shadowColor = '#2d9d8a';
-          ctx.shadowBlur = 8;
-        }
+        const fontSize = Math.min(31, Math.max(22, h * 0.56));
+        ctx.font = `700 ${fontSize}px 'STKaiti', 'KaiTi', 'STSong', 'SimSun', serif`;
         ctx.fillText(text, x + w / 2, y + h / 2, w - 18);
-        ctx.shadowBlur = 0;
+
+        // 右下压印给字块增加实体感，不提示答案。
+        if (!hit) {
+          ctx.strokeStyle = 'rgba(176, 140, 92, 0.36)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(visualX + visualW - 15, visualY + visualH - 6);
+          ctx.lineTo(visualX + visualW - 6, visualY + visualH - 15);
+          ctx.stroke();
+        }
 
         ctx.restore();
       }
@@ -1102,10 +1140,9 @@ export default {
       const speed = BASE_SPEED * speedMultiplier * DIFFICULTY_SPEEDS[selectedDifficulty.value];
 
       // 角色速度更新
-      if (keys.up) {
-        player.vy -= PLAYER_ACCEL;
-      } else if (keys.down) {
-        player.vy += PLAYER_ACCEL;
+      const verticalInput = Number(keys.down) - Number(keys.up);
+      if (verticalInput !== 0) {
+        player.vy += verticalInput * PLAYER_ACCEL;
       } else {
         player.vy *= PLAYER_FRICTION;
       }
@@ -1113,10 +1150,9 @@ export default {
       if (Math.abs(player.vy) < 0.05) player.vy = 0;
       player.y += player.vy;
 
-      if (keys.left) {
-        player.vx -= PLAYER_ACCEL;
-      } else if (keys.right) {
-        player.vx += PLAYER_ACCEL;
+      const horizontalInput = Number(keys.right) - Number(keys.left);
+      if (horizontalInput !== 0) {
+        player.vx += horizontalInput * PLAYER_ACCEL;
       } else {
         player.vx *= PLAYER_FRICTION;
       }
@@ -1231,12 +1267,14 @@ export default {
 
     const pauseGame = () => {
       if (gameState.value !== 'PLAYING') return;
+      resetKeys();
       gameState.value = 'PAUSED';
       cancelAnimationFrame(animFrameId);
     };
 
     const resumeGame = () => {
       if (gameState.value !== 'PAUSED') return;
+      resetKeys();
       gameState.value = 'PLAYING';
       lastTime = performance.now();
       animFrameId = requestAnimationFrame(gameLoop);
@@ -1267,6 +1305,7 @@ export default {
     };
 
     const goBack = () => {
+      resetKeys();
       cancelAnimationFrame(animFrameId);
       router.push('/');
     };
@@ -1356,11 +1395,15 @@ export default {
     // ==================== 键盘事件 ====================
 
     const handleKeyDown = (e) => {
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { keys.up = true; e.preventDefault(); }
-      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { keys.down = true; e.preventDefault(); }
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { keys.left = true; e.preventDefault(); }
-      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { keys.right = true; e.preventDefault(); }
+      const movementCode = getMovementCode(e);
+      if (movementCode && gameState.value === 'PLAYING') {
+        pressedMovementCodes.add(movementCode);
+        syncMovementKeys();
+        e.preventDefault();
+        return;
+      }
       if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
         if (gameState.value === 'PLAYING') pauseGame();
         else if (gameState.value === 'PAUSED') resumeGame();
       }
@@ -1368,26 +1411,36 @@ export default {
     };
 
     const handleKeyUp = (e) => {
-      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') keys.up = false;
-      if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') keys.down = false;
-      if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.left = false;
-      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.right = false;
+      const movementCode = getMovementCode(e);
+      if (!movementCode) return;
+      pressedMovementCodes.delete(movementCode);
+      syncMovementKeys();
+      if (gameState.value === 'PLAYING') e.preventDefault();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) resetKeys();
     };
 
     // ==================== 生命周期 ====================
 
     onMounted(() => {
       initCanvas();
-      window.addEventListener('keydown', handleKeyDown);
-      window.addEventListener('keyup', handleKeyUp);
+      // 捕获阶段接管游戏方向键，避免按钮焦点、输入法或页面滚动中途吞掉某个轴。
+      window.addEventListener('keydown', handleKeyDown, true);
+      window.addEventListener('keyup', handleKeyUp, true);
+      window.addEventListener('blur', resetKeys);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
     });
 
     onUnmounted(() => {
       cancelAnimationFrame(animFrameId);
       window.removeEventListener('resize', resizeCanvas);
       resetKeys();
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('blur', resetKeys);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (toastTimer) clearTimeout(toastTimer);
     });
 

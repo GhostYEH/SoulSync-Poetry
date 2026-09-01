@@ -8,7 +8,7 @@ const { aiRateLimiter } = require('../middleware/rateLimiter');
 const authenticateToken = require('../middleware/auth');
 const optionalAuthenticateToken = authenticateToken.optionalAuthenticateToken;
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 // 在所有的 AI 路由之前，统一尝试解析 token，以便后续限流器能获取到 req.user
 router.use(optionalAuthenticateToken);
@@ -363,7 +363,7 @@ router.post('/recite-check', aiRateLimiter, async function(req, res, next) {
     if (poem_id && req.user) {
       const learningService = require('../services/learningService');
       const userId = req.user.userId;
-      learningService.recordLearningAction(userId, poem_id, 'recite', result.score);
+      await learningService.recordLearningAction(userId, poem_id, 'recite', result.score);
 
       // 接入学习事件闭环：背诵考察原文记忆
       // 幂等设计：attemptId 由前端在背诵开始时生成 UUID，HTTP 重试复用同一值

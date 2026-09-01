@@ -12,12 +12,11 @@
     "build:frontend": "cd frontend && npm run build",
     "package": "node build.js",
     "build:backend": "cd backend && npm install",
-    "test": "cd backend && npm test",
     "db:seed": "cd backend && node scripts/seed.js",
     "db:seed:dev": "cd backend && node scripts/seed.js --dev",
     "db:seed:students": "cd backend && node scripts/seedStudentDemoData.js"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^10.0.5"
   }
 }

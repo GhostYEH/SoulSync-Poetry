@@ -1,5 +1,11 @@
 <template>
-  <div ref="rootRef" class="poetry-mahjong-wrapper" @keydown.prevent @keyup.prevent>
+  <div
+    ref="rootRef"
+    class="poetry-mahjong-wrapper"
+    :class="{ 'game-active': phase === 'PLAYING' || phase === 'PAUSED' }"
+    @keydown.prevent
+    @keyup.prevent
+  >
     <!-- ==================== 开始菜单 ==================== -->
     <transition name="panel-fade">
       <div v-if="phase === 'MENU'" class="overlay menu-overlay">
@@ -64,15 +70,15 @@
             <div class="rules-grid">
               <div class="rule-item correct">
                 <span class="rule-icon">✓</span>
-                <span class="rule-text">接<strong>正确</strong>诗句 <strong>+1分</strong></span>
+                <span class="rule-text">接<strong>正确</strong>诗句 <strong>+1分</strong>，连击有加成</span>
               </div>
               <div class="rule-item wrong">
                 <span class="rule-icon">✗</span>
-                <span class="rule-text">接<strong>错误</strong>诗句 <strong>+1失误</strong></span>
+                <span class="rule-text">接<strong>错误</strong>诗句 <strong>-1分</strong>，最低为0</span>
               </div>
               <div class="rule-item miss">
                 <span class="rule-icon">◎</span>
-                <span class="rule-text">漏掉正确诗句 <strong>-1分</strong></span>
+                <span class="rule-text">没有接到诗句 <strong>不加不扣</strong></span>
               </div>
               <div class="rule-item danger">
                 <span class="rule-icon">❤</span>
@@ -100,9 +106,9 @@
 
           <!-- 按钮组 -->
           <div class="menu-actions">
-            <button class="start-btn primary-action" @click="startGame">
+            <button class="start-btn primary-action" :disabled="isStarting" @click="startGame">
               <span class="btn-icon">🎮</span>
-              <span class="btn-text">开始挑战</span>
+              <span class="btn-text">{{ isStarting ? '诗笺准备中' : '开始挑战' }}</span>
               <span class="btn-shimmer"></span>
             </button>
             <button class="start-btn secondary-action" @click="$router.push('/')">
@@ -124,7 +130,12 @@
     <!-- ==================== 游戏 HUD ==================== -->
     <transition name="hud-slide">
       <div v-if="phase === 'PLAYING' || phase === 'PAUSED'" class="game-hud">
-        <!-- 左侧：失误指示 -->
+        <div class="hud-brand">
+          <span>POETRY MATCH</span>
+          <strong>诗词大富翁</strong>
+        </div>
+
+        <!-- 元气：接错五次后本轮结束 -->
         <div class="hud-left">
           <div class="lives-container">
             <div
@@ -153,24 +164,15 @@
         <!-- 右侧：分数和时间 -->
         <div class="hud-right">
           <div class="score-container">
-            <div class="score-ring">
-              <svg viewBox="0 0 50 50">
-                <circle class="ring-bg" cx="25" cy="25" r="22" />
-                <circle
-                  class="ring-fill"
-                  cx="25" cy="25" r="22"
-                  :stroke-dasharray="`${Math.min(score / 30 * 138, 138)} 138`"
-                />
-              </svg>
-              <span class="score-number" :class="{ 'score-bounce': scoreAnim }">{{ score }}</span>
-            </div>
             <span class="hud-label">得分</span>
+            <strong class="score-number" :class="{ 'score-bounce': scoreAnim }">{{ score }}</strong>
           </div>
           <div class="time-display">
-            <span class="time-icon">⏱</span>
+            <PhClock class="time-icon" :size="17" weight="duotone" />
             <span class="time-value">{{ formatTime(elapsed) }}</span>
           </div>
-          <button class="hud-pause-btn" type="button" aria-label="暂停游戏" @click="pauseGame">暂停</button>
+          <div class="control-hint"><kbd>A</kbd><kbd>D</kbd><span>或</span><kbd>←</kbd><kbd>→</kbd><span>移动</span></div>
+          <button class="hud-pause-btn" type="button" aria-label="暂停游戏" @click="pauseGame"><PhPause :size="16" weight="bold" />暂停</button>
         </div>
       </div>
     </transition>
@@ -467,7 +469,7 @@
 
     <!-- ==================== Toast 提示 ==================== -->
     <transition name="toast-pop">
-      <div v-if="toast.show" :class="['game-toast', toast.type]">
+      <div v-if="toast.show" :class="['game-toast', toast.type]" role="status" aria-live="polite">
         <span class="toast-icon">{{ toast.type === 'success' ? '✓' : toast.type === 'error' ? '✗' : toast.type === 'warn' ? '!' : 'ℹ' }}</span>
         <span class="toast-text">{{ toast.text }}</span>
         <span v-if="toast.combo" class="toast-combo">×{{ toast.combo }}</span>
@@ -490,6 +492,9 @@ import { useRouter } from 'vue-router';
 import questionsData from '@/data/poetryQuestions.json';
 import { API_BASE_URL } from '../services/api';
 import { generateAttemptId } from '../utils/attemptId';
+import { applyCardCatchScore } from '../utils/cardCatchScore';
+import { PhClock, PhPause } from '@phosphor-icons/vue';
+import scholarAvatarUrl from '@/assets/poets/unknown-scholar.png';
 
 const API_BASE = `${API_BASE_URL}/card-game`;
 
@@ -518,11 +523,14 @@ const authFetch = (url, options = {}) => {
 
 export default {
   name: 'PoetryCardCatch',
+  components: { PhClock, PhPause },
   setup() {
     const router = useRouter();
     const rootRef = ref(null);
     const canvasRef = ref(null);
     const wrapRef = ref(null);
+    const scholarAvatar = typeof Image !== 'undefined' ? new Image() : null;
+    if (scholarAvatar) scholarAvatar.src = scholarAvatarUrl;
 
     // ==================== 游戏状态 ====================
     const phase = ref('MENU');
@@ -904,6 +912,22 @@ export default {
     const drawBackground = () => {
       ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
+      // 只补充视觉边界，不改变碰撞范围：让玩家一眼看出下方是接取区域。
+      const catchZoneY = player.y - 18;
+      const catchWash = ctx.createLinearGradient(0, catchZoneY, 0, CANVAS_H);
+      catchWash.addColorStop(0, 'rgba(235, 244, 235, 0)');
+      catchWash.addColorStop(1, 'rgba(114, 164, 144, 0.18)');
+      ctx.fillStyle = catchWash;
+      ctx.fillRect(0, catchZoneY, CANVAS_W, CANVAS_H - catchZoneY);
+      ctx.strokeStyle = 'rgba(74, 132, 115, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([7, 9]);
+      ctx.beginPath();
+      ctx.moveTo(54, catchZoneY);
+      ctx.lineTo(CANVAS_W - 54, catchZoneY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
       for (const p of petals) {
         p.y += p.speed;
         p.x += Math.sin(p.sway) * 0.5;
@@ -947,96 +971,90 @@ export default {
     };
 
     const drawCard = (card) => {
-      const { x, y, w, h, upperText, lowerText, isCorrect, collected, glow } = card;
+      const { x, y, w, h, upperText, lowerText, collected, glow } = card;
 
       ctx.save();
       ctx.translate(x + w / 2, y + h / 2);
       ctx.rotate(card.rot || 0);
       ctx.translate(-(x + w / 2), -(y + h / 2));
+      ctx.globalAlpha = collected ? 0.5 : 1;
 
-      // 外发光效果：统一金色光晕
+      // 接取反馈只改变光晕，题签本身不泄露答案。
       if (glow > 0 && !collected) {
-        ctx.shadowColor = 'rgba(244, 208, 63, 0.6)';
-        ctx.shadowBlur = 30 * glow;
+        ctx.shadowColor = 'rgba(176, 140, 92, 0.46)';
+        ctx.shadowBlur = 24 * glow;
       }
 
-      // 卡片主体 - 统一深色卷轴风格
       if (!collected) {
-        const cardGrad = ctx.createLinearGradient(x, y, x + w, y + h);
-        cardGrad.addColorStop(0, 'rgba(255, 255, 255, 0.97)');
-        cardGrad.addColorStop(1, 'rgba(232, 245, 239, 0.97)');
-        ctx.fillStyle = cardGrad;
-      } else {
-        ctx.fillStyle = 'rgba(245, 249, 246, 0.58)';
+        ctx.shadowColor = 'rgba(35, 78, 67, 0.24)';
+        ctx.shadowBlur = 22;
+        ctx.shadowOffsetY = 9;
       }
 
-      // 统一边框颜色
-      ctx.strokeStyle = 'rgba(176, 140, 92, 0.62)';
-      ctx.lineWidth = 2;
-
-      // 卷轴头装饰
-      const rollW = 12;
-      const rollGrad = ctx.createLinearGradient(x, y, x + rollW, y);
-      rollGrad.addColorStop(0, 'rgba(176, 140, 92, 0.72)');
-      rollGrad.addColorStop(0.5, 'rgba(208, 183, 143, 1)');
-      rollGrad.addColorStop(1, 'rgba(176, 140, 92, 0.72)');
-      ctx.fillStyle = rollGrad;
-      ctx.fillRect(x, y, rollW, h);
-
-      // 卡片主体
+      const paper = ctx.createLinearGradient(x, y, x + w, y + h);
+      paper.addColorStop(0, '#fffdf5');
+      paper.addColorStop(0.55, '#f8fbf5');
+      paper.addColorStop(1, '#e8f3ec');
       ctx.beginPath();
-      ctx.roundRect(x + rollW, y, w - rollW, h, [0, 16, 16, 0]);
+      ctx.roundRect(x, y, w, h, 15);
+      ctx.fillStyle = paper;
       ctx.fill();
+      ctx.strokeStyle = 'rgba(137, 104, 58, 0.62)';
+      ctx.lineWidth = 1.5;
       ctx.stroke();
 
       ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
 
-      // 顶部装饰线 - 统一为金色
-      if (!collected) {
-        ctx.strokeStyle = 'rgba(244, 208, 63, 0.3)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x + rollW + 15, y + 2);
-        ctx.lineTo(x + w - 15, y + 2);
-        ctx.stroke();
-      }
-
-      // 分隔线
-      const midY = y + h / 2;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
+      // 左侧书脊让题签更像正在下落的诗册页。
+      const spine = ctx.createLinearGradient(x, y, x + 12, y);
+      spine.addColorStop(0, '#8f6c3f');
+      spine.addColorStop(0.42, '#d4b57f');
+      spine.addColorStop(1, '#a37b47');
+      ctx.fillStyle = spine;
       ctx.beginPath();
-      ctx.moveTo(x + rollW + 12, midY);
-      ctx.lineTo(x + w - 8, midY);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.roundRect(x, y + 3, 11, h - 6, [12, 0, 0, 12]);
+      ctx.fill();
 
-      // 上句
-      const fontSize = Math.min(12, Math.max(9, (w - rollW - 28) / upperText.length * 1.5));
-      ctx.fillStyle = collected ? 'rgba(49, 93, 85, 0.32)' : '#315d55';
-      ctx.font = `${fontSize}px 'STSong','SimSun','Noto Serif SC',serif`;
-      ctx.textAlign = 'center';
+      // 右上角折页。
+      ctx.fillStyle = 'rgba(176, 140, 92, 0.18)';
+      ctx.beginPath();
+      ctx.moveTo(x + w - 28, y);
+      ctx.lineTo(x + w, y);
+      ctx.lineTo(x + w, y + 28);
+      ctx.closePath();
+      ctx.fill();
+
+      // 上句区域。
+      ctx.fillStyle = '#8c7352';
+      ctx.font = `600 10px 'Noto Sans SC','Microsoft YaHei',sans-serif`;
+      ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(upperText, x + rollW + (w - rollW) / 2, y + h * 0.28, w - rollW - 20);
+      ctx.fillText('上句', x + 24, y + 22);
 
-      // 下句文字：统一浅金色
-      const lowerColor = collected
-        ? 'rgba(49, 93, 85, 0.26)'
-        : '#197666';
-      ctx.font = `bold ${Math.min(14, Math.max(10, (w - rollW - 28) / lowerText.length * 1.7))}px 'STSong','SimSun','Noto Serif SC',serif`;
-      ctx.fillStyle = lowerColor;
-      ctx.fillText(lowerText, x + rollW + (w - rollW) / 2, y + h * 0.72, w - rollW - 20);
+      const upperFont = Math.min(16, Math.max(13, (w - 74) / Math.max(upperText.length, 1) * 1.5));
+      ctx.fillStyle = '#294f48';
+      ctx.font = `600 ${upperFont}px 'STKaiti','KaiTi','STSong','SimSun',serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(upperText, x + w / 2 + 5, y + 42, w - 54);
 
-      // 正确/错误角标：统一浅金色小圆点
-      if (!collected) {
-        const tagX = x + w - 20;
-        const tagY = y + 14;
-        ctx.fillStyle = 'rgba(244, 208, 63, 0.4)';
-        ctx.beginPath();
-        ctx.arc(tagX, tagY, 6, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      ctx.strokeStyle = 'rgba(56, 111, 96, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + 24, y + 59);
+      ctx.lineTo(x + w - 18, y + 59);
+      ctx.stroke();
+
+      // 候选下句使用独立承托区，但正确和错误卡保持完全相同的样式。
+      ctx.fillStyle = 'rgba(25, 118, 102, 0.09)';
+      ctx.strokeStyle = 'rgba(25, 118, 102, 0.16)';
+      ctx.beginPath();
+      ctx.roundRect(x + 22, y + 69, w - 38, h - 81, 9);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#197666';
+      ctx.font = `700 ${Math.min(20, Math.max(15, (w - 62) / Math.max(lowerText.length, 1) * 1.7))}px 'STKaiti','KaiTi','STSong','SimSun',serif`;
+      ctx.fillText(lowerText, x + w / 2 + 4, y + 89, w - 56);
 
       ctx.restore();
     };
@@ -1076,79 +1094,73 @@ export default {
         if (player.bounce < 0) player.bounce = 0;
       }
 
-      // 光晕
-      const haloGrad = ctx.createRadialGradient(0, 0, pw * 0.2, 0, 0, pw * 0.9);
-      haloGrad.addColorStop(0, 'rgba(244, 208, 63, 0.15)');
+      // 光晕和落地阴影。
+      const haloGrad = ctx.createRadialGradient(0, 4, pw * 0.18, 0, 4, pw * 0.92);
+      haloGrad.addColorStop(0, 'rgba(45, 157, 138, 0.18)');
       haloGrad.addColorStop(1, 'transparent');
       ctx.fillStyle = haloGrad;
       ctx.beginPath();
-      ctx.arc(0, 0, pw * 0.9, 0, Math.PI * 2);
+      ctx.arc(0, 4, pw * 0.92, 0, Math.PI * 2);
       ctx.fill();
 
-      // 身体 - 书生形象
-      const bodyGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, pw * 0.42);
-      bodyGrad.addColorStop(0, '#ffffff');
-      bodyGrad.addColorStop(0.5, '#f0f0f0');
-      bodyGrad.addColorStop(1, '#e0d8c8');
-      ctx.fillStyle = bodyGrad;
+      ctx.fillStyle = 'rgba(33, 85, 72, 0.16)';
       ctx.beginPath();
-      ctx.arc(0, 0, pw * 0.4, 0, Math.PI * 2);
+      ctx.ellipse(0, ph * 0.38, pw * 0.48, 7, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(139, 90, 43, 0.5)';
-      ctx.lineWidth = 2;
+
+      // 接诗托盘与人物使用同一碰撞范围，视觉上强调“接取”动作。
+      ctx.shadowColor = 'rgba(34, 83, 70, 0.22)';
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 4;
+      const trayGrad = ctx.createLinearGradient(0, -ph * 0.45, 0, -ph * 0.22);
+      trayGrad.addColorStop(0, '#fffdf4');
+      trayGrad.addColorStop(1, '#dcece4');
+      ctx.fillStyle = trayGrad;
+      ctx.strokeStyle = '#8e744e';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(-pw * 0.62, -ph * 0.42, pw * 1.24, 17, 8);
+      ctx.fill();
       ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
 
-      // 书生服装
-      ctx.fillStyle = 'rgba(139, 90, 43, 0.3)';
+      ctx.fillStyle = '#b08c5c';
       ctx.beginPath();
-      ctx.ellipse(0, ph * 0.18, pw * 0.34, ph * 0.12, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 帽子 - 书生帽
-      const hatGrad = ctx.createLinearGradient(0, -ph * 0.55, 0, -ph * 0.2);
-      hatGrad.addColorStop(0, '#173f39');
-      hatGrad.addColorStop(1, '#197666');
-      ctx.fillStyle = hatGrad;
-      ctx.beginPath();
-      ctx.ellipse(0, -ph * 0.28, pw * 0.3, ph * 0.07, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillRect(-pw * 0.12, -ph * 0.42, pw * 0.24, ph * 0.14);
-      ctx.fillStyle = '#173f39';
-      ctx.beginPath();
-      ctx.arc(0, -ph * 0.42, pw * 0.1, Math.PI, 0);
-      ctx.fill();
-      // 帽子上装饰
-      ctx.fillStyle = '#f4d03f';
-      ctx.beginPath();
-      ctx.arc(0, -ph * 0.52, 3, 0, Math.PI * 2);
+      ctx.arc(-pw * 0.56, -ph * 0.335, 3.2, 0, Math.PI * 2);
+      ctx.arc(pw * 0.56, -ph * 0.335, 3.2, 0, Math.PI * 2);
       ctx.fill();
 
-      // 脸
-      ctx.fillStyle = '#5d4037';
-      // 眼睛
+      // 现有水墨书生资产，替代原来的几何小圆脸。
+      const avatarY = ph * 0.08;
+      const avatarR = pw * 0.43;
+      ctx.shadowColor = 'rgba(30, 78, 67, 0.25)';
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = '#f8f4e8';
       ctx.beginPath();
-      ctx.arc(-pw * 0.12, -ph * 0.05, 3.5, 0, Math.PI * 2);
-      ctx.arc(pw * 0.12, -ph * 0.05, 3.5, 0, Math.PI * 2);
+      ctx.arc(0, avatarY, avatarR + 4, 0, Math.PI * 2);
       ctx.fill();
-      // 眼睛高光
-      ctx.fillStyle = '#fff';
+      ctx.shadowBlur = 0;
+      ctx.save();
       ctx.beginPath();
-      ctx.arc(-pw * 0.1, -ph * 0.07, 1.5, 0, Math.PI * 2);
-      ctx.arc(pw * 0.14, -ph * 0.07, 1.5, 0, Math.PI * 2);
-      ctx.fill();
-      // 微笑
-      ctx.beginPath();
-      ctx.arc(0, ph * 0.08, 5, 0.2, Math.PI - 0.2);
-      ctx.strokeStyle = '#5d4037';
+      ctx.arc(0, avatarY, avatarR, 0, Math.PI * 2);
+      ctx.clip();
+      if (scholarAvatar?.complete && scholarAvatar.naturalWidth) {
+        ctx.drawImage(scholarAvatar, -avatarR, avatarY - avatarR, avatarR * 2, avatarR * 2);
+      }
+      ctx.restore();
+      ctx.strokeStyle = '#287b6c';
       ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, avatarY, avatarR + 3, 0, Math.PI * 2);
       ctx.stroke();
 
       // 接取光晕
       if (cards.some((c) => !c.collected && Math.abs(c.x + c.w / 2 - (px + pw / 2)) < pw * 1.4 && c.y + c.h > py)) {
-        ctx.strokeStyle = 'rgba(244, 208, 63, 0.5)';
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(176, 140, 92, 0.72)';
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.arc(0, ph * 0.05, pw * 0.55, 0, Math.PI * 2);
+        ctx.roundRect(-pw * 0.68, -ph * 0.47, pw * 1.36, 25, 12);
         ctx.stroke();
       }
 
@@ -1254,7 +1266,7 @@ export default {
               
               // 连击加分
               const comboBonus = combo.value >= 5 ? 2 : combo.value >= 3 ? 1 : 0;
-              score.value += 1 + comboBonus;
+              score.value = applyCardCatchScore(score.value, 'correct', comboBonus);
               correctCount.value++;
               scoreAnim.value = true;
               setTimeout(() => { scoreAnim.value = false; }, 300);
@@ -1269,6 +1281,8 @@ export default {
               }
             } else {
               combo.value = 0; // 重置连击
+              const previousScore = score.value;
+              score.value = applyCardCatchScore(score.value, 'wrong');
               wrongCount.value++;
               wrongCaughtLog.push({
                 questionText: card.upperText,
@@ -1278,7 +1292,7 @@ export default {
                 addedToReview: false
               });
               spawnParticles(card.x + card.w / 2, card.y + card.h / 2, '#f87171', 12);
-              showToast('错误！', 'error');
+              showToast(previousScore > 0 ? '-1 接错了' : '接错了，当前已是 0 分', 'error');
 
               if (wrongCount.value >= MAX_WRONG) {
                 endGame();
@@ -1292,11 +1306,11 @@ export default {
         if (!card.passed && !card.collected && card.y > CANVAS_H) {
           card.passed = true;
           if (card.isCorrect) {
-            score.value = Math.max(0, score.value - 1);
+            score.value = applyCardCatchScore(score.value, 'missed');
             missedCount.value++;
             combo.value = 0; // 重置连击
             spawnParticles(card.x + card.w / 2, CANVAS_H - 10, '#fbbf24', 6);
-            showToast('-1 漏掉了！', 'warn');
+            showToast('错过正确句，不加不扣', 'warn');
           }
         }
 
@@ -1738,7 +1752,7 @@ export default {
 
     return {
       rootRef, canvasRef, wrapRef,
-      phase, diff, score, wrongCount, correctCount, missedCount,
+      phase, diff, isStarting, score, wrongCount, correctCount, missedCount,
       elapsed, gameLevel, gradeText, gradeClass, levelLabel,
       combo, maxCombo, scoreAnim,
       DIFFICULTIES,
@@ -1756,16 +1770,14 @@ export default {
 
 /* ==================== 基础布局 ==================== */
 .poetry-mahjong-wrapper {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
+  position: relative !important;
+  inset: auto !important;
   width: 100vw !important;
-  height: 100vh !important;
-  min-height: 100vh !important;
-  max-height: 100vh !important;
-  background: linear-gradient(180deg, #2c1654 0%, #1a1035 30%, #0f0a1e 60%, #080510 100%);
+  height: calc(100dvh - 84px) !important;
+  min-height: calc(100dvh - 84px) !important;
+  max-height: calc(100dvh - 84px) !important;
+  margin: 0 calc(50% - 50vw) !important;
+  background: #edf7f2;
   display: flex;
   flex-direction: column;
   align-items: center;

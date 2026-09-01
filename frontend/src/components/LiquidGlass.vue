@@ -3,7 +3,7 @@
     :is="as"
     ref="rootElement"
     class="liquid-glass-vue"
-    :class="{ 'is-interactive': interactive, 'is-over-light': overLight, 'is-pressed': isPressed }"
+    :class="{ 'is-interactive': interactive, 'is-over-light': overLight, 'is-pointer-inside': isPointerInside, 'is-pressed': isPressed }"
     :style="glassStyle"
     data-liquid-glass-component
     @pointerenter="handlePointerEnter"
@@ -79,6 +79,7 @@ const props = defineProps({
 const emit = defineEmits(['click'])
 const rootElement = ref(null)
 const isPressed = ref(false)
+const isPointerInside = ref(false)
 const instanceId = getCurrentInstance()?.uid ?? Math.round(Math.random() * 100000)
 const filterId = `liquid-glass-vue-${instanceId}`
 const isFirefox = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('firefox')
@@ -145,6 +146,16 @@ function handlePointerEnter(event) {
 
 function handlePointerMove(event) {
   if (!supportsFinePointer) return
+  const nestedGlass = event.target instanceof Element
+    ? event.target.closest('[data-liquid-glass]')
+    : null
+  if (nestedGlass && nestedGlass !== rootElement.value) {
+    isPointerInside.value = false
+    pendingPointer = null
+    resetPointer()
+    return
+  }
+  isPointerInside.value = true
   pendingPointer = { x: event.clientX, y: event.clientY }
   if (!frameId) frameId = window.requestAnimationFrame(applyPointerPosition)
 }
@@ -162,6 +173,7 @@ function resetPointer() {
 }
 
 function handlePointerLeave() {
+  isPointerInside.value = false
   isPressed.value = false
   pendingPointer = null
   resetPointer()
@@ -198,6 +210,8 @@ onBeforeUnmount(() => {
   --lg-shift-y: 0px;
   --lg-scale-x: 1;
   --lg-scale-y: 1;
+  --lg-pointer-warp-alpha: 0;
+  --lg-pointer-highlight-alpha: 0;
   position: relative;
   box-sizing: border-box;
   isolation: isolate;
@@ -233,7 +247,7 @@ onBeforeUnmount(() => {
 .liquid-glass-vue__warp {
   z-index: -3;
   background:
-    radial-gradient(circle at var(--lg-pointer-x) var(--lg-pointer-y), rgba(255,255,255,.52), transparent 24%),
+    radial-gradient(150px circle at var(--lg-pointer-x) var(--lg-pointer-y), rgba(255,255,255,var(--lg-pointer-warp-alpha)), transparent 68%),
     linear-gradient(135deg, rgba(255,255,255,.24), rgba(216,244,235,.08) 48%, rgba(255,248,225,.17)),
     rgba(226,246,238,.1);
   backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturation)) contrast(1.09) brightness(1.03);
@@ -257,7 +271,7 @@ onBeforeUnmount(() => {
   z-index: -1;
   background:
     linear-gradient(var(--lg-highlight-angle), transparent 18%, rgba(255,255,255,.38) 42%, rgba(199,241,232,.12) 49%, transparent 65%),
-    radial-gradient(circle at var(--lg-pointer-x) var(--lg-pointer-y), rgba(255,255,255,.48), transparent 32%);
+    radial-gradient(150px circle at var(--lg-pointer-x) var(--lg-pointer-y), rgba(218,255,246,var(--lg-pointer-highlight-alpha)), transparent 70%);
   opacity: .88;
   transition: opacity .2s ease;
 }
@@ -275,6 +289,11 @@ onBeforeUnmount(() => {
 
 .liquid-glass-vue.is-interactive:hover .liquid-glass-vue__highlight {
   opacity: 1;
+}
+
+.liquid-glass-vue.is-pointer-inside {
+  --lg-pointer-warp-alpha: .52;
+  --lg-pointer-highlight-alpha: .48;
 }
 
 .liquid-glass-vue.is-pressed .liquid-glass-vue__warp,

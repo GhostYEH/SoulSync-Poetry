@@ -1,5 +1,5 @@
 // 配置文件
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const _WEAK_SECRETS = ['your-secret-key', 'your-secret-key-change-in-production', 'secret', '123456', 'password', 'jwt-secret', ''];
 const _jwtSecret = process.env.JWT_SECRET || 'your-secret-key';

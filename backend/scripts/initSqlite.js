@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
@@ -434,10 +434,30 @@ CREATE TABLE IF NOT EXISTS question_knowledge_mappings (
   question_id TEXT NOT NULL,
   knowledge_point_id INTEGER NOT NULL,
   weight REAL DEFAULT 1.0,
-  source TEXT DEFAULT 'inferred',
+  source TEXT DEFAULT 'rule',
+  confidence REAL DEFAULT 0.8,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (knowledge_point_id) REFERENCES knowledge_points(id) ON DELETE CASCADE,
   UNIQUE(question_id, knowledge_point_id)
+);
+
+CREATE TABLE IF NOT EXISTS challenge_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  question_id TEXT UNIQUE,
+  challenge_id INTEGER,
+  question_index INTEGER,
+  poem_id INTEGER,
+  question_type TEXT,
+  question_text TEXT,
+  correct_answer TEXT,
+  options TEXT,
+  user_answer TEXT,
+  is_correct INTEGER,
+  answered_at TEXT,
+  source TEXT DEFAULT 'learning_event',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (poem_id) REFERENCES poems(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS learning_events (

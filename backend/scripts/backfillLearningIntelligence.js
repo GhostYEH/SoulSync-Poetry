@@ -5,7 +5,7 @@
  *
  * 运行: node scripts/backfillLearningIntelligence.js
  */
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const db = require('../src/utils/db');
 const knowledgeModel = require('../src/services/knowledgeModelService');
 const learningEventService = require('../src/services/learningEventService');

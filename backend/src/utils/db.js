@@ -71,6 +71,10 @@ function getSqliteDb() {
   return sqliteDb;
 }
 
+function getSqlitePath() {
+  return SQLITE_PATH;
+}
+
 // ============================================================================
 // SQL 兼容层
 // ============================================================================
@@ -303,5 +307,6 @@ module.exports = {
   isPostgres,
   isSqlite,
   getDialect,
+  getSqlitePath,
   ...dialectHelpers,
 };

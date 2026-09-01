@@ -33,6 +33,8 @@ const SKIP_TAGS = new Set(['HTML', 'BODY', 'SVG', 'PATH', 'CANVAS', 'IMG', 'VIDE
 const STRUCTURAL_TAGS = new Set(['DIV', 'SECTION', 'ARTICLE', 'ASIDE', 'NAV', 'HEADER', 'FORM', 'LI'])
 const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'image'])
 const BUTTON_CLASS_PATTERN = /(^|[-_])(btn|button|action|cta|toggle|trigger|chip|pill|tab|choice|option)([-_]|$)/i
+const ENHANCE_SELECTOR = '[class],button,a,input,textarea,select'
+const INTERNAL_GLASS_CLASSES = new Set(['liquid-glass-positioned', 'is-liquid-hovered', 'is-liquid-pressed'])
 
 function classLooksLikeSurface(element) {
   return [...element.classList].some((token) => {
@@ -226,7 +228,22 @@ function enhanceElement(element) {
 
 function enhanceTree(root = document) {
   if (root instanceof HTMLElement) enhanceElement(root)
-  root.querySelectorAll?.('[class],button,a,input,textarea,select').forEach(enhanceElement)
+  root.querySelectorAll?.(ENHANCE_SELECTOR).forEach(enhanceElement)
+}
+
+function hasOnlyInternalClassChanges(element, previousValue = '') {
+  const before = new Set(String(previousValue ?? '').split(/\s+/).filter(Boolean))
+  const after = new Set(element.classList)
+  const changed = new Set([
+    ...[...before].filter((className) => !after.has(className)),
+    ...[...after].filter((className) => !before.has(className))
+  ])
+
+  if (!changed.size) return true
+  if (element.hasAttribute('data-liquid-glass-component')) {
+    return [...changed].every((className) => ['is-pointer-inside', 'is-pressed'].includes(className))
+  }
+  return [...changed].every((className) => INTERNAL_GLASS_CLASSES.has(className))
 }
 
 export function installLiquidGlass(router) {
@@ -236,39 +253,83 @@ export function installLiquidGlass(router) {
   let scanFrame = null
   let pointerFrame = null
   let activeSurface = null
+  let activeSurfaceRect = null
   let pendingPointer = null
+  let pointerGeometryDirty = false
+  const appRoot = document.getElementById('app') || document.body
+  const pendingScanRoots = new Set()
+  const pressedControls = new Set()
   const scanTimers = new Set()
 
-  const scheduleScan = () => {
+  const addScanRoot = (root) => {
+    if (!(root instanceof Element) && root !== document) return false
+    if (root instanceof Element && root.closest('.dynamic-elements')) return false
+
+    for (const pendingRoot of pendingScanRoots) {
+      if (pendingRoot === root || pendingRoot.contains?.(root)) return false
+      if (root.contains?.(pendingRoot)) pendingScanRoots.delete(pendingRoot)
+    }
+
+    pendingScanRoots.add(root)
+    return true
+  }
+
+  const scheduleScan = (root = appRoot) => {
+    addScanRoot(root)
     if (scanFrame) return
     scanFrame = window.requestAnimationFrame(() => {
       scanFrame = null
-      enhanceTree(document)
+      const roots = [...pendingScanRoots]
+      pendingScanRoots.clear()
+      roots.forEach((scanRoot) => {
+        if (scanRoot === document || scanRoot.isConnected) enhanceTree(scanRoot)
+      })
     })
   }
 
   const observer = new MutationObserver((mutations) => {
-    const hasRelevantChange = mutations.some((mutation) => {
-      if (mutation.type === 'attributes') return true
-      if (mutation.target instanceof HTMLElement && mutation.target.closest('.dynamic-elements')) return false
-      return [...mutation.addedNodes].some((node) => (
-        !(node instanceof HTMLElement) || !node.classList.contains('liquid-glass-optics')
-      ))
+    mutations.forEach((mutation) => {
+      const target = mutation.target
+      if (!(target instanceof HTMLElement) || target.closest('.dynamic-elements')) return
+
+      if (mutation.type === 'attributes') {
+        if (mutation.attributeName === 'class' && hasOnlyInternalClassChanges(target, mutation.oldValue)) return
+        scheduleScan(target)
+        return
+      }
+
+      const isInternalOpticsNode = (node) => (
+        node instanceof HTMLElement && node.classList.contains('liquid-glass-optics')
+      )
+      const addedNodes = [...mutation.addedNodes].filter((node) => !isInternalOpticsNode(node))
+      const hasRelevantRemoval = [...mutation.removedNodes].some((node) => !isInternalOpticsNode(node))
+      if (!addedNodes.length && !hasRelevantRemoval) return
+
+      // Re-evaluate the parent because adding/removing text or controls can turn
+      // a structural element into (or out of) an eligible glass surface.
+      scheduleScan(target)
+      addedNodes.forEach((node) => {
+        if (node instanceof HTMLElement) scheduleScan(node)
+      })
     })
-    if (hasRelevantChange) scheduleScan()
   })
 
-  observer.observe(document.getElementById('app') || document.body, {
+  observer.observe(appRoot, {
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['class', 'disabled', 'aria-pressed', 'aria-selected']
+    attributeFilter: ['class', 'disabled', 'aria-pressed', 'aria-selected'],
+    attributeOldValue: true
   })
 
   const applyPointer = () => {
     pointerFrame = null
     if (!activeSurface || !pendingPointer) return
-    const rect = activeSurface.getBoundingClientRect()
+    if (!activeSurfaceRect || pointerGeometryDirty) {
+      activeSurfaceRect = activeSurface.getBoundingClientRect()
+      pointerGeometryDirty = false
+    }
+    const rect = activeSurfaceRect
     const x = Math.min(100, Math.max(0, ((pendingPointer.x - rect.left) / Math.max(1, rect.width)) * 100))
     const y = Math.min(100, Math.max(0, ((pendingPointer.y - rect.top) / Math.max(1, rect.height)) * 100))
     activeSurface.style.setProperty('--liquid-x', `${x}%`)
@@ -276,37 +337,71 @@ export function installLiquidGlass(router) {
     activeSurface.style.setProperty('--liquid-angle', `${118 + (x - 50) * 0.38}deg`)
   }
 
+  const clearActiveSurface = () => {
+    if (activeSurface) {
+      activeSurface.classList.remove('is-liquid-hovered')
+      activeSurface.style.removeProperty('--liquid-x')
+      activeSurface.style.removeProperty('--liquid-y')
+      activeSurface.style.removeProperty('--liquid-angle')
+    }
+    activeSurface = null
+    activeSurfaceRect = null
+    pendingPointer = null
+  }
+
+  const setActiveSurface = (surface) => {
+    if (surface === activeSurface) return
+    clearActiveSurface()
+    activeSurface = surface
+    activeSurfaceRect = surface.getBoundingClientRect()
+    activeSurface.classList.add('is-liquid-hovered')
+    pointerGeometryDirty = false
+  }
+
   const handlePointerMove = (event) => {
     const surface = event.target.closest?.('[data-liquid-glass]')
-    if (!surface) return
-    activeSurface = surface
+    if (!surface) {
+      clearActiveSurface()
+      return
+    }
+    setActiveSurface(surface)
     pendingPointer = { x: event.clientX, y: event.clientY }
     if (!pointerFrame) pointerFrame = window.requestAnimationFrame(applyPointer)
   }
 
   const handlePointerOut = (event) => {
-    if (!activeSurface || activeSurface.contains(event.relatedTarget)) return
-    activeSurface.style.removeProperty('--liquid-x')
-    activeSurface.style.removeProperty('--liquid-y')
-    activeSurface.style.removeProperty('--liquid-angle')
-    activeSurface = null
-    pendingPointer = null
+    if (!event.relatedTarget) clearActiveSurface()
   }
 
-  const handlePointerDown = (event) => event.target.closest?.('[data-liquid-glass="control"]')?.classList.add('is-liquid-pressed')
-  const clearPressed = () => document.querySelectorAll('.is-liquid-pressed').forEach((element) => element.classList.remove('is-liquid-pressed'))
+  const handlePointerDown = (event) => {
+    const control = event.target.closest?.('[data-liquid-glass="control"]')
+    if (!control) return
+    control.classList.add('is-liquid-pressed')
+    pressedControls.add(control)
+  }
+  const clearPressed = () => {
+    pressedControls.forEach((element) => element.classList.remove('is-liquid-pressed'))
+    pressedControls.clear()
+  }
+  const invalidatePointerGeometry = () => {
+    pointerGeometryDirty = true
+  }
 
   document.addEventListener('pointermove', handlePointerMove, { passive: true })
   document.addEventListener('pointerout', handlePointerOut, { passive: true })
   document.addEventListener('pointerdown', handlePointerDown, { passive: true })
   document.addEventListener('pointerup', clearPressed, { passive: true })
   document.addEventListener('pointercancel', clearPressed, { passive: true })
+  window.addEventListener('resize', invalidatePointerGeometry, { passive: true })
+  window.addEventListener('scroll', invalidatePointerGeometry, { passive: true, capture: true })
 
   const queueStableScans = () => {
     scanTimers.forEach((timer) => window.clearTimeout(timer))
     scanTimers.clear()
     scheduleScan()
-    ;[80, 260, 620, 1200].forEach((delay) => {
+    // One delayed safety pass covers async view content and late CSS without
+    // repeatedly rescanning the entire application after every navigation.
+    ;[320].forEach((delay) => {
       const timer = window.setTimeout(() => {
         scanTimers.delete(timer)
         scheduleScan()
@@ -316,7 +411,6 @@ export function installLiquidGlass(router) {
   }
 
   const removeRouteHook = router?.afterEach(queueStableScans)
-  scheduleScan()
   queueStableScans()
 
   return () => {
@@ -327,8 +421,13 @@ export function installLiquidGlass(router) {
     document.removeEventListener('pointerdown', handlePointerDown)
     document.removeEventListener('pointerup', clearPressed)
     document.removeEventListener('pointercancel', clearPressed)
+    window.removeEventListener('resize', invalidatePointerGeometry)
+    window.removeEventListener('scroll', invalidatePointerGeometry, { capture: true })
     if (scanFrame) window.cancelAnimationFrame(scanFrame)
     if (pointerFrame) window.cancelAnimationFrame(pointerFrame)
+    pendingScanRoots.clear()
+    clearActiveSurface()
+    clearPressed()
     scanTimers.forEach((timer) => window.clearTimeout(timer))
     scanTimers.clear()
     delete document.documentElement.dataset.liquidGlassInstalled

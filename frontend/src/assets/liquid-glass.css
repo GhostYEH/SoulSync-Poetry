@@ -23,10 +23,14 @@
 }
 
 #app [data-liquid-glass] {
+  --liquid-hotspot-core-alpha: 0;
+  --liquid-hotspot-halo-alpha: 0;
+  --liquid-optics-core-alpha: 0;
+  --liquid-optics-halo-alpha: 0;
   isolation: isolate;
   background-color: var(--liquid-glass-fill) !important;
   background-image:
-    radial-gradient(circle at var(--liquid-x) var(--liquid-y), rgba(255,255,255,.4), transparent 24%),
+    radial-gradient(150px circle at var(--liquid-x) var(--liquid-y), rgba(255,255,255,var(--liquid-hotspot-core-alpha)), rgba(210,250,240,var(--liquid-hotspot-halo-alpha)) 30%, transparent 68%),
     linear-gradient(var(--liquid-angle), rgba(255,255,255,.28), rgba(216,244,235,.08) 44%, rgba(255,248,224,.18)) !important;
   background-clip: padding-box !important;
   border-color: var(--liquid-glass-line) !important;
@@ -107,12 +111,19 @@
   transition: opacity .18s ease, filter .18s ease;
 }
 
-#app [data-liquid-glass]:not([data-liquid-glass="control"]):hover > .liquid-glass-optics {
+#app [data-liquid-glass].is-liquid-hovered {
+  --liquid-hotspot-core-alpha: .54;
+  --liquid-hotspot-halo-alpha: .16;
+  --liquid-optics-core-alpha: .7;
+  --liquid-optics-halo-alpha: .2;
+}
+
+#app [data-liquid-glass]:not([data-liquid-glass="control"]).is-liquid-hovered > .liquid-glass-optics {
   opacity: 1;
   filter: url(#liquid-glass-global-refraction) brightness(1.12) saturate(1.16);
 }
 
-#app [data-liquid-glass="control"]:hover:not(:disabled):not([aria-disabled="true"]) {
+#app [data-liquid-glass="control"].is-liquid-hovered:not(:disabled):not([aria-disabled="true"]) {
   --liquid-hotspot-core-alpha: .58;
   --liquid-hotspot-halo-alpha: .14;
   --liquid-sweep-alpha: .34;
@@ -128,7 +139,7 @@
   translate: 0 -1px;
 }
 
-#app [data-liquid-glass="control"]:hover:not(:disabled):not([aria-disabled="true"]) > .liquid-glass-optics {
+#app [data-liquid-glass="control"].is-liquid-hovered:not(:disabled):not([aria-disabled="true"]) > .liquid-glass-optics {
   filter: url(#liquid-glass-global-refraction) brightness(1.12) saturate(1.16);
 }
 

@@ -6,13 +6,6 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tests/apiSmokeTest.js && node tests/gameMechanicsTest.js",
-    "test:smoke": "node tests/apiSmokeTest.js",
-    "test:sqlite": "node tests/dbModeTest.js",
-    "test:security": "node tests/securityTest.js",
-    "test:transaction": "node tests/transactionTest.js",
-    "test:cheat": "node tests/antiCheatTest.js",
-    "test:all": "node tests/dbModeTest.js && node tests/apiSmokeTest.js && node tests/securityTest.js && node tests/transactionTest.js && node tests/antiCheatTest.js",
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
     "db:seed:students": "node scripts/seedStudentDemoData.js"

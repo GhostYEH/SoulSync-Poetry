@@ -34,12 +34,17 @@ router.post('/add', authenticateToken, asyncHandler(async (req, res) => {
   learningEventService.recordEvent({
     userId,
     eventType: learningEventService.EVENT_TYPES.WRONG_ANSWER,
-    questionId: result.id ? String(result.id) : null,
+    questionId: result.id ? `wrong_question:${result.id}` : null,
     questionText: questionData.question || '',
     correct: false,
     difficulty: questionData.level || 3,
     eventKey: `wrong-add:${userId}:${result.id}`,
-    metadata: { source: 'wrong-questions-add', userAnswer: questionData.user_answer, correctAnswer: questionData.answer },
+    metadata: {
+      source: 'wrong-questions-add',
+      questionSource: 'wrong_question',
+      userAnswer: questionData.user_answer,
+      correctAnswer: questionData.answer,
+    },
   }).catch(err => console.error('[learningEvent] 错题添加事件失败:', err.message));
 
   res.json(result);

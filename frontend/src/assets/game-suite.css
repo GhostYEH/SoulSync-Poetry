@@ -106,6 +106,20 @@
   background: transparent;
 }
 
+#app .parkour-wrapper {
+  height: calc(100dvh - 84px) !important;
+  max-height: calc(100dvh - 84px) !important;
+}
+
+#app .parkour-wrapper .game-canvas {
+  background-image:
+    linear-gradient(180deg, rgba(250, 253, 249, .34), rgba(239, 247, 239, .12) 54%, rgba(227, 239, 224, .38)),
+    url('./feature-parkour.png') !important;
+  background-position: center, center !important;
+  background-size: cover, cover !important;
+  background-repeat: no-repeat !important;
+}
+
 /* HUD: 正在玩的状态只保留四件事，元气、题面、得分、暂停。 */
 #app .parkour-wrapper .game-hud,
 #app .poetry-mahjong-wrapper .game-hud {
@@ -144,6 +158,36 @@
   gap: 10px;
 }
 
+#app .parkour-wrapper .hud-lives {
+  justify-content: flex-start;
+  gap: 14px;
+}
+
+#app .parkour-wrapper .hud-game-name {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: 76px;
+}
+
+#app .parkour-wrapper .hud-game-name strong {
+  color: var(--game-ink);
+  font: 600 16px/1.2 'STKaiti', 'KaiTi', 'Noto Serif SC', serif;
+  white-space: nowrap;
+}
+
+#app .parkour-wrapper .hud-game-name span {
+  color: var(--game-gold);
+  font: 600 9px/1.2 'Noto Sans SC', sans-serif;
+  letter-spacing: .14em;
+  white-space: nowrap;
+}
+
+#app .parkour-wrapper .hud-vitals {
+  display: grid;
+  gap: 3px;
+}
+
 #app .parkour-wrapper .lives-container,
 #app .poetry-mahjong-wrapper .lives-container {
   display: flex;
@@ -161,6 +205,22 @@
   color: var(--game-jade);
   background: rgba(255, 255, 255, .72);
   box-shadow: none;
+}
+
+#app .parkour-wrapper .life-orb {
+  border-color: rgba(25, 119, 105, .3);
+  color: #fff;
+  background: linear-gradient(145deg, #69ad98, #247967);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .46), 0 4px 10px rgba(32, 108, 88, .16);
+  animation: none;
+}
+
+#app .parkour-wrapper .life-orb.life-lost {
+  border-color: rgba(166, 102, 95, .2);
+  color: #a97a73;
+  background: rgba(225, 214, 207, .74);
+  opacity: .54;
+  transform: none;
 }
 
 #app .parkour-wrapper .life-lost,
@@ -194,10 +254,17 @@
   padding: 9px 18px;
   border: 1px solid rgba(180, 142, 88, .3);
   border-radius: 11px;
-  color: var(--game-ink-soft);
-  background: rgba(255, 255, 255, .58);
-  font: 500 16px/1.45 'STKaiti', 'KaiTi', 'SimSun', serif;
+  color: var(--game-ink);
+  background: rgba(255, 255, 255, .72);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .88), 0 5px 16px rgba(52, 94, 82, .08);
+  font: 600 16px/1.45 'STKaiti', 'KaiTi', 'SimSun', serif;
   text-align: center;
+}
+
+#app .parkour-wrapper .q-part,
+#app .parkour-wrapper .q-text {
+  color: var(--game-ink) !important;
+  text-shadow: none !important;
 }
 
 #app .parkour-wrapper .scroll-deco {
@@ -225,6 +292,160 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
+}
+
+#app .poetry-mahjong-wrapper .game-hud {
+  grid-template-columns: minmax(150px, 1fr) auto auto minmax(430px, auto);
+  width: min(1380px, calc(100% - 40px)) !important;
+  padding: 10px 12px 10px 20px !important;
+  border-color: rgba(255, 255, 255, .92) !important;
+  background: rgba(248, 252, 247, .9) !important;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .98), 0 14px 34px rgba(35, 86, 75, .16) !important;
+}
+
+#app .poetry-mahjong-wrapper .hud-brand {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+#app .poetry-mahjong-wrapper .hud-brand span {
+  color: var(--game-gold);
+  font: 600 9px/1.2 Georgia, serif;
+  letter-spacing: .2em;
+}
+
+#app .poetry-mahjong-wrapper .hud-brand strong {
+  overflow: hidden;
+  color: var(--game-ink);
+  font: 600 18px/1.25 'STKaiti', 'KaiTi', 'Noto Serif SC', serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#app .poetry-mahjong-wrapper .hud-left,
+#app .poetry-mahjong-wrapper .hud-center {
+  flex-direction: row;
+}
+
+#app .poetry-mahjong-wrapper .life-orb {
+  border-color: rgba(25, 119, 105, .28);
+  color: #fff;
+  background: linear-gradient(145deg, #69ad98, #247967);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .46), 0 4px 10px rgba(32, 108, 88, .16);
+  animation: none;
+}
+
+#app .poetry-mahjong-wrapper .life-orb.life-lost {
+  border-color: rgba(166, 102, 95, .2);
+  color: #a97a73;
+  background: rgba(225, 214, 207, .74);
+  opacity: .54;
+  transform: none;
+}
+
+#app .poetry-mahjong-wrapper .score-container {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 74px;
+}
+
+#app .poetry-mahjong-wrapper .score-number {
+  position: static !important;
+  inset: auto !important;
+  display: block;
+  color: var(--game-jade) !important;
+  font: 700 27px/1 'Noto Serif SC', 'STKaiti', serif;
+}
+
+#app .poetry-mahjong-wrapper .time-display {
+  gap: 7px;
+  padding: 8px 10px;
+  border: 1px solid rgba(83, 137, 126, .18);
+  color: var(--game-muted);
+  background: rgba(255, 255, 255, .5);
+}
+
+#app .poetry-mahjong-wrapper .time-icon {
+  color: var(--game-jade);
+  background: transparent;
+}
+
+#app .poetry-mahjong-wrapper .time-value {
+  color: var(--game-ink-soft);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#app .poetry-mahjong-wrapper .control-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--game-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+#app .poetry-mahjong-wrapper .control-hint kbd {
+  display: inline-grid;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  place-items: center;
+  border: 1px solid rgba(60, 111, 98, .25);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  color: var(--game-ink-soft);
+  background: rgba(255, 255, 255, .72);
+  font: 600 10px/1 'Noto Sans SC', sans-serif;
+}
+
+#app .poetry-mahjong-wrapper .hud-pause-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+#app .poetry-mahjong-wrapper .canvas-wrap {
+  padding: 96px 18px 18px !important;
+  align-items: flex-start !important;
+  justify-content: center !important;
+}
+
+#app .poetry-mahjong-wrapper .game-canvas {
+  width: calc(100% - 4px) !important;
+  height: auto !important;
+  max-width: 2300px;
+  max-height: 100%;
+  aspect-ratio: 1400 / 600;
+  border: 1px solid rgba(176, 140, 92, .34) !important;
+  border-radius: 22px !important;
+  background-image:
+    linear-gradient(180deg, rgba(249, 252, 247, .44), rgba(238, 248, 240, .14) 58%, rgba(228, 240, 226, .34)),
+    url('./feature-card-catch.png') !important;
+  background-position: center, center !important;
+  background-size: cover, cover !important;
+  background-repeat: no-repeat !important;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .82), 0 18px 38px rgba(44, 89, 76, .14) !important;
+}
+
+#app .poetry-mahjong-wrapper.game-active {
+  height: calc(100dvh - 84px) !important;
+  min-height: calc(100dvh - 84px) !important;
+  max-height: none !important;
+}
+
+@media (min-width: 821px) {
+  #app .poetry-mahjong-wrapper.game-active .game-canvas {
+    width: calc(100% - 4px) !important;
+    height: 100% !important;
+    max-width: none;
+    max-height: none;
+    aspect-ratio: auto;
+  }
 }
 
 #app .poetry-mahjong-wrapper .level-badge,
@@ -286,6 +507,10 @@
   font-family: 'STKaiti', 'KaiTi', 'SimSun', serif;
 }
 
+#app .parkour-wrapper .score-inner {
+  text-shadow: none !important;
+}
+
 #app .poetry-mahjong-wrapper .time-display {
   color: var(--game-muted);
   font-size: 12px;
@@ -325,6 +550,29 @@
   background: linear-gradient(180deg, rgba(230, 241, 233, .68), rgba(215, 231, 220, .82)) !important;
   backdrop-filter: blur(8px) saturate(115%);
   -webkit-backdrop-filter: blur(8px) saturate(115%);
+}
+
+/* 游戏菜单、暂停和结算都采用同一条短过渡，避免旧的回弹缩放与路由动画叠加。 */
+#app .parkour-wrapper .panel-fade-enter-active,
+#app .parkour-wrapper .panel-fade-leave-active,
+#app .poetry-mahjong-wrapper .panel-fade-enter-active,
+#app .poetry-mahjong-wrapper .panel-fade-leave-active {
+  animation: none !important;
+  will-change: opacity, transform;
+  transition: opacity .2s cubic-bezier(.22, 1, .36, 1),
+              transform .2s cubic-bezier(.22, 1, .36, 1) !important;
+}
+
+#app .parkour-wrapper .panel-fade-enter-from,
+#app .poetry-mahjong-wrapper .panel-fade-enter-from {
+  opacity: 0;
+  transform: translate3d(0, 7px, 0) scale(.995);
+}
+
+#app .parkour-wrapper .panel-fade-leave-to,
+#app .poetry-mahjong-wrapper .panel-fade-leave-to {
+  opacity: 0;
+  transform: translate3d(0, -5px, 0) scale(.998);
 }
 
 #app .parkour-wrapper .menu-card,
@@ -1022,10 +1270,43 @@
     grid-row: 2;
   }
 
+  #app .parkour-wrapper .hud-game-name {
+    display: none;
+  }
+
+  #app .parkour-wrapper .hud-lives {
+    gap: 7px;
+  }
+
   #app .parkour-wrapper .hud-score,
   #app .poetry-mahjong-wrapper .hud-right {
     grid-column: 2;
     grid-row: 1;
+  }
+
+  #app .poetry-mahjong-wrapper .hud-brand {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  #app .poetry-mahjong-wrapper .hud-left {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  #app .poetry-mahjong-wrapper .hud-center {
+    grid-column: 2;
+    grid-row: 2;
+    justify-content: flex-end;
+  }
+
+  #app .poetry-mahjong-wrapper .control-hint {
+    display: none;
+  }
+
+  #app .poetry-mahjong-wrapper .canvas-wrap {
+    padding-top: 126px !important;
+    align-items: flex-start;
   }
 
   #app .parkour-wrapper .question-scroll {
@@ -1106,6 +1387,29 @@
   #app .poetry-mahjong-wrapper .review-title {
     order: -1;
     width: 100%;
+  }
+
+  #app .poetry-mahjong-wrapper .game-hud {
+    padding: 9px 10px !important;
+  }
+
+  #app .poetry-mahjong-wrapper .hud-brand span,
+  #app .poetry-mahjong-wrapper .hud-label,
+  #app .poetry-mahjong-wrapper .time-display {
+    display: none;
+  }
+
+  #app .poetry-mahjong-wrapper .hud-brand strong {
+    font-size: 16px;
+  }
+
+  #app .poetry-mahjong-wrapper .life-orb {
+    width: 20px;
+    height: 20px;
+  }
+
+  #app .poetry-mahjong-wrapper .canvas-wrap {
+    padding: 116px 8px 8px !important;
   }
 
   #app .parkour-wrapper .game-toast,

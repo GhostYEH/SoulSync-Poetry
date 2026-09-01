@@ -84,13 +84,21 @@ router.post('/answer/submit', authenticateToken, asyncHandler(async (req, res) =
     userId,
     eventType: serverIsCorrect ? learningEventService.EVENT_TYPES.CORRECT_ANSWER
                           : learningEventService.EVENT_TYPES.WRONG_ANSWER,
-    questionId: result.recordId ? String(result.recordId) : null,
+    questionId: result.recordId ? `challenge_record:${result.recordId}` : null,
     questionText: question,
     correct: serverIsCorrect,
     difficulty: level || 3,
     hintCount: usedAiHelp ? 1 : 0,
     eventKey: `answer:${userId}:${attemptKey}`,
-    metadata: { userAnswer, correctAnswer, poemTitle, poemAuthor, level, clientAttemptId: attemptKey },
+    metadata: {
+      userAnswer,
+      correctAnswer,
+      poemTitle,
+      poemAuthor,
+      level,
+      clientAttemptId: attemptKey,
+      questionSource: 'challenge_record',
+    },
   }).catch(err => console.error('[learningEvent] 答题事件记录失败:', err.message));
 
   res.json(result);

@@ -75,8 +75,49 @@ function migrate(dbPath) {
         UNIQUE(question_id, knowledge_point_id)
       )
     `);
+    addColumnIfMissing(db, 'question_knowledge_mappings', 'confidence', 'REAL DEFAULT 0.8');
 
-    // 3. learning_events — 学习事件
+    // 3. challenge_questions — 可复用练习题目录
+    // question_id 是跨题目来源的稳定 ID；其余 challenge_* 字段保留给旧挑战服务兼容使用。
+    createTableIfNotExists(db, 'challenge_questions', `
+      CREATE TABLE challenge_questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question_id TEXT UNIQUE,
+        challenge_id INTEGER,
+        question_index INTEGER,
+        poem_id INTEGER,
+        question_type TEXT,
+        question_text TEXT,
+        correct_answer TEXT,
+        options TEXT,
+        user_answer TEXT,
+        is_correct INTEGER,
+        answered_at TEXT,
+        source TEXT DEFAULT 'learning_event',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    addColumnIfMissing(db, 'challenge_questions', 'question_id', 'TEXT');
+    addColumnIfMissing(db, 'challenge_questions', 'challenge_id', 'INTEGER');
+    addColumnIfMissing(db, 'challenge_questions', 'question_index', 'INTEGER');
+    addColumnIfMissing(db, 'challenge_questions', 'poem_id', 'INTEGER');
+    addColumnIfMissing(db, 'challenge_questions', 'question_type', 'TEXT');
+    addColumnIfMissing(db, 'challenge_questions', 'question_text', 'TEXT');
+    addColumnIfMissing(db, 'challenge_questions', 'correct_answer', 'TEXT');
+    addColumnIfMissing(db, 'challenge_questions', 'options', 'TEXT');
+    addColumnIfMissing(db, 'challenge_questions', 'user_answer', 'TEXT');
+    addColumnIfMissing(db, 'challenge_questions', 'is_correct', 'INTEGER');
+    addColumnIfMissing(db, 'challenge_questions', 'answered_at', 'TEXT');
+    addColumnIfMissing(db, 'challenge_questions', 'source', "TEXT DEFAULT 'learning_event'");
+    addColumnIfMissing(db, 'challenge_questions', 'created_at', 'TEXT');
+    addColumnIfMissing(db, 'challenge_questions', 'updated_at', 'TEXT');
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_challenge_questions_question_id
+      ON challenge_questions(question_id)
+    `);
+
+    // 4. learning_events — 学习事件
     createTableIfNotExists(db, 'learning_events', `
       CREATE TABLE learning_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,7 +142,7 @@ function migrate(dbPath) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_learning_events_type ON learning_events(event_type)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_learning_events_created ON learning_events(created_at)");
 
-    // 4. student_knowledge_states — 学生知识状态
+    // 5. student_knowledge_states — 学生知识状态
     createTableIfNotExists(db, 'student_knowledge_states', `
       CREATE TABLE student_knowledge_states (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,7 +164,7 @@ function migrate(dbPath) {
       )
     `);
 
-    // 5. wrong_questions 补字段
+    // 6. wrong_questions 补字段
     if (tableExists(db, 'wrong_questions')) {
       addColumnIfMissing(db, 'wrong_questions', 'added_at', 'TEXT');
       addColumnIfMissing(db, 'wrong_questions', 'last_reviewed_at', 'TEXT');
@@ -131,7 +172,7 @@ function migrate(dbPath) {
       addColumnIfMissing(db, 'wrong_questions', 'source', "TEXT DEFAULT 'challenge'");
     }
 
-    // 6. student_tags 表
+    // 7. student_tags 表
     createTableIfNotExists(db, 'student_tags', `
       CREATE TABLE student_tags (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,7 +183,7 @@ function migrate(dbPath) {
       )
     `);
 
-    // 7. 补充高频查询索引（仅在表存在时创建，兼容空数据库）
+    // 8. 补充高频查询索引（仅在表存在时创建，兼容空数据库）
     function createIndexIfTableExists(indexSql, table) {
       if (tableExists(db, table)) {
         try { db.exec(indexSql); } catch (e) { console.warn('  [!] 索引跳过:', e.message); }
@@ -158,6 +199,8 @@ function migrate(dbPath) {
     createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_student_knowledge_states_user_kp ON student_knowledge_states(user_id, knowledge_point_id)", 'student_knowledge_states');
     createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_user_challenge_records_user ON user_challenge_records(user_id)", 'user_challenge_records');
     createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_question_knowledge_mappings_qid ON question_knowledge_mappings(question_id)", 'question_knowledge_mappings');
+    createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_question_knowledge_mappings_kp ON question_knowledge_mappings(knowledge_point_id)", 'question_knowledge_mappings');
+    createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_challenge_questions_poem ON challenge_questions(poem_id)", 'challenge_questions');
     createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_users_class ON users(class_id)", 'users');
     createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_learning_events_user_created ON learning_events(user_id, created_at)", 'learning_events');
 

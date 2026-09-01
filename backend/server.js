@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
@@ -170,7 +170,7 @@ async function bootstrap() {
     if (db.isSqlite && db.isSqlite()) {
       const sqliteMigration = require('./src/utils/sqliteMigration');
       try {
-        sqliteMigration.migrate(path.join(__dirname, 'db', 'poetry.db'));
+        sqliteMigration.migrate(db.getSqlitePath());
       } catch (migErr) {
         console.warn('SQLite migration 跳过:', migErr.message);
       }
@@ -189,6 +189,16 @@ async function bootstrap() {
       console.log('知识模型种子初始化完成');
     } catch (seedErr) {
       console.warn('知识模型种子初始化跳过:', seedErr.message);
+    }
+
+    try {
+      const learningEventService = require('./src/services/learningEventService');
+      const backfill = await learningEventService.backfillPracticeQuestionCatalog();
+      if (backfill.questions > 0 || backfill.mappings > 0) {
+        console.log(`练习题目录回填完成: ${backfill.questions} 道题，${backfill.mappings} 条知识映射`);
+      }
+    } catch (backfillErr) {
+      console.warn('练习题目录回填跳过:', backfillErr.message);
     }
   } catch (err) {
     console.error('数据加载失败:', err);

@@ -30,7 +30,23 @@
 
     <section class="daily-poem-section" aria-labelledby="daily-title"><div class="section-heading-row"><div><span class="eyebrow">A QUIET MOMENT</span><h2 id="daily-title">每日一诗</h2></div><span class="section-note">给今天留一段慢读的时间</span></div><div v-if="dailyPoem" class="daily-poem-card" @click="navigateToDetail(dailyPoem.id)"><div class="date-stamp"><strong>{{ currentDay }}</strong><span>{{ currentMonth }}</span></div><div class="daily-poem-copy"><span class="poem-label">今日读本 · {{ dailyPoem.dynasty }}代</span><h3>{{ dailyPoem.title }}</h3><p>{{ dailyPoem.author }}</p><blockquote>{{ dailyPoem.content.split('\n').join(' / ') }}</blockquote></div><div class="daily-poem-actions"><button class="quiet-action" @click.stop="toggleRead(dailyPoem)">{{ isReading && readingPoemId === dailyPoem.id ? '停止朗读' : '朗读诗篇' }}</button><button class="poem-detail-link" @click.stop="navigateToDetail(dailyPoem.id)">读全文与赏析 <span>↗</span></button></div></div><div v-else class="loading-state">加载每日一诗...</div></section>
 
-    <section class="library-section" aria-labelledby="library-title"><div class="section-heading-row"><div><span class="eyebrow">OPEN THE LIBRARY</span><h2 id="library-title">精选诗句</h2></div><span class="section-note">沿卷浏览，找到下一首想读的诗</span></div><div class="library-toolbar"><label class="search-field"><span>⌕</span><input v-model="searchQuery" placeholder="搜索诗词、诗人..." @keyup.enter="handleSearch" /></label><button class="primary-action compact-action" @click="handleSearch">搜索</button><select v-model="dynastyFilter" @change="filterPoems"><option value="">全部朝代</option><option value="唐">唐朝</option><option value="宋">宋朝</option><option value="元">元朝</option></select></div><div v-if="loading" class="loading-state">加载中...</div><div v-else-if="error" class="error-state"><span>{{ error }}</span><button class="text-action" @click="fetchPoems">重试</button></div><div v-else-if="filteredPoems.length === 0" class="loading-state">暂无诗词</div><div v-else class="poem-scroll-shell"><img class="poem-scroll-art" :src="scrollArt" alt="" aria-hidden="true" /><div class="poem-scroll-heading"><span class="scroll-seal">藏</span><div><strong>沿卷读诗</strong><small>拖动卷轴，浏览诗词库</small></div><span class="scroll-hint">横向滑动 ↔</span></div><div ref="poemScroller" class="poem-scroll-viewport" role="listbox" tabindex="0" aria-label="精选古诗词，可横向拖动浏览" @pointerdown="startPoemScrollDrag" @pointermove="movePoemScrollDrag" @pointerup="endPoemScrollDrag" @pointercancel="endPoemScrollDrag"><div class="poem-scroll-track"><button v-for="(poem, index) in filteredPoems" :key="poem.id" class="scroll-poem-card" @click="openPoemFromScroll(poem.id)"><span class="scroll-poem-index">{{ String(index + 1).padStart(2, '0') }}</span><span class="scroll-poem-title">{{ poem.title }}</span><span class="scroll-poem-author">{{ poem.author }} · {{ poem.dynasty }}</span><span class="scroll-poem-content">{{ getShortContent(poem.content) }}</span><span class="scroll-poem-arrow">↗</span></button><button v-if="hasMore" class="scroll-load-more" :disabled="loadingMore" @click.stop="loadMore"><span class="load-more-mark">↓</span><strong>{{ loadingMore ? '加载中' : '继续加载' }}</strong><small>下一卷诗词</small></button><div v-else class="scroll-end-mark"><span>卷尽</span><small>已读完当前诗词库</small></div></div></div></div></section>
+    <section class="library-section" aria-labelledby="library-title">
+      <div class="section-heading-row"><div><span class="eyebrow">OPEN THE LIBRARY</span><h2 id="library-title">精选诗句</h2></div><span class="section-note">沿卷浏览，找到下一首想读的诗</span></div>
+      <div class="library-toolbar"><label class="search-field"><span>⌕</span><input v-model="searchQuery" placeholder="搜索诗词、诗人..." @keyup.enter="handleSearch" /></label><button class="primary-action compact-action" @click="handleSearch">搜索</button><select v-model="dynastyFilter" @change="filterPoems"><option value="">全部朝代</option><option value="唐">唐朝</option><option value="宋">宋朝</option><option value="元">元朝</option></select></div>
+      <div v-if="loading" class="loading-state">加载中...</div>
+      <div v-else-if="error" class="error-state"><span>{{ error }}</span><button class="text-action" @click="fetchPoems">重试</button></div>
+      <div v-else-if="filteredPoems.length === 0" class="loading-state">暂无诗词</div>
+      <div v-else class="poem-scroll-shell">
+        <img class="poem-scroll-art" :src="scrollArt" alt="" aria-hidden="true" />
+        <div class="poem-scroll-heading"><span class="scroll-seal">藏</span><div><strong>沿卷读诗</strong><small>拖动卷轴，浏览诗词库</small></div><span class="scroll-hint">横向滑动 ↔</span></div>
+        <div id="poem-scroll-viewport" ref="poemScroller" class="poem-scroll-viewport" role="listbox" tabindex="0" aria-label="精选古诗词，可横向拖动浏览" @scroll.passive="syncPoemScrollbar" @pointerdown="startPoemScrollDrag" @pointermove="movePoemScrollDrag" @pointerup="endPoemScrollDrag" @pointercancel="endPoemScrollDrag">
+          <div class="poem-scroll-track"><button v-for="(poem, index) in filteredPoems" :key="poem.id" class="scroll-poem-card" @click="openPoemFromScroll(poem.id)"><span class="scroll-poem-index">{{ String(index + 1).padStart(2, '0') }}</span><span class="scroll-poem-title">{{ poem.title }}</span><span class="scroll-poem-author">{{ poem.author }} · {{ poem.dynasty }}</span><span class="scroll-poem-content">{{ getShortContent(poem.content) }}</span><span class="scroll-poem-arrow">↗</span></button><button v-if="hasMore" class="scroll-load-more" :disabled="loadingMore" @click.stop="loadMore"><span class="load-more-mark">↓</span><strong>{{ loadingMore ? '加载中' : '继续加载' }}</strong><small>下一卷诗词</small></button><div v-else class="scroll-end-mark"><span>卷尽</span><small>已读完当前诗词库</small></div></div>
+        </div>
+        <div ref="poemScrollbar" class="poem-scrollbar" :class="{ 'is-dragging': poemScrollbarDrag.active, 'is-disabled': poemScrollMetrics.max <= 0 }" role="scrollbar" aria-controls="poem-scroll-viewport" aria-label="精选古诗词横向滚动条" aria-orientation="horizontal" :aria-valuemax="Math.round(poemScrollMetrics.max)" :aria-valuenow="Math.round(poemScrollMetrics.left)" aria-valuemin="0" tabindex="0" @keydown="handlePoemScrollbarKeydown" @pointerdown="startPoemScrollbarDrag" @pointermove="movePoemScrollbarDrag" @pointerup="endPoemScrollbarDrag" @pointercancel="endPoemScrollbarDrag">
+          <span class="poem-scrollbar-thumb" :style="{ width: `${poemScrollMetrics.thumbWidth}px`, transform: `translate3d(${poemScrollMetrics.thumbOffset}px, 0, 0)` }"></span>
+        </div>
+      </div>
+    </section>
 
     <section class="footprint-section" aria-labelledby="footprint-title"><div class="section-heading-row"><div><span class="eyebrow">LEAVE A TRACE</span><h2 id="footprint-title">学习足迹</h2></div><span class="section-note">你的坚持，会慢慢变成可见的地图</span></div><div class="footprint-layout"><div class="footprint-summary"><div class="summary-top"><span>本周学习节奏</span><button class="text-action" @click="navigateTo('/dashboard')">打开学习仪表盘 ↗</button></div><div class="summary-number"><strong>{{ userStatsData[5]?.displayValue || 0 }}</strong><span>/ 7 天<br />有学习记录</span></div><div class="week-dots"><span v-for="(day, index) in weekDays" :key="day" :class="{ active: index < Number(userStatsData[5]?.value || 0) }"><i></i><small>{{ day }}</small></span></div></div><div class="ranking-card"><div class="ranking-card-head"><div><span class="eyebrow">SOCIAL PRACTICE</span><strong>诗友排行榜</strong></div><div class="ranking-tabs"><button v-for="tab in rankingTabs" :key="tab.key" :class="{ active: activeRankingTab === tab.key }" @click="switchRankingTab(tab.key)">{{ tab.label }}</button></div></div><div v-if="rankingLoading" class="loading-state">加载排行榜...</div><div v-else-if="currentRankingList.length === 0" class="loading-state compact-loading">暂无排名数据</div><div v-else class="ranking-rows"><div v-for="(item, index) in currentRankingList.slice(0, 4)" :key="item.id || index" class="ranking-row"><span class="ranking-rank">{{ index + 1 }}</span><span class="ranking-avatar">{{ item.username?.charAt(0) || '游' }}</span><span class="ranking-name">{{ item.username }}</span><span class="ranking-score">{{ item.score }}<small>{{ item.unit }}</small></span></div></div></div></div></section>
 
@@ -79,11 +95,15 @@ export default {
     features: [{ name: '诗词闯关', desc: '逐关挑战，检查真正掌握的内容', short: '闯关 · 复习', symbol: '闯', path: '/challenge', image: challengeFeatureArt }, { name: '飞花令', desc: '在线对战，以诗会友', short: '对战 · 反应', symbol: '令', path: '/feihualing/single', image: feihualingFeatureArt }, { name: 'AI 创作', desc: '让积累变成自己的文字', short: '灵感 · 表达', symbol: '写', path: '/creation', image: creationFeatureArt }, { name: '诗词跑酷', desc: '在游戏中背诵经典', short: '游戏 · 记忆', symbol: '行', path: '/parkour', image: parkourFeatureArt }, { name: '诗词大富翁', desc: '接住千古名句', short: '趣味 · 连击', symbol: '游', path: '/card-catch', image: cardCatchFeatureArt }, { name: '学习分析', desc: '查看你的学习轨迹', short: '数据 · 反馈', symbol: '迹', path: '/dashboard', image: analyticsFeatureArt }],
     learningModules: [{ title: '诗词基础', desc: '建立阅读古诗词的第一套方法', status: '待开始', count: 6, lessons: [{ label: '格律与意象', complete: true }, { label: '常见表达', current: true }, { label: '名句积累' }] }, { title: '理解与赏析', desc: '从字句走向情境与情绪', status: '下一阶段', count: 8, lessons: [{ label: '诗句拆解' }, { label: '情境判断' }, { label: '作品赏析' }] }, { title: '闯关与复习', desc: '在挑战里检查真正掌握的内容', status: '待解锁', count: 10, lessons: [{ label: '诗词闯关' }, { label: '错题复习' }, { label: '飞花令' }] }, { title: '创作与表达', desc: '把积累转化成自己的文字', status: '待解锁', count: 5, lessons: [{ label: '灵感采集' }, { label: 'AI 辅助创作' }, { label: '作品记录' }] }],
     userStatsData: [{ label: '已学诗词', value: 0, displayValue: '0', percentage: 0 }, { label: '学习时长', value: 0, displayValue: '0', percentage: 0 }, { label: '闯关进度', value: 0, displayValue: '0', percentage: 0 }, { label: '飞花令积分', value: 1000, displayValue: '1000', percentage: 50 }, { label: '创作作品', value: 0, displayValue: '0', percentage: 0 }, { label: '本周打卡', value: 0, displayValue: '0', percentage: 0 }],
-    poems: [], filteredPoems: [], loading: true, loadingMore: false, hasMore: true, error: '', searchQuery: '', dynastyFilter: '', page: 1, pageSize: 20, scrollDrag: { active: false, startX: 0, startScrollLeft: 0, moved: false, suppressClick: false }, rankingTabs: [{ key: 'feihua', label: '飞花令' }, { key: 'challenge', label: '闯关' }, { key: 'creation', label: '创作' }], activeRankingTab: 'feihua', rankingData: { feihua: [], challenge: [], creation: [] }, rankingLoading: false, featureImagesReady: {}
+    poems: [], filteredPoems: [], loading: true, loadingMore: false, hasMore: true, error: '', searchQuery: '', dynastyFilter: '', page: 1, pageSize: 20,
+    scrollDrag: { active: false, startX: 0, startScrollLeft: 0, moved: false, suppressClick: false },
+    poemScrollMetrics: { max: 0, left: 0, thumbWidth: 0, thumbOffset: 0 },
+    poemScrollbarDrag: { active: false, startX: 0, startScrollLeft: 0, pointerId: null },
+    rankingTabs: [{ key: 'feihua', label: '飞花令' }, { key: 'challenge', label: '闯关' }, { key: 'creation', label: '创作' }], activeRankingTab: 'feihua', rankingData: { feihua: [], challenge: [], creation: [] }, rankingLoading: false, featureImagesReady: {}
   } },
   computed: { currentMonth() { return `${this.currentDate.getMonth() + 1}月` }, currentDay() { return this.currentDate.getDate() }, currentPathIndex() { return Math.min(3, Math.floor(this.learningProgress / 25)) }, learningProgress() { return Math.round(this.userStatsData[2]?.percentage || 0) }, pathProgress() { return this.learningProgress }, currentRankingList() { return this.rankingData[this.activeRankingTab] || [] }, weekDays() { return ['一', '二', '三', '四', '五', '六', '日'] } },
   mounted() { this.checkLoginStatus(); this.fetchDailyPoem(); this.fetchHitokoto(); this.fetchPoems(); this.fetchRankingData(); this.fetchLearningStats(); this.$nextTick(this.observeFeatureImages) },
-  beforeUnmount() { this.stopReading(); this.featureImageObserver?.disconnect() },
+  beforeUnmount() { this.stopReading(); this.featureImageObserver?.disconnect(); this.poemScrollResizeObserver?.disconnect() },
   methods: {
     checkLoginStatus() { this.isLoggedIn = !!localStorage.getItem('token') }, prefetchNavigation(path) { prefetchRoute(path).catch(() => {}) }, navigateTo(path) { this.prefetchNavigation(path); this.$router.push(path) }, navigateToDetail(id) { if (id) this.$router.push(`/poem/${id}`) }, getModuleProgress(index) { return index === 0 || index === 2 ? this.learningProgress : 0 },
     observeFeatureImages() {
@@ -128,9 +148,99 @@ export default {
     pickFallbackHitokoto() { const quote = POSITIVE_HITOKOTO[Math.floor(Math.random() * POSITIVE_HITOKOTO.length)]; this.hitokotoText = quote.text; this.hitokotoFrom = quote.from },
     async fetchLearningStats() { try { const result = await api.home.getLearningStats(); if (result.success && result.data) { if (result.data.loggedIn) { this.isLoggedIn = true; this.updateUserStats(result.data) } else this.isLoggedIn = false } } catch { this.isLoggedIn = !!localStorage.getItem('token') } },
     updateUserStats(data) { const values = [data.poemsStudied || 0, Math.round((data.totalStudyTime || 0) / 60), data.challengeLevel || 0, data.feihuaRating || 1000, data.totalCreations || 0, data.weeklyCheckins || 0]; const maxes = [100, 1000, 100, 2000, 50, 7]; values.forEach((value, index) => { this.userStatsData[index].value = value; this.userStatsData[index].displayValue = Number(value).toLocaleString(); this.userStatsData[index].percentage = Math.min(100, (value / maxes[index]) * 100) }) },
-    async fetchPoems() { try { if (this.page === 1) this.loading = true; this.error = ''; let url = `/poems?page=${this.page}&pageSize=${this.pageSize}&random=true`; if (this.dynastyFilter) url += `&dynasty=${encodeURIComponent(this.dynastyFilter)}`; const data = await request(url, { includeAuth: false, timeout: TIMEOUTS.SHORT }); this.hasMore = data.length === this.pageSize; this.poems = this.page === 1 ? data : [...this.poems, ...data]; this.filteredPoems = this.poems } catch (err) { this.error = err.message || '诗词库暂时未能打开' } finally { this.loading = false; this.loadingMore = false } },
+    async fetchPoems() { try { if (this.page === 1) this.loading = true; this.error = ''; let url = `/poems?page=${this.page}&pageSize=${this.pageSize}&random=true`; if (this.dynastyFilter) url += `&dynasty=${encodeURIComponent(this.dynastyFilter)}`; const data = await request(url, { includeAuth: false, timeout: TIMEOUTS.SHORT }); this.hasMore = data.length === this.pageSize; this.poems = this.page === 1 ? data : [...this.poems, ...data]; this.filteredPoems = this.poems } catch (err) { this.error = err.message || '诗词库暂时未能打开' } finally { this.loading = false; this.loadingMore = false; await this.$nextTick(); this.setupPoemScrollbar() } },
     loadMore() { if (this.loadingMore || !this.hasMore) return; this.loadingMore = true; this.page += 1; this.fetchPoems() }, handleSearch() { if (this.searchQuery.trim()) this.$router.push({ path: '/search', query: { q: this.searchQuery } }) }, filterPoems() { this.page = 1; this.poems = []; this.hasMore = true; this.fetchPoems() }, getShortContent(content) { const clean = (content || '').replace(/\s+/g, ' ').trim(); return clean.length > 58 ? `${clean.substring(0, 58)}...` : clean },
-    startPoemScrollDrag(event) { const scroller = this.$refs.poemScroller; if (!scroller) return; this.scrollDrag.active = true; this.scrollDrag.startX = event.clientX; this.scrollDrag.startScrollLeft = scroller.scrollLeft; this.scrollDrag.moved = false }, movePoemScrollDrag(event) { if (!this.scrollDrag.active) return; const scroller = this.$refs.poemScroller; const distance = event.clientX - this.scrollDrag.startX; if (Math.abs(distance) > 4) { if (!this.scrollDrag.moved) scroller.setPointerCapture?.(event.pointerId); this.scrollDrag.moved = true; scroller.scrollLeft = this.scrollDrag.startScrollLeft - distance } }, endPoemScrollDrag(event) { if (!this.scrollDrag.active) return; if (this.scrollDrag.moved) { this.$refs.poemScroller?.releasePointerCapture?.(event.pointerId); this.scrollDrag.suppressClick = true; setTimeout(() => { this.scrollDrag.suppressClick = false }, 120) } this.scrollDrag.active = false }, openPoemFromScroll(id) { if (!this.scrollDrag.suppressClick) this.navigateToDetail(id) },
+    setupPoemScrollbar() {
+      this.poemScrollResizeObserver?.disconnect()
+      const scroller = this.$refs.poemScroller
+      if (!scroller) return
+      if ('ResizeObserver' in window) {
+        this.poemScrollResizeObserver = new ResizeObserver(this.syncPoemScrollbar)
+        this.poemScrollResizeObserver.observe(scroller)
+        if (scroller.firstElementChild) this.poemScrollResizeObserver.observe(scroller.firstElementChild)
+      }
+      this.syncPoemScrollbar()
+    },
+    syncPoemScrollbar() {
+      const scroller = this.$refs.poemScroller
+      const scrollbar = this.$refs.poemScrollbar
+      if (!scroller || !scrollbar) return
+      const max = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
+      const left = Math.min(max, Math.max(0, scroller.scrollLeft))
+      const trackWidth = scrollbar.clientWidth
+      const visibleRatio = scroller.scrollWidth > 0 ? scroller.clientWidth / scroller.scrollWidth : 1
+      const thumbWidth = max > 0 ? Math.min(trackWidth, Math.max(56, trackWidth * visibleRatio)) : trackWidth
+      const thumbTravel = Math.max(0, trackWidth - thumbWidth)
+      const thumbOffset = max > 0 ? (left / max) * thumbTravel : 0
+      this.poemScrollMetrics = { max, left, thumbWidth, thumbOffset }
+    },
+    startPoemScrollDrag(event) {
+      if (event.button !== 0) return
+      const scroller = this.$refs.poemScroller
+      if (!scroller) return
+      this.scrollDrag.active = true
+      this.scrollDrag.startX = event.clientX
+      this.scrollDrag.startScrollLeft = scroller.scrollLeft
+      this.scrollDrag.moved = false
+    },
+    movePoemScrollDrag(event) {
+      if (!this.scrollDrag.active) return
+      const scroller = this.$refs.poemScroller
+      const distance = event.clientX - this.scrollDrag.startX
+      if (Math.abs(distance) > 4) {
+        if (!this.scrollDrag.moved) scroller.setPointerCapture?.(event.pointerId)
+        this.scrollDrag.moved = true
+        scroller.scrollLeft = this.scrollDrag.startScrollLeft - distance
+      }
+    },
+    endPoemScrollDrag(event) {
+      if (!this.scrollDrag.active) return
+      if (this.$refs.poemScroller?.hasPointerCapture?.(event.pointerId)) this.$refs.poemScroller.releasePointerCapture(event.pointerId)
+      if (this.scrollDrag.moved) {
+        this.scrollDrag.suppressClick = true
+        setTimeout(() => { this.scrollDrag.suppressClick = false }, 120)
+      }
+      this.scrollDrag.active = false
+    },
+    startPoemScrollbarDrag(event) {
+      if (event.button !== 0 || this.poemScrollMetrics.max <= 0) return
+      const scroller = this.$refs.poemScroller
+      const scrollbar = this.$refs.poemScrollbar
+      if (!scroller || !scrollbar) return
+      if (!event.target.classList.contains('poem-scrollbar-thumb')) {
+        const rect = scrollbar.getBoundingClientRect()
+        const travel = Math.max(1, rect.width - this.poemScrollMetrics.thumbWidth)
+        const nextRatio = Math.min(1, Math.max(0, (event.clientX - rect.left - this.poemScrollMetrics.thumbWidth / 2) / travel))
+        scroller.scrollLeft = nextRatio * this.poemScrollMetrics.max
+      }
+      scrollbar.setPointerCapture?.(event.pointerId)
+      this.poemScrollbarDrag = { active: true, startX: event.clientX, startScrollLeft: scroller.scrollLeft, pointerId: event.pointerId }
+    },
+    movePoemScrollbarDrag(event) {
+      if (!this.poemScrollbarDrag.active || event.pointerId !== this.poemScrollbarDrag.pointerId) return
+      const scroller = this.$refs.poemScroller
+      const scrollbar = this.$refs.poemScrollbar
+      const travel = Math.max(1, scrollbar.clientWidth - this.poemScrollMetrics.thumbWidth)
+      scroller.scrollLeft = this.poemScrollbarDrag.startScrollLeft + ((event.clientX - this.poemScrollbarDrag.startX) / travel) * this.poemScrollMetrics.max
+    },
+    endPoemScrollbarDrag(event) {
+      if (!this.poemScrollbarDrag.active || event.pointerId !== this.poemScrollbarDrag.pointerId) return
+      const scrollbar = this.$refs.poemScrollbar
+      if (scrollbar?.hasPointerCapture?.(event.pointerId)) scrollbar.releasePointerCapture(event.pointerId)
+      this.poemScrollbarDrag.active = false
+      this.poemScrollbarDrag.pointerId = null
+    },
+    handlePoemScrollbarKeydown(event) {
+      const scroller = this.$refs.poemScroller
+      if (!scroller) return
+      const step = Math.max(80, scroller.clientWidth * 0.18)
+      const keyOffsets = { ArrowLeft: -step, ArrowRight: step, PageUp: -scroller.clientWidth * 0.8, PageDown: scroller.clientWidth * 0.8 }
+      if (event.key === 'Home' || event.key === 'End') scroller.scrollTo({ left: event.key === 'Home' ? 0 : this.poemScrollMetrics.max, behavior: 'smooth' })
+      else if (event.key in keyOffsets) scroller.scrollBy({ left: keyOffsets[event.key], behavior: 'smooth' })
+      else return
+      event.preventDefault()
+    },
+    openPoemFromScroll(id) { if (!this.scrollDrag.suppressClick) this.navigateToDetail(id) },
     async fetchRankingData() { this.rankingLoading = true; try { const tabs = ['feihua', 'challenge', 'creation']; const results = await Promise.all(tabs.map(tab => api.home.getLeaderboard(tab))); tabs.forEach((tab, index) => { if (results[index]?.success) this.rankingData[tab] = results[index].data || [] }) } catch { /* empty state remains useful */ } finally { this.rankingLoading = false } }, switchRankingTab(key) { this.activeRankingTab = key }, toggleRead(poem) { if (this.isReading) return this.stopReading(); this.startReading(poem) }, stopReading() { if (this.audio) { this.audio.pause(); this.audio.currentTime = 0; this.audio = null } if (this.speechSynthesisSupported) speechSynthesis.cancel(); this.isReading = false; this.readingPoemId = null }, async startReading(poem) { if (!poem?.content) return; this.stopReading(); this.isReading = true; this.readingPoemId = poem.id; try { const audioBlob = await api.ai.tts(poem.content.replace(/\n/g, '。')); const audioUrl = URL.createObjectURL(audioBlob); this.audio = new Audio(audioUrl); this.audio.onended = () => { this.isReading = false; this.readingPoemId = null; URL.revokeObjectURL(audioUrl) }; await this.audio.play() } catch { this.stopReading() } }
   }
 }
@@ -150,4 +260,5 @@ export default {
 @media (prefers-reduced-motion:reduce){.home-intro,.learning-hero{animation:none}.ring-large,.ring-small{animation:none}*{scroll-behavior:auto!important}}
 @media (max-width:980px){.cockpit-home{padding-inline:20px}.learning-main{grid-template-columns:1fr 220px;padding:40px}.learning-hero{grid-template-columns:1fr 220px}.explore-layout{grid-template-columns:repeat(2,minmax(0,1fr))}.path-rail{grid-template-columns:repeat(2,1fr);gap:34px 18px}.path-line{display:none}.path-step-copy{min-height:0}.daily-poem-card{grid-template-columns:70px minmax(0,1fr)}.daily-poem-actions{grid-column:2;flex-direction:row;align-items:center;gap:18px}.ai-home-section{margin-inline:-20px}}
 @media (max-width:700px){.cockpit-home{padding:20px 14px 68px}.home-intro{display:block;padding:22px 4px 28px}.intro-copy h1{font-size:42px}.intro-note{margin-top:28px;padding:15px 0 0;border-top:1px solid var(--line);border-left:0}.learning-hero{display:block}.learning-main{display:block;padding:30px 24px 26px}.learning-copy h2{font-size:42px}.hero-orbit{min-height:200px;margin-top:20px}.orbit-core{inset:66px calc(50% - 52px)}.ring-large{inset:14px 15%}.ring-small{inset:40px 29%}.label-poem{left:23%}.label-meaning{right:20%}.label-rhythm{right:17%;bottom:4px}.learning-status{display:grid;grid-template-columns:auto 1fr;gap:15px 20px;padding:22px 24px;border-top:1px solid rgba(76,132,119,.18);border-left:0}.status-heading{grid-column:1/-1}.status-level{width:90px;height:90px;margin:0}.status-level strong{font-size:25px}.status-list{margin:0}.status-list div{padding:7px 0}.section-heading-row{display:block}.section-note{display:block;margin-top:9px}.explore-section,.path-section,.daily-poem-section,.library-section,.footprint-section{margin-top:68px}.explore-layout{grid-template-columns:1fr;gap:12px}.explore-card{min-height:196px;padding:20px}.feature-card-copy strong{font-size:21px}.feature-card-watermark{font-size:64px}.path-rail{grid-template-columns:1fr;gap:24px}.path-step{display:grid;grid-template-columns:42px 1fr;gap:12px}.path-node{margin-bottom:0}.path-step-meta{grid-column:2}.daily-poem-card{display:block;padding:28px 24px}.date-stamp{flex-direction:row;align-items:baseline;gap:8px}.date-stamp strong{font-size:52px}.daily-poem-copy blockquote{font-size:18px}.daily-poem-actions{flex-wrap:wrap;margin-top:26px}.library-toolbar{flex-wrap:wrap}.search-field{flex-basis:100%;max-width:none}.library-toolbar select{flex:1}.poem-scroll-shell{padding:24px 16px 20px}.scroll-hint{display:none}.footprint-summary,.ranking-card{padding:22px 18px}.summary-number{margin-top:32px}.summary-number strong{font-size:62px}.ranking-card-head{display:block}.ranking-tabs{margin-top:16px}.ai-home-section{margin-inline:-14px}}
+.poem-scroll-viewport{scrollbar-width:none;touch-action:pan-y;user-select:none}.poem-scroll-viewport::-webkit-scrollbar{display:none}.poem-scrollbar{position:relative;z-index:1;height:10px;margin-top:8px;border-radius:999px;background:rgba(33,53,52,.12);outline:none;touch-action:none}.poem-scrollbar:focus-visible{box-shadow:0 0 0 3px rgba(47,138,123,.2)}.poem-scrollbar.is-disabled{opacity:.35}.poem-scrollbar-thumb{display:block;height:100%;min-width:56px;border-radius:inherit;background:rgba(33,53,52,.72);box-shadow:0 1px 4px rgba(22,75,72,.16);transition:background .16s ease}.poem-scrollbar:hover .poem-scrollbar-thumb,.poem-scrollbar:focus-visible .poem-scrollbar-thumb,.poem-scrollbar.is-dragging .poem-scrollbar-thumb{background:var(--jade-deep)}
 </style>

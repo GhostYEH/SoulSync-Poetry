@@ -13,6 +13,29 @@ const Register = () => import('../views/Register.vue')
 const PoetryParkour = () => import('../views/PoetryParkour.vue')
 const PoetryCardCatch = () => import('../views/PoetryCardCatch.vue')
 
+// Vue Router 只会为浏览器前进/后退提供 savedPosition。应用内按钮通常使用
+// push，因此额外记录每个路由离开时的位置，保证从二级页点回首页也能回到原处。
+const routeScrollPositions = new Map()
+const ROUTE_TRANSITION_MS = 220
+
+function readWindowScrollPosition() {
+  return {
+    left: Math.max(0, window.scrollX || window.pageXOffset || 0),
+    top: Math.max(0, window.scrollY || window.pageYOffset || 0)
+  }
+}
+
+function restoreAfterLayout(position) {
+  return new Promise((resolve) => {
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    window.setTimeout(() => {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => resolve({ ...position, behavior: 'auto' }))
+      })
+    }, reduceMotion ? 0 : ROUTE_TRANSITION_MS)
+  })
+}
+
 // 路由配置
 const routes = [
   {
@@ -262,11 +285,14 @@ const router = createRouter({
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
-      return { ...savedPosition, behavior: 'auto' }
-    } else {
-      // 导航时立即定位，避免 html 的平滑滚动把“回到顶部”展示成一段动画。
-      return { left: 0, top: 0, behavior: 'auto' }
+      return restoreAfterLayout(savedPosition)
     }
+
+    const rememberedPosition = routeScrollPositions.get(to.fullPath)
+    if (rememberedPosition) return restoreAfterLayout(rememberedPosition)
+
+    // 首次进入页面仍从顶部开始，不把位置记忆误用到新的路由参数或查询条件。
+    return restoreAfterLayout({ left: 0, top: 0 })
   }
 })
 
@@ -304,15 +330,16 @@ function warmUpCommonRoutes() {
   ]
   let index = 0
   const requestIdle = window.requestIdleCallback
-    ? (callback) => window.requestIdleCallback(callback, { timeout: 1200 })
-    : (callback) => window.setTimeout(callback, 180)
+    ? (callback) => window.requestIdleCallback(callback, { timeout: 4000 })
+    : (callback) => window.setTimeout(callback, 500)
 
   const warmNext = () => {
     if (index >= commonRoutes.length) return
     requestIdle(() => {
       // 预取是尽力而为的后台工作；真正导航仍由 Vue Router 管理错误。
       prefetchRoute(commonRoutes[index++]).catch(() => {})
-      window.setTimeout(warmNext, 120)
+      // 将模块解析摊到多个空闲窗口，避免首屏刚可交互时集中占用主线程。
+      window.setTimeout(warmNext, 400)
     })
   }
 
@@ -320,10 +347,11 @@ function warmUpCommonRoutes() {
 }
 
 router.isReady().then(() => {
+  const scheduleWarmUp = () => window.setTimeout(warmUpCommonRoutes, 800)
   if (document.readyState === 'complete') {
-    warmUpCommonRoutes()
+    scheduleWarmUp()
   } else {
-    window.addEventListener('load', warmUpCommonRoutes, { once: true })
+    window.addEventListener('load', scheduleWarmUp, { once: true })
   }
 })
 
@@ -341,6 +369,8 @@ const navOrder = [
 
 // 导航守卫：自动判断页面切换方向并通知 App.vue
 router.beforeEach((to, from, next) => {
+  if (from.name) routeScrollPositions.set(from.fullPath, readWindowScrollPosition())
+
   const toIdx = navOrder.indexOf(to.path)
   const fromIdx = navOrder.indexOf(from.path)
   let direction

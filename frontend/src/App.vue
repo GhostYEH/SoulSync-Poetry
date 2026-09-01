@@ -6,7 +6,6 @@
       'challenge-shell': $route.path === '/challenge' || $route.path.startsWith('/challenge/level/'),
       'poem-shell': $route.path.startsWith('/poem/')
     }"
-    @mousemove="createMapleLeaf"
   >
 
     <!-- Shared optical map used by automatically enhanced Vue surfaces. -->
@@ -88,10 +87,11 @@
     <!-- 主内容区 -->
     <main class="container">
       <router-view v-slot="{ Component }">
-        <!-- 路由页面直接替换，避免旧首页在滚动回顶时短暂留在视口中。 -->
-        <keep-alive :include="keepAliveIncludes">
-          <component :is="Component" />
-        </keep-alive>
+        <transition :name="transitionName" mode="out-in">
+          <keep-alive :include="keepAliveIncludes">
+            <component :is="Component" />
+          </keep-alive>
+        </transition>
       </router-view>
     </main>
 
@@ -112,6 +112,12 @@ import DemoMode from './views/DemoMode.vue'
 import { prefetchRoute } from './router'
 import { PhBooks as Books, PhCirclesThreePlus as CirclesThreePlus, PhFlagBanner as FlagBanner, PhHouse as House, PhLeaf as Leaf, PhMagnifyingGlass as MagnifyingGlass, PhNotebook as Notebook, PhPenNib as PenNib, PhUserCircle as UserCircle } from '@phosphor-icons/vue'
 
+const POEM_WORDS = Object.freeze([
+  '春', '夏', '秋', '冬', '风', '花', '雪', '月', '山', '水', '云', '霞', '诗', '词', '歌', '赋',
+  '人', '生', '梦', '想', '情', '意', '心', '境', '远', '近', '高', '低', '东', '西', '南', '北',
+  '天', '地', '日', '月', '星', '辰'
+])
+
 export default {
   name: 'App',
   components: {
@@ -130,14 +136,13 @@ export default {
   },
   data() {
     return {
-      dynamicElements: [],
-      lastMapleLeafTime: 0,
-      poemWords: ['春', '夏', '秋', '冬', '风', '花', '雪', '月', '山', '水', '云', '霞', '诗', '词', '歌', '赋', '人', '生', '梦', '想', '情', '意', '心', '境', '远', '近', '高', '低', '东', '西', '南', '北', '天', '地', '日', '月', '星', '辰'],
       collectionCount: 0,
       isElectron: false,
       transitionName: 'page-forward',
       lastPath: '/',
-      keepAliveIncludes: ['PoemDetail'],
+      // 首页保活后，返回时异步内容高度和横向滚动状态都不会重新初始化；
+      // 页面纵向位置由 router 的 scrollBehavior 精确恢复。
+      keepAliveIncludes: ['Home', 'PoemDetail'],
       appReady: false // 全局就绪状态，防止页面一直转圈
     }
   },
@@ -146,6 +151,7 @@ export default {
     // 这些集合不参与视图渲染，不放进响应式 data，避免装饰元素增删时触发
     // 无意义的组件更新。
     this.dynamicElementNodes = new Set()
+    this.prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     this.hoverPointerStates = new Map()
     // 检测是否在Electron环境中
     this.isElectron = typeof window !== 'undefined' && window.electronAPI;
@@ -160,8 +166,9 @@ export default {
     this.pageTransitionHandler = this.handlePageTransition.bind(this)
     window.addEventListener('page-transition', this.pageTransitionHandler)
 
-    this.createDynamicElements()
-    this.startCreatingDynamicElements()
+    this.visibilityHandler = this.handleVisibilityChange.bind(this)
+    document.addEventListener('visibilitychange', this.visibilityHandler)
+    this.handleVisibilityChange()
 
     // 初始化收藏数量
     this.updateCollectionCount()
@@ -190,6 +197,7 @@ export default {
     }, 2000);
   },
   beforeUnmount() {
+    document.removeEventListener('visibilitychange', this.visibilityHandler)
     this.stopCreatingDynamicElements()
 
     // 移除事件监听器
@@ -298,22 +306,36 @@ export default {
       }
     },
     startCreatingDynamicElements() {
+      if (document.hidden || this.prefersReducedMotion) return
       // 定时创建新的动态元素
-      this.petalInterval = setInterval(() => {
-        this.createPetal()
-      }, 5000)
+      if (!this.petalInterval) {
+        this.petalInterval = setInterval(() => {
+          this.createPetal()
+        }, 5000)
+      }
       
-      this.textInterval = setInterval(() => {
-        this.createFloatingText()
-      }, 8000)
+      if (!this.textInterval) {
+        this.textInterval = setInterval(() => {
+          this.createFloatingText()
+        }, 8000)
+      }
+    },
+    pauseCreatingDynamicElements() {
+      if (this.petalInterval) clearInterval(this.petalInterval)
+      if (this.textInterval) clearInterval(this.textInterval)
+      this.petalInterval = null
+      this.textInterval = null
+    },
+    handleVisibilityChange() {
+      if (document.hidden || this.prefersReducedMotion) {
+        this.pauseCreatingDynamicElements()
+        return
+      }
+      if (!this.dynamicElementNodes?.size) this.createDynamicElements()
+      this.startCreatingDynamicElements()
     },
     stopCreatingDynamicElements() {
-      if (this.petalInterval) {
-        clearInterval(this.petalInterval)
-      }
-      if (this.textInterval) {
-        clearInterval(this.textInterval)
-      }
+      this.pauseCreatingDynamicElements()
       // 清除所有动态元素
       this.dynamicElementNodes?.forEach(element => {
         if (element && element.parentNode) {
@@ -358,7 +380,7 @@ export default {
       text.className = 'floating-text'
       
       // 随机文字
-      const randomWord = this.poemWords[Math.floor(Math.random() * this.poemWords.length)]
+      const randomWord = POEM_WORDS[Math.floor(Math.random() * POEM_WORDS.length)]
       text.textContent = randomWord
       
       // 随机位置和动画时间
@@ -375,35 +397,6 @@ export default {
       // 添加到容器
       if (this.$refs.dynamicElements) {
         this.addDynamicElement(text, (duration + delay) * 1000)
-      }
-    },
-    createMapleLeaf(event) {
-      // 限制枫叶生成频率，每300毫秒最多生成一个
-      if (this.lastMapleLeafTime && Date.now() - this.lastMapleLeafTime < 300) {
-        return
-      }
-      this.lastMapleLeafTime = Date.now()
-      
-      const mapleLeaf = document.createElement('div')
-      mapleLeaf.className = 'maple-leaf'
-      
-      // 设置枫叶位置为鼠标当前位置
-      mapleLeaf.style.left = `${event.clientX}px`
-      mapleLeaf.style.top = `${event.clientY}px`
-      
-      // 随机大小和旋转角度
-      const size = 15 + Math.random() * 10
-      const rotate = Math.random() * 360
-      const duration = 2
-      
-      mapleLeaf.style.width = `${size}px`
-      mapleLeaf.style.height = `${size}px`
-      mapleLeaf.style.transform = `rotate(${rotate}deg)`
-      mapleLeaf.style.animationDuration = `${duration}s`
-      
-      // 添加到容器
-      if (this.$refs.dynamicElements) {
-        this.addDynamicElement(mapleLeaf, duration * 1000)
       }
     },
     createRipple(event) {
@@ -452,41 +445,59 @@ export default {
 /* 前进：旧页向下滑出，新页从上方滑入 */
 .page-forward-enter-active,
 .page-forward-leave-active {
-  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-              transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: none !important;
+  will-change: opacity, transform;
+  transition: opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .page-forward-enter-from {
   opacity: 0;
-  transform: translateY(-16px);
+  transform: translate3d(0, 10px, 0) scale(0.995);
 }
 .page-forward-leave-to {
   opacity: 0;
-  transform: translateY(16px);
+  transform: translate3d(0, -6px, 0) scale(0.998);
 }
 .page-forward-enter-to,
 .page-forward-leave-from {
   opacity: 1;
-  transform: translateY(0);
+  transform: translate3d(0, 0, 0) scale(1);
 }
 
 /* 后退：旧页向上滑出，新页从下方滑入 */
 .page-back-enter-active,
 .page-back-leave-active {
-  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-              transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: none !important;
+  will-change: opacity, transform;
+  transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .page-back-enter-from {
   opacity: 0;
-  transform: translateY(16px);
+  transform: translate3d(0, -8px, 0) scale(0.997);
 }
 .page-back-leave-to {
   opacity: 0;
-  transform: translateY(-16px);
+  transform: translate3d(0, 6px, 0) scale(0.998);
 }
 .page-back-enter-to,
 .page-back-leave-from {
   opacity: 1;
-  transform: translateY(0);
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
+.page-forward-enter-active,
+.page-back-enter-active {
+  transform-origin: 50% 12%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-forward-enter-active,
+  .page-forward-leave-active,
+  .page-back-enter-active,
+  .page-back-leave-active {
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* 旧 fade 保持兼容 */
@@ -509,6 +520,7 @@ export default {
   pointer-events: none;
   z-index: 999;
   overflow: hidden;
+  contain: layout style paint;
 }
 
 /* 涟漪效果样式 */
@@ -592,30 +604,6 @@ export default {
   white-space: nowrap;
 }
 
-/* 枫叶样式 */
-.maple-leaf {
-  position: fixed;
-  background: linear-gradient(135deg, #ff6b35, #f7931e);
-  border-radius: 50% 0 50% 0;
-  pointer-events: none;
-  z-index: 9999;
-  animation: maple-leaf-float ease-in-out forwards;
-  opacity: 0.8;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-.maple-leaf::before {
-  content: '';
-  position: absolute;
-  top: -5px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 10px;
-  height: 10px;
-  background: linear-gradient(135deg, #ff6b35, #f7931e);
-  border-radius: 50%;
-}
-
 /* 花瓣飘动动画 */
 @keyframes petal-float {
   0% {
@@ -648,30 +636,6 @@ export default {
   }
   100% {
     transform: translateY(100vh) scale(1.2);
-    opacity: 0;
-  }
-}
-
-/* 枫叶飘落动画 */
-@keyframes maple-leaf-float {
-  0% {
-    transform: translate(0, 0) rotate(0deg) scale(1);
-    opacity: 1;
-  }
-  25% {
-    transform: translate(10px, 20px) rotate(90deg) scale(1.1);
-    opacity: 0.9;
-  }
-  50% {
-    transform: translate(20px, 40px) rotate(180deg) scale(1);
-    opacity: 0.8;
-  }
-  75% {
-    transform: translate(10px, 60px) rotate(270deg) scale(0.9);
-    opacity: 0.7;
-  }
-  100% {
-    transform: translate(0, 80px) rotate(360deg) scale(0.8);
     opacity: 0;
   }
 }

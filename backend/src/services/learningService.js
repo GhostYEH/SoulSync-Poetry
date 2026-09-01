@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const axios = require('axios');
 const db = require('../utils/db');
 
@@ -126,6 +126,7 @@ async function recordLearningAction(userId, poemId, action, score) {
     let newTotalScore = row.total_score;
     let newBestScore = row.best_score;
     let newStudyTime = row.study_time;
+    let newLastViewTime = row.last_view_time;
 
     if (recordObj.recite_attempts > 0 && score !== null) {
       newTotalScore = row.total_score + score;
@@ -140,13 +141,23 @@ async function recordLearningAction(userId, poemId, action, score) {
 
     if (recordObj.view_count > 0) {
       newViewCount = row.view_count + 1;
-      recordObj.last_view_time = new Date().toISOString();
+      newLastViewTime = new Date().toISOString();
     }
 
     await db.run(
       'UPDATE learning_records SET view_count = $1, ai_explain_count = $2, recite_attempts = $3, best_score = $4, total_score = $5, study_time = $6, last_view_time = $7 WHERE user_id = $8 AND poem_id = $9',
-      [newViewCount, newAiCount, newReciteAttempts, newBestScore, newTotalScore, newStudyTime, recordObj.last_view_time, userId, poemId]
+      [newViewCount, newAiCount, newReciteAttempts, newBestScore, newTotalScore, newStudyTime, newLastViewTime, userId, poemId]
     );
+    recordObj = {
+      ...row,
+      view_count: newViewCount,
+      ai_explain_count: newAiCount,
+      recite_attempts: newReciteAttempts,
+      best_score: newBestScore,
+      total_score: newTotalScore,
+      study_time: newStudyTime,
+      last_view_time: newLastViewTime,
+    };
   } else {
     const result = await db.run(
       'INSERT INTO learning_records (user_id, poem_id, view_count, ai_explain_count, recite_attempts, best_score, total_score, study_time, last_view_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',

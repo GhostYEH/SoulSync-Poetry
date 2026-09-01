@@ -38,6 +38,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 
 const isMaximized = ref(false);
+let resizeFrame = null;
 
 // 检查是否在Electron环境中
 const isElectron = () => {
@@ -65,23 +66,34 @@ const close = () => {
   }
 };
 
+const syncMaximizedState = async () => {
+  if (!isElectron()) return;
+  isMaximized.value = await window.electronAPI.isMaximized();
+};
+
+const handleWindowResize = () => {
+  if (resizeFrame) return;
+  resizeFrame = window.requestAnimationFrame(async () => {
+    resizeFrame = null;
+    await syncMaximizedState();
+  });
+};
+
 // 监听窗口状态变化
 onMounted(async () => {
   if (isElectron()) {
-    isMaximized.value = await window.electronAPI.isMaximized();
+    await syncMaximizedState();
 
-    // 监听窗口大小变化
-    window.addEventListener('resize', async () => {
-      isMaximized.value = await window.electronAPI.isMaximized();
-    });
+    // 同一帧只查询一次窗口状态，避免拖动窗口时堆积 IPC 调用。
+    window.addEventListener('resize', handleWindowResize, { passive: true });
   }
 });
 
 onUnmounted(() => {
   if (isElectron()) {
-    window.removeEventListener('resize', async () => {
-      isMaximized.value = await window.electronAPI.isMaximized();
-    });
+    window.removeEventListener('resize', handleWindowResize);
+    if (resizeFrame) window.cancelAnimationFrame(resizeFrame);
+    resizeFrame = null;
   }
 });
 </script>
