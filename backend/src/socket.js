@@ -12,6 +12,24 @@ const duelTimers = new Map();
 
 // 断线重连等待计时器（闯关对战）
 const reconnectTimers = new Map();
+
+// 两套联机模式共用一份在线名单，避免用户在另一种对战中仍被显示为可邀请。
+function getUnifiedOnlineUsers() {
+  const users = new Map();
+  for (const user of feihualingService.getOnlineUsers()) {
+    users.set(String(user.userId), { ...user });
+  }
+  for (const user of challengeBattleService.getOnlineUsersList()) {
+    const key = String(user.userId);
+    const existing = users.get(key) || { userId: key, username: user.username };
+    users.set(key, {
+      ...existing,
+      username: existing.username || user.username,
+      inGame: Boolean(existing.inGame || user.inGame)
+    });
+  }
+  return Array.from(users.values());
+}
 const RECONNECT_WAIT_TIME = 30000; // 30秒重连等待时间
 const feihuaReconnectTimers = new Map();
 
@@ -72,6 +90,7 @@ function setupSocket(io) {
                     message: '对手已重连，游戏继续',
                     currentQuestionIndex: room.currentQuestionIndex,
                     currentTurn: room.currentQuestionIndex % 2,
+                    remainingTime: getDualInviteRemainingTime(room),
                     players: room.players.map(pl => ({
                       id: pl.id,
                       username: pl.username,
@@ -93,7 +112,19 @@ function setupSocket(io) {
           username: decoded.username
         });
 
-        io.emit('online-users', onlineUsers);
+        const pendingFeihuaInvitation = feihualingService.getPendingInvitation(currentUserId);
+        if (pendingFeihuaInvitation) {
+          socket.emit('receive-invitation', pendingFeihuaInvitation);
+        }
+        challengeBattleService.getPendingInvitations(currentUserId).forEach(invitation => {
+          socket.emit('challenge-invitation', {
+            inviteId: invitation.inviteId,
+            fromId: invitation.inviterId,
+            from: invitation.inviterName
+          });
+        });
+
+        io.emit('online-users', getUnifiedOnlineUsers());
         console.log(`[Socket] 用户 ${decoded.username} 已认证`);
       } catch (error) {
         console.error('[Socket] 登录失败:', error);
@@ -116,7 +147,14 @@ function setupSocket(io) {
     });
 
     socket.on('send-invitation', (data) => {
+      if (!currentUserId) { socket.emit('error', { error: '未登录' }); return; }
+      if (!data?.targetUserId) { socket.emit('error', { error: '未选择目标用户' }); return; }
       const targetUserId = data.targetUserId.toString();
+      if (targetUserId === currentUserId) { socket.emit('error', { error: '不能邀请自己' }); return; }
+      if (challengeBattleService.getUser(targetUserId)?.inGame || challengeBattleService.getUser(currentUserId)?.inGame) {
+        socket.emit('error', { error: '你或对方正在闯关对战中' });
+        return;
+      }
       const keyword = data.keyword || '花';
       const difficulty = data.difficulty || 'medium';
       const result = feihualingService.sendInvitation(currentUserId, targetUserId, keyword, difficulty);
@@ -163,12 +201,18 @@ function setupSocket(io) {
       if (fromSocketId) io.to(fromSocketId).emit('game-start', gameStartPayload);
       if (toSocketId) io.to(toSocketId).emit('game-start', gameStartPayload);
       startTurnTimer(room.id, io);
-      io.emit('online-users', feihualingService.getOnlineUsers());
+      io.emit('online-users', getUnifiedOnlineUsers());
     });
 
     socket.on('feihualing:get-online-users', () => {
       if (!currentUserId) return;
-      socket.emit('online-users', feihualingService.getOnlineUsers());
+      socket.emit('online-users', getUnifiedOnlineUsers());
+    });
+
+    socket.on('feihualing:get-pending-invitation', () => {
+      if (!currentUserId) return;
+      const invitation = feihualingService.getPendingInvitation(currentUserId);
+      if (invitation) socket.emit('receive-invitation', invitation);
     });
 
     socket.on('reject-invitation', (data) => {
@@ -181,7 +225,7 @@ function setupSocket(io) {
       if (result.fromSocketId) {
         io.to(result.fromSocketId).emit('invitation-rejected', { inviteId, fromUserId: currentUserId });
       }
-      io.emit('online-users', feihualingService.getOnlineUsers());
+      io.emit('online-users', getUnifiedOnlineUsers());
       socket.emit('invitation-rejected', { success: true });
     });
 
@@ -191,7 +235,7 @@ function setupSocket(io) {
       if (result.toSocketId) {
         io.to(result.toSocketId).emit('invitation-cancelled');
       }
-      io.emit('online-users', feihualingService.getOnlineUsers());
+      io.emit('online-users', getUnifiedOnlineUsers());
     });
 
     socket.on('submit-poem', async (data) => {
@@ -267,7 +311,7 @@ function setupSocket(io) {
                       rankingChange: finishResult.rankingChange
                     });
                   });
-                  io.emit('online-users', feihualingService.getOnlineUsers());
+                  io.emit('online-users', getUnifiedOnlineUsers());
                 }
               } else {
                 room.players.forEach(player => {
@@ -301,9 +345,14 @@ function setupSocket(io) {
               isRanking: room.isRanking, rankingChange: verifyResult.rankingChange
             });
           });
+          io.emit('online-users', getUnifiedOnlineUsers());
         }
       } catch (err) {
         feihualingService.releaseAnswer(data?.roomId, currentUserId);
+        const failedRoom = feihualingService.getRoom(data?.roomId);
+        if (failedRoom?.status === 'playing') {
+          startTurnTimer(failedRoom.id, io);
+        }
         console.error('[Feihua] 提交诗句失败:', err);
         socket.emit('error', { error: '提交诗句失败，请重试' });
       }
@@ -322,7 +371,7 @@ function setupSocket(io) {
       const result = feihualingService.endGame(roomId, opponent.id, quitter.id, reason);
       if (!result.success) { socket.emit('error', { error: result.error }); return; }
       clearTurnTimer(roomId);
-      result.players.forEach(player => {
+      room.players.forEach(player => {
         if (player.socketId) io.to(player.socketId).emit('game-result', {
           winnerId: result.winner.userId, winnerName: result.winner.username,
           loserId: result.loser.userId, loserName: result.loser.username,
@@ -330,6 +379,7 @@ function setupSocket(io) {
           usedPoems: result.usedPoems, players: result.players, currentRound: result.totalRounds
         });
       });
+      io.emit('online-users', getUnifiedOnlineUsers());
     });
 
     // ==============================================================
@@ -371,6 +421,7 @@ function setupSocket(io) {
         });
         setTimeout(async () => {
           const nextResult = await challengeBattleService.nextSingleQuestion(roomId, currentUserId);
+          if (!nextResult) return;
           if (nextResult.type === 'finished') {
             challengeBattleService.saveSingleRecord(challengeBattleService.getRoom(roomId));
             socket.emit('challenge-finished', {
@@ -403,7 +454,9 @@ function setupSocket(io) {
       try {
         const { roomId, mode } = data;
         if (mode === 'dual' || mode === 'dual-invite') {
-          const result = challengeBattleService.quitDualInviteGame(roomId, currentUserId);
+          const result = mode === 'dual'
+            ? challengeBattleService.quitDualGame(roomId, currentUserId)
+            : challengeBattleService.quitDualInviteGame(roomId, currentUserId);
           if (result && result.type === 'finished') {
             const room = challengeBattleService.getRoom(roomId);
             if (room) {
@@ -411,7 +464,7 @@ function setupSocket(io) {
                 if (p.socketId) io.to(p.socketId).emit('challenge-dual-finished', result);
               });
             }
-            io.emit('online-users', challengeBattleService.getOnlineUsersList());
+            io.emit('online-users', getUnifiedOnlineUsers());
           }
           return;
         }
@@ -431,6 +484,11 @@ function setupSocket(io) {
     // ==============================================================
     socket.on('challenge-match-start', async (data) => {
       if (!currentUserId) { socket.emit('error', { error: '未登录' }); return; }
+      const currentChallengeUser = challengeBattleService.getUser(currentUserId);
+      if (currentChallengeUser?.inGame || feihualingService.getUser(currentUserId)?.inGame) {
+        socket.emit('error', { error: '你正在对战中' });
+        return;
+      }
       const room = await challengeBattleService.addToMatchmaking(currentUserId, data.username || '玩家', socket.id);
       if (room) {
         const roomInfo = challengeBattleService.getRoomInfo(room);
@@ -474,7 +532,7 @@ function setupSocket(io) {
             const advanceResult = await challengeBattleService.advanceDualRound(roomId);
             if (advanceResult.type === 'finished') {
               room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('challenge-dual-finished', advanceResult); });
-              io.emit('online-users', challengeBattleService.getOnlineUsersList());
+              io.emit('online-users', getUnifiedOnlineUsers());
             } else if (advanceResult.success) {
               room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('challenge-dual-next', { question: advanceResult.question, currentRound: advanceResult.currentRound, players: advanceResult.players }); });
             }
@@ -503,7 +561,7 @@ function setupSocket(io) {
               const advanceResult = await challengeBattleService.advanceDualRound(roomId);
               if (advanceResult.type === 'finished') {
                 room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('challenge-dual-finished', advanceResult); });
-                io.emit('online-users', challengeBattleService.getOnlineUsersList());
+                io.emit('online-users', getUnifiedOnlineUsers());
               } else if (advanceResult.success) {
                 room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('challenge-dual-next', { question: advanceResult.question, currentRound: advanceResult.currentRound, players: advanceResult.players }); });
               }
@@ -521,11 +579,20 @@ function setupSocket(io) {
     socket.on('challenge-send-invitation', (data) => {
       if (!currentUserId) { socket.emit('error', { error: '未登录' }); return; }
       const { targetUserId, targetUsername } = data;
+      if (!targetUserId || String(targetUserId) === String(currentUserId)) {
+        socket.emit('error', { error: '不能邀请自己' });
+        return;
+      }
       const inviter = challengeBattleService.getUser(currentUserId);
       if (!inviter) { socket.emit('error', { error: '用户信息不存在' }); return; }
       const targetSocket = challengeBattleService.getUserSocket(targetUserId);
       if (!targetSocket) { socket.emit('error', { error: '目标用户不在线' }); return; }
       if (targetSocket.inGame) { socket.emit('error', { error: '目标用户正在对战中' }); return; }
+      if (inviter.inGame) { socket.emit('error', { error: '你正在对战中' }); return; }
+      if (feihualingService.getUser(targetUserId)?.inGame || feihualingService.getUser(currentUserId)?.inGame) {
+        socket.emit('error', { error: '你或对方正在飞花令对战中' });
+        return;
+      }
 
       const inviteId = challengeBattleService.createInvitation(currentUserId, data.username || inviter.username, targetUserId);
       io.to(targetSocket.socketId).emit('challenge-invitation', {
@@ -565,7 +632,7 @@ function setupSocket(io) {
       }
 
       // 更新在线用户列表
-      io.emit('online-users', challengeBattleService.getOnlineUsersList());
+      io.emit('online-users', getUnifiedOnlineUsers());
 
       // 启动计时器
       startDualInviteTimer(room.id, io, challengeBattleService);
@@ -574,7 +641,11 @@ function setupSocket(io) {
     // 拒绝邀请
     socket.on('challenge-reject-invitation', (data) => {
       const { inviteId, inviterId } = data;
-      challengeBattleService.removeInvitation(inviteId);
+      const result = challengeBattleService.rejectInvitation(inviteId, currentUserId, inviterId);
+      if (!result.success) {
+        socket.emit('error', { error: result.error });
+        return;
+      }
       const inviterSocket = challengeBattleService.getUserSocket(inviterId);
       if (inviterSocket) {
         io.to(inviterSocket.socketId).emit('challenge-invitation-rejected', { rejecterId: currentUserId });
@@ -610,7 +681,7 @@ function setupSocket(io) {
           console.log('[Challenge] 游戏结束（答错），发送 challenge-dual-finished');
           clearDualInviteTimer(roomId);
           broadcastToRoom(room, 'challenge-dual-finished', result, io);
-          io.emit('online-users', challengeBattleService.getOnlineUsersList());
+          io.emit('online-users', getUnifiedOnlineUsers());
           return;
         }
 
@@ -625,7 +696,7 @@ function setupSocket(io) {
               console.log('[Challenge] 30题全部答完，发送 challenge-dual-finished');
               clearDualInviteTimer(roomId);
               broadcastToRoom(advanceResult.room || room, 'challenge-dual-finished', advanceResult, io);
-              io.emit('online-users', challengeBattleService.getOnlineUsersList());
+              io.emit('online-users', getUnifiedOnlineUsers());
             } else {
               console.log('[Challenge] 发送下一题:', advanceResult.currentQuestionIndex);
               // 重启计时器
@@ -652,7 +723,7 @@ function setupSocket(io) {
           clearDualInviteTimer(roomId);
           const room = challengeBattleService.getRoom(roomId);
           if (room) broadcastToRoom(room, 'challenge-dual-finished', result, io);
-          io.emit('online-users', challengeBattleService.getOnlineUsersList());
+          io.emit('online-users', getUnifiedOnlineUsers());
         }
       } catch (err) {
         console.error('[Challenge] 邀请对战超时处理失败:', err);
@@ -670,7 +741,7 @@ function setupSocket(io) {
           clearDualInviteTimer(roomId);
           const room = challengeBattleService.getRoom(roomId);
           if (room) broadcastToRoom(room, 'challenge-dual-finished', result, io);
-          io.emit('online-users', challengeBattleService.getOnlineUsersList());
+          io.emit('online-users', getUnifiedOnlineUsers());
         }
       } catch (err) {
         console.error('[Challenge] 退出游戏失败:', err);
@@ -679,8 +750,18 @@ function setupSocket(io) {
 
     // 获取在线用户列表（闯关对战）
     socket.on('challenge-get-online-users', () => {
-      const users = challengeBattleService.getOnlineUsersList();
-      socket.emit('online-users', users);
+      socket.emit('online-users', getUnifiedOnlineUsers());
+    });
+
+    socket.on('challenge-get-pending-invitations', () => {
+      if (!currentUserId) return;
+      challengeBattleService.getPendingInvitations(currentUserId).forEach(invitation => {
+        socket.emit('challenge-invitation', {
+          inviteId: invitation.inviteId,
+          fromId: invitation.inviterId,
+          from: invitation.inviterName
+        });
+      });
     });
 
     // ping
@@ -705,7 +786,7 @@ function setupSocket(io) {
         const feihuaUser = feihualingService.getUser(currentUserId);
         const feihuaRoomId = feihuaUser?.inGame;
         const onlineUsers = feihualingService.removeUser(socket.id);
-        io.emit('online-users', onlineUsers);
+        io.emit('online-users', getUnifiedOnlineUsers());
         const feihuaRoom = feihualingService.getRoom(feihuaRoomId);
         const feihuaPlayer = feihuaRoom?.players.find(p => String(p.id) === String(currentUserId));
         if (feihuaRoom?.status === 'playing' && feihuaPlayer?.disconnected) {
@@ -760,7 +841,7 @@ function setupSocket(io) {
                           io.to(p.socketId).emit('challenge-dual-finished', result);
                         }
                       });
-                      io.emit('online-users', challengeBattleService.getOnlineUsersList());
+                      io.emit('online-users', getUnifiedOnlineUsers());
                       challengeBattleService.removeUser(socket.id);
                     }
                   }
@@ -775,7 +856,7 @@ function setupSocket(io) {
           }
         }
 
-        io.emit('online-users', challengeBattleService.getOnlineUsersList());
+        io.emit('online-users', getUnifiedOnlineUsers());
       }
     });
   });
@@ -831,8 +912,6 @@ function startDualInviteTimer(roomId, io, service) {
   const room = service.getRoom(roomId);
   if (!room) return;
 
-  let remaining = room.timeLimit || 30;
-
   const timer = setInterval(() => {
     const currentRoom = service.getRoom(roomId);
     if (!currentRoom || currentRoom.status !== 'playing') {
@@ -840,7 +919,7 @@ function startDualInviteTimer(roomId, io, service) {
       return;
     }
 
-    remaining--;
+    const remaining = getDualInviteRemainingTime(currentRoom);
 
     // 向当前回合的玩家发送倒计时
     const currentTurn = currentRoom.currentQuestionIndex % 2;
@@ -848,6 +927,7 @@ function startDualInviteTimer(roomId, io, service) {
     if (currentPlayer && currentPlayer.socketId) {
       io.to(currentPlayer.socketId).emit('challenge-dual-timer-tick', {
         remaining,
+        total: currentRoom.timeLimit || 30,
         roomId,
         currentQuestionIndex: currentRoom.currentQuestionIndex
       });
@@ -860,12 +940,19 @@ function startDualInviteTimer(roomId, io, service) {
       const result = service.handleDualInviteTimeoutByRoom(roomId);
       if (result && result.type === 'finished') {
         broadcastToRoom(currentRoom, 'challenge-dual-finished', result, io);
-        io.emit('online-users', service.getOnlineUsersList());
+        io.emit('online-users', getUnifiedOnlineUsers());
       }
     }
   }, 1000);
 
   duelTimers.set(roomId, timer);
+}
+
+function getDualInviteRemainingTime(room) {
+  const timeLimit = Number(room?.timeLimit) || 30;
+  const startedAt = Number(room?.questionStartedAt) || Date.now();
+  const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+  return Math.max(0, timeLimit - elapsed);
 }
 
 // 清除双人邀请对战计时器
@@ -920,6 +1007,7 @@ function startTurnTimer(roomId, io) {
             players: result.players, currentRound: result.totalRounds, isRanking: currentRoom.isRanking, rankingChange
           });
         });
+        io.emit('online-users', getUnifiedOnlineUsers());
       }
     }
   }, 1000);

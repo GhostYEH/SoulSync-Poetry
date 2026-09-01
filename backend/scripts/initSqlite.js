@@ -142,6 +142,9 @@ CREATE TABLE IF NOT EXISTS wrong_questions (
   wrong_count INTEGER DEFAULT 1,
   last_wrong_time TEXT DEFAULT (datetime('now')),
   correct_streak INTEGER DEFAULT 0,
+  review_count INTEGER DEFAULT 0,
+  interval_days INTEGER DEFAULT 1,
+  next_review TEXT DEFAULT (date('now')),
   mastered INTEGER DEFAULT 0,
   full_poem TEXT,
   author TEXT,
@@ -211,6 +214,12 @@ CREATE TABLE IF NOT EXISTS user_error_book (
   explanation TEXT,
   added_at TEXT NOT NULL,
   is_reviewed INTEGER DEFAULT 0,
+  wrong_count INTEGER DEFAULT 1,
+  review_streak INTEGER DEFAULT 0,
+  review_count INTEGER DEFAULT 0,
+  interval_days INTEGER DEFAULT 1,
+  next_review TEXT DEFAULT (date('now')),
+  last_reviewed_at TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id),
   FOREIGN KEY (record_id) REFERENCES user_challenge_records(id)
 );

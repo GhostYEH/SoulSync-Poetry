@@ -9,6 +9,8 @@ const fs = require('fs');
 const path = require('path');
 const db = require('../utils/db');
 const { ApiError } = require('../utils/apiResponse');
+const { normalizeAnswer, answersMatch } = require('../utils/answerUtils');
+const { MASTER_REVIEW_COUNT, calculateReviewState } = require('../utils/reviewPolicy');
 
 // ============================================================
 // 诗词数据：200首不同诗词，按难度分4段
@@ -1318,17 +1320,13 @@ function findQuestionByLevelAndText(level, questionText) {
 // ============================================================
 // 答案规范化：去空格、标点、全角转半角
 // ============================================================
-function normalize(str) {
-  return String(str ?? '')
-    .normalize('NFKC')
-    .replace(/[\s\p{P}\p{S}]/gu, '');
-}
+const normalize = normalizeAnswer;
 
 // ============================================================
 // 直接查表判断答案（无需AI，纯数据匹配）
 // ============================================================
 function checkAnswer(userAnswer, correctAnswer) {
-  return normalize(userAnswer) === normalize(correctAnswer);
+  return answersMatch(userAnswer, correctAnswer);
 }
 
 // ============================================================
@@ -1489,14 +1487,33 @@ async function submitAnswer(userId, level, questionText, userAnswer, frontendCor
 // 错题本
 // ============================================================
 async function addToErrorBook(userId, recordId, question, userAnswer, correctAnswer, explanation) {
+  const record = await db.get(
+    'SELECT id FROM user_challenge_records WHERE id = $1 AND user_id = $2',
+    [recordId, userId]
+  );
+  if (!record) throw ApiError.notFound('答题记录不存在');
+
   const existing = await db.get(
     'SELECT id FROM user_error_book WHERE user_id = $1 AND question_content = $2 LIMIT 1',
     [userId, question]
   );
-  if (!existing) {
+  if (existing) {
     await db.run(
-      `INSERT INTO user_error_book (user_id, record_id, question_content, user_answer, correct_answer, explanation, added_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `UPDATE user_error_book
+       SET record_id = $1, user_answer = $2, correct_answer = $3,
+           explanation = COALESCE($4, explanation), added_at = $5,
+           is_reviewed = 0, wrong_count = COALESCE(wrong_count, 1) + 1,
+           review_streak = 0, review_count = 0, interval_days = 1,
+           next_review = CURRENT_DATE, last_reviewed_at = NULL
+       WHERE user_id = $6 AND id = $7`,
+      [recordId, userAnswer, correctAnswer, explanation || null, new Date().toISOString(), userId, existing.id]
+    );
+  } else {
+    await db.run(
+      `INSERT INTO user_error_book
+       (user_id, record_id, question_content, user_answer, correct_answer, explanation, added_at,
+        is_reviewed, wrong_count, review_streak, review_count, interval_days, next_review)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 1, 0, 0, 1, CURRENT_DATE)`,
       [userId, recordId, question, userAnswer, correctAnswer, explanation, new Date().toISOString()]
     );
   }
@@ -1511,7 +1528,59 @@ async function getErrorBook(userId) {
 }
 
 async function removeFromErrorBook(userId, id) {
-  await db.run('DELETE FROM user_error_book WHERE user_id = $1 AND id = $2', [userId, id]);
+  const result = await db.run('DELETE FROM user_error_book WHERE user_id = $1 AND id = $2', [userId, id]);
+  return result.rowCount > 0;
+}
+
+async function reviewErrorBookQuestion(userId, id, userAnswer) {
+  return db.transaction(async (tx) => {
+    const row = await tx.get(
+      'SELECT * FROM user_error_book WHERE user_id = $1 AND id = $2',
+      [userId, id]
+    );
+    if (!row) throw ApiError.notFound('错题不存在');
+
+    const correct = answersMatch(userAnswer, row.correct_answer);
+    const nextState = calculateReviewState({
+      reviewCount: Math.max(Number(row.review_count) || 0, Number(row.is_reviewed) === 1 ? MASTER_REVIEW_COUNT : 0),
+      correctStreak: row.review_streak,
+      intervalDays: row.interval_days,
+      correct,
+      mastered: Number(row.is_reviewed) === 1,
+    });
+    const wrongCount = (Number(row.wrong_count) || 1) + (correct ? 0 : 1);
+
+    await tx.run(
+      `UPDATE user_error_book
+       SET is_reviewed = $1, review_streak = $2, review_count = $3,
+           interval_days = $4, next_review = $5, wrong_count = $6,
+           user_answer = $7, last_reviewed_at = CURRENT_TIMESTAMP
+       WHERE user_id = $8 AND id = $9`,
+      [nextState.mastered ? 1 : 0, nextState.correctStreak, nextState.reviewCount,
+        nextState.intervalDays, nextState.nextReview, wrongCount, userAnswer || '', userId, id]
+    );
+
+    return {
+      correct,
+      mastered: nextState.mastered,
+      correctAnswer: row.correct_answer,
+      correctStreak: nextState.correctStreak,
+      reviewCount: nextState.reviewCount,
+      intervalDays: nextState.intervalDays,
+      nextReview: nextState.nextReview,
+    };
+  });
+}
+
+async function markErrorBookQuestionReviewed(userId, id) {
+  const result = await db.run(
+    `UPDATE user_error_book
+     SET is_reviewed = 1, review_streak = $1, review_count = $1,
+         next_review = NULL, last_reviewed_at = CURRENT_TIMESTAMP
+     WHERE user_id = $2 AND id = $3`,
+    [MASTER_REVIEW_COUNT, userId, id]
+  );
+  return result.rowCount > 0;
 }
 
 async function getLeaderboard() {
@@ -1544,6 +1613,8 @@ module.exports = {
   addToErrorBook,
   getErrorBook,
   removeFromErrorBook,
+  reviewErrorBookQuestion,
+  markErrorBookQuestionReviewed,
   getLeaderboard,
   checkAnswer,
   normalize,

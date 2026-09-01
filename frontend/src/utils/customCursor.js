@@ -44,31 +44,7 @@ export function installCustomCursor(router) {
   let lastInteractiveMode = false
   let lastTextMode = false
   let lastGlassMode = false
-  let cursorWarmupScheduled = false
   let enabled = false
-
-  const scheduleCursorAssetWarmup = (activeAsset) => {
-    if (cursorWarmupScheduled) return
-    cursorWarmupScheduled = true
-
-    const warmRemainingAssets = () => {
-      cursorAssets.filter((src) => src !== activeAsset).forEach((src) => {
-        const image = new Image()
-        image.decoding = 'async'
-        image.src = src
-      })
-    }
-    const scheduleWhenIdle = () => {
-      if (window.requestIdleCallback) {
-        window.requestIdleCallback(warmRemainingAssets, { timeout: 3000 })
-      } else {
-        window.setTimeout(warmRemainingAssets, 500)
-      }
-    }
-
-    if (document.readyState === 'complete') scheduleWhenIdle()
-    else window.addEventListener('load', scheduleWhenIdle, { once: true })
-  }
 
   const setCursorArtwork = () => {
     if (!cursorImage) return
@@ -167,7 +143,6 @@ export function installCustomCursor(router) {
     cursorElement.appendChild(cursorImage)
     document.body.appendChild(cursorElement)
     setCursorArtwork()
-    scheduleCursorAssetWarmup(cursorAssets[currentAssetIndex])
 
     pointerMoveHandler = (event) => {
       targetX = event.clientX
@@ -232,8 +207,9 @@ export function installCustomCursor(router) {
 
   pointerMedia.addEventListener?.('change', handlePointerCapabilityChange)
   motionMedia.addEventListener?.('change', handleMotionPreferenceChange)
-  router?.afterEach(() => {
-    if (enabled) setCursorArtwork()
+  router?.afterEach((_to, from) => {
+    // 首次路由解析已在 enableCursor 中设置过图案，避免启动时额外下载一张大图。
+    if (enabled && from?.name) setCursorArtwork()
   })
 
   syncCursorCapability()

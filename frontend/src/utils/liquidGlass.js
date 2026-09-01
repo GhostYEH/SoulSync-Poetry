@@ -111,17 +111,22 @@ function tintSignature(element) {
   return [classes, element.disabled, element.getAttribute('aria-pressed'), element.getAttribute('aria-selected')].join('|')
 }
 
-function updateControlTint(element) {
+function updateControlTint(element, existingStyle) {
   const signature = tintSignature(element)
   if (element.dataset.liquidTintSignature === signature) return
 
   const previousGlass = element.getAttribute('data-liquid-glass')
   const previousTone = element.getAttribute('data-liquid-tone')
-  element.removeAttribute('data-liquid-glass')
-  element.removeAttribute('data-liquid-tone')
-  const tint = readControlTint(window.getComputedStyle(element))
-  if (previousGlass) element.setAttribute('data-liquid-glass', previousGlass)
-  if (previousTone) element.setAttribute('data-liquid-tone', previousTone)
+  let tint
+  if (previousGlass || previousTone) {
+    element.removeAttribute('data-liquid-glass')
+    element.removeAttribute('data-liquid-tone')
+    tint = readControlTint(window.getComputedStyle(element))
+    if (previousGlass) element.setAttribute('data-liquid-glass', previousGlass)
+    if (previousTone) element.setAttribute('data-liquid-tone', previousTone)
+  } else {
+    tint = readControlTint(existingStyle || window.getComputedStyle(element))
+  }
 
   const chroma = tint ? Math.max(tint.r, tint.g, tint.b) - Math.min(tint.r, tint.g, tint.b) : 0
   const luminance = tint ? tint.r * .2126 + tint.g * .7152 + tint.b * .0722 : 255
@@ -153,7 +158,7 @@ function isTransparentSurface(element, style) {
   return alpha === 0 && (hasEdge || hasShadow)
 }
 
-function shouldEnhance(element) {
+function shouldEnhance(element, style) {
   if (!(element instanceof HTMLElement)) return false
   if (SKIP_TAGS.has(element.tagName)) return false
   if (element.classList.contains('liquid-glass-optics') || element.getAttribute('aria-hidden') === 'true') return false
@@ -164,7 +169,7 @@ function shouldEnhance(element) {
   const interactive = INTERACTIVE_TAGS.has(element.tagName)
   const explicitSurface = element.matches(EXPLICIT_SURFACES)
   const semanticSurface = explicitSurface || classLooksLikeSurface(element)
-  const style = window.getComputedStyle(element)
+  style ||= window.getComputedStyle(element)
   const ownsBackdrop = getBackdropFilter(style) !== 'none' && !['P', 'SPAN', 'I', 'SMALL'].includes(element.tagName)
   if (style.display === 'none' || style.visibility === 'hidden') return false
   // Buttons are always glass, including fully opaque primary/danger controls.
@@ -185,6 +190,22 @@ function shouldEnhance(element) {
   return true
 }
 
+function isImmediatelyIneligible(element) {
+  if (!(element instanceof HTMLElement)) return true
+  if (SKIP_TAGS.has(element.tagName)) return true
+  if (element.classList.contains('liquid-glass-optics') || element.getAttribute('aria-hidden') === 'true') return true
+  if (element.hasAttribute('data-liquid-ignore') || element.hasAttribute('data-liquid-glass-component')) return true
+  return element.closest('[data-liquid-glass-component]') && !isButtonLike(element)
+}
+
+function enhancementSignature(element) {
+  const classes = [...element.classList]
+    .filter((className) => !INTERNAL_GLASS_CLASSES.has(className))
+    .sort()
+    .join(' ')
+  return [classes, element.disabled, element.getAttribute('aria-pressed'), element.getAttribute('aria-selected')].join('|')
+}
+
 function classifySurface(element) {
   if (isButtonLike(element)) return 'control'
   if (element.matches('.modal,.modal-content,.dialog,.drawer,.popover,.score-modal,.login-panel,.register-form')) return 'strong'
@@ -195,9 +216,9 @@ function canHostOptics(element) {
   return !['INPUT', 'TEXTAREA', 'SELECT', 'OPTION'].includes(element.tagName)
 }
 
-function ensureOptics(element) {
+function ensureOptics(element, positionIsStatic) {
   if (!canHostOptics(element) || element.querySelector(':scope > .liquid-glass-optics')) return
-  if (window.getComputedStyle(element).position === 'static') {
+  if (positionIsStatic) {
     element.classList.add('liquid-glass-positioned')
   }
   const optics = document.createElement('span')
@@ -211,24 +232,63 @@ function removeOptics(element) {
   element.classList.remove('liquid-glass-positioned')
 }
 
-function enhanceElement(element) {
-  if (shouldEnhance(element)) {
-    const surfaceType = classifySurface(element)
-    if (surfaceType === 'control') updateControlTint(element)
-    element.dataset.liquidGlass = surfaceType
-    const style = window.getComputedStyle(element)
-    const shouldUseOptics = isButtonLike(element) || INTERACTIVE_TAGS.has(element.tagName) || element.matches(EXPLICIT_SURFACES) || classLooksLikeSurface(element) || getBackdropFilter(style) !== 'none'
-    if (shouldUseOptics) ensureOptics(element)
+function planEnhancement(element) {
+  if (isImmediatelyIneligible(element)) {
+    return { element, eligible: false }
+  }
+
+  const signature = enhancementSignature(element)
+  if (element.dataset.liquidEnhanceSignature === signature) {
+    return { element, skip: true }
+  }
+
+  const style = window.getComputedStyle(element)
+  if (!shouldEnhance(element, style)) return { element, eligible: false, signature }
+
+  const surfaceType = classifySurface(element)
+  return {
+    element,
+    eligible: true,
+    surfaceType,
+    style,
+    signature,
+    positionIsStatic: style.position === 'static',
+    shouldUseOptics: isButtonLike(element)
+      || INTERACTIVE_TAGS.has(element.tagName)
+      || element.matches(EXPLICIT_SURFACES)
+      || classLooksLikeSurface(element)
+      || getBackdropFilter(style) !== 'none'
+  }
+}
+
+function applyEnhancement(plan) {
+  const { element } = plan
+  if (plan.skip) return
+  if (plan.eligible) {
+    if (plan.surfaceType === 'control') updateControlTint(element, plan.style)
+    element.dataset.liquidGlass = plan.surfaceType
+    if (plan.shouldUseOptics) ensureOptics(element, plan.positionIsStatic)
     else removeOptics(element)
   } else if (element.hasAttribute('data-liquid-glass')) {
     delete element.dataset.liquidGlass
     removeOptics(element)
   }
+  if (plan.signature) element.dataset.liquidEnhanceSignature = plan.signature
+}
+
+function enhanceElement(element) {
+  applyEnhancement(planEnhancement(element))
 }
 
 function enhanceTree(root = document) {
-  if (root instanceof HTMLElement) enhanceElement(root)
-  root.querySelectorAll?.(ENHANCE_SELECTOR).forEach(enhanceElement)
+  const elements = []
+  if (root instanceof HTMLElement) elements.push(root)
+  root.querySelectorAll?.(ENHANCE_SELECTOR).forEach((element) => elements.push(element))
+
+  // Complete every style/layout read before inserting optics or attributes.
+  // This prevents each element from invalidating the next element's read.
+  const plans = elements.map(planEnhancement)
+  plans.forEach(applyEnhancement)
 }
 
 function hasOnlyInternalClassChanges(element, previousValue = '') {

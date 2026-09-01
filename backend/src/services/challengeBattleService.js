@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../utils/db');
+const { answersMatch } = require('../utils/answerUtils');
 
 class ChallengeBattleService {
   constructor() {
@@ -135,6 +136,7 @@ class ChallengeBattleService {
 
     if (!inviter) return { success: false, error: '邀请者不在线' };
     if (!acceptor) return { success: false, error: '被邀请者不在线' };
+    if (inviter.inGame || acceptor.inGame) return { success: false, error: '你或对方正在游戏中' };
 
     // 删除邀请
     this.invitations.delete(foundInvite.inviteId);
@@ -157,6 +159,15 @@ class ChallengeBattleService {
     this.invitations.delete(inviteId);
   }
 
+  rejectInvitation(inviteId, targetId, inviterId) {
+    const invitation = this.invitations.get(inviteId);
+    if (!invitation || invitation.targetId !== String(targetId) || invitation.inviterId !== String(inviterId)) {
+      return { success: false, error: '邀请不存在或已失效' };
+    }
+    this.invitations.delete(inviteId);
+    return { success: true, invitation };
+  }
+
   // 按用户ID移除邀请
   removeInvitationByUser(userId) {
     for (const [inviteId, inv] of this.invitations.entries()) {
@@ -174,6 +185,20 @@ class ChallengeBattleService {
       }
     }
     return null;
+  }
+
+  getPendingInvitations(userId) {
+    const now = Date.now();
+    const targetId = userId.toString();
+    const result = [];
+    for (const [inviteId, inv] of this.invitations.entries()) {
+      if (now - inv.createdAt > 60000) {
+        this.invitations.delete(inviteId);
+        continue;
+      }
+      if (inv.targetId === targetId) result.push({ inviteId, ...inv });
+    }
+    return result;
   }
 
   getRoom(roomId) {
@@ -278,17 +303,25 @@ class ChallengeBattleService {
     return 'hard';
   }
 
-  async generateQuestion(usedTitles = [], currentRound = 1) {
+  getQuestionKey(question) {
+    return [question?.title || '', question?.question || '', question?.answer || ''].join('\u0000');
+  }
+
+  async generateQuestion(usedQuestionKeys = [], currentRound = 1) {
     const poems = await this.loadPoemsCache();
 
     if (poems.length === 0) {
-      return this.getFallbackQuestion(usedTitles);
+      return this.getFallbackQuestion(usedQuestionKeys);
     }
 
     const targetDifficulty = this.getDifficultyByRound(currentRound);
-    const usedSet = new Set(usedTitles);
+    const usedSet = new Set(usedQuestionKeys);
 
-    let candidates = poems.filter(p => !usedSet.has(p.title));
+    const hasUnusedCouplet = poem => poem.couplets.some(couplet => !usedSet.has(this.getQuestionKey({
+      title: poem.title,
+      ...couplet
+    })));
+    let candidates = poems.filter(hasUnusedCouplet);
 
     const difficultyOrder = { 'easy': 1, 'medium': 2, 'hard': 3 };
     const targetLevel = difficultyOrder[targetDifficulty];
@@ -303,14 +336,16 @@ class ChallengeBattleService {
     }
 
     if (candidates.length === 0) {
-      candidates = poems.filter(p => !usedSet.has(p.title));
-    }
-    if (candidates.length === 0) {
       candidates = poems;
     }
 
     const poem = candidates[Math.floor(Math.random() * candidates.length)];
-    const couplet = poem.couplets[Math.floor(Math.random() * poem.couplets.length)];
+    const unusedCouplets = poem.couplets.filter(couplet => !usedSet.has(this.getQuestionKey({
+      title: poem.title,
+      ...couplet
+    })));
+    const coupletPool = unusedCouplets.length > 0 ? unusedCouplets : poem.couplets;
+    const couplet = coupletPool[Math.floor(Math.random() * coupletPool.length)];
 
     return {
       question: couplet.question,
@@ -324,27 +359,35 @@ class ChallengeBattleService {
     };
   }
 
-  async generateQuestionBatch(count = 20, usedTitles = [], startRound = 1) {
+  async generateQuestionBatch(count = 20, usedQuestionKeys = [], startRound = 1) {
     const questions = [];
-    const usedTitlesSet = new Set(usedTitles);
+    const usedQuestionKeysSet = new Set(usedQuestionKeys);
 
     for (let i = 0; i < count * 3 && questions.length < count; i++) {
       const round = startRound + questions.length;
-      const q = await this.generateQuestion([...usedTitlesSet], round);
-      if (q && !usedTitlesSet.has(q.title)) {
-        usedTitlesSet.add(q.title);
+      const q = await this.generateQuestion([...usedQuestionKeysSet], round);
+      const questionKey = q && this.getQuestionKey(q);
+      if (q && !usedQuestionKeysSet.has(questionKey)) {
+        usedQuestionKeysSet.add(questionKey);
         questions.push(q);
       }
     }
 
-    if (questions.length === 0) {
-      questions.push(this.getFallbackQuestion(usedTitles));
+    // 题库可能比目标局数小；继续从静态兜底题库补齐，避免房间声明的题数
+    // 大于实际数组长度，导致答题阶段访问 undefined。
+    while (questions.length < count) {
+      const q = this.getFallbackQuestion([...usedQuestionKeysSet]);
+      if (!q) break;
+      const questionKey = this.getQuestionKey(q);
+      if (usedQuestionKeysSet.has(questionKey)) break;
+      usedQuestionKeysSet.add(questionKey);
+      questions.push(q);
     }
 
     return questions;
   }
 
-  getFallbackQuestion(excludeTitles = []) {
+  getFallbackQuestion(excludeQuestionKeys = []) {
     const pool = [
       { question: '床前明月光，____。', answer: '疑是地上霜', full_poem: '床前明月光，疑是地上霜。举头望明月，低头思故乡。', title: '静夜思', author: '李白', type: '上句填下句', analysis: '此句出自李白《静夜思》', difficulty: 'easy' },
       { question: '____，疑是地上霜。', answer: '床前明月光', full_poem: '床前明月光，疑是地上霜。举头望明月，低头思故乡。', title: '静夜思', author: '李白', type: '下句填上句', analysis: '此句出自李白《静夜思》', difficulty: 'easy' },
@@ -378,9 +421,10 @@ class ChallengeBattleService {
       { question: '____，霜叶红于二月花。', answer: '停车坐爱枫林晚', full_poem: '远上寒山石径斜，白云深处有人家。停车坐爱枫林晚，霜叶红于二月花。', title: '山行', author: '杜牧', type: '下句填上句', analysis: '此句出自杜牧《山行》', difficulty: 'medium' },
     ];
 
-    const available = pool.filter(q => !excludeTitles.includes(q.title));
-    const source = available.length > 0 ? available : pool;
-    return source[Math.floor(Math.random() * source.length)];
+    const excluded = new Set(excludeQuestionKeys);
+    const available = pool.filter(q => !excluded.has(this.getQuestionKey(q)));
+    if (available.length === 0) return null;
+    return available[Math.floor(Math.random() * available.length)];
   }
 
   // ==============================================================
@@ -397,7 +441,7 @@ class ChallengeBattleService {
       username,
       status: 'playing',
       questions: [{ ...initialQuestion, round: 1 }],
-      usedTitles: [initialQuestion.title],
+      usedQuestionKeys: [this.getQuestionKey(initialQuestion)],
       wrongQuestions: [],
       currentRound: 1,
       totalTime: 30,
@@ -424,9 +468,8 @@ class ChallengeBattleService {
     }
 
     const currentQuestion = room.questions[room.questions.length - 1];
-    const normalizedUser = normalizeStr(answer);
-    const normalizedCorrect = normalizeStr(currentQuestion.answer);
-    const isCorrect = normalizedUser === normalizedCorrect;
+    if (!currentQuestion) return { success: false, error: '题目不存在' };
+    const isCorrect = answersMatch(answer, currentQuestion.answer);
 
     room.questionAnswered = true;
     if (isCorrect) {
@@ -462,9 +505,9 @@ class ChallengeBattleService {
       return this.endSingleGame(room);
     }
 
-    const question = await this.generateQuestion(room.usedTitles, nextRound);
+    const question = await this.generateQuestion(room.usedQuestionKeys, nextRound);
     room.questions.push({ ...question, round: nextRound });
-    room.usedTitles.push(question.title);
+    room.usedQuestionKeys.push(this.getQuestionKey(question));
     room.currentRound = nextRound;
     room.questionStartedAt = Date.now();
     room.questionAnswered = false;
@@ -499,10 +542,11 @@ class ChallengeBattleService {
     });
 
     const nextResult = await this.nextSingleQuestion(roomId, userId);
-    if (nextResult.type === 'finished') {
+    if (nextResult?.type === 'finished') {
       this.saveSingleRecord(room);
       return nextResult;
     }
+    if (!nextResult) return null;
     return {
       correctAnswer: currentQuestion.answer,
       ...nextResult
@@ -540,10 +584,12 @@ class ChallengeBattleService {
   }
 
   async saveSingleRecord(room) {
-    try {
-      const winnerId = room.correctCount >= room.wrongCount ? room.userId : null;
-      const loserId = room.correctCount < room.wrongCount ? room.userId : null;
+    if (!room) return;
 
+    const winnerId = room.correctCount >= room.wrongCount ? room.userId : null;
+    const loserId = room.correctCount < room.wrongCount ? room.userId : null;
+
+    try {
       await db.query(
         `INSERT INTO challenge_battles (player1_id, player2_id, winner_id, loser_id, total_questions, player1_correct, player2_correct, total_rounds, started_at, ended_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -557,7 +603,12 @@ class ChallengeBattleService {
           room.endedAt || Date.now()
         ]
       );
+    } catch (err) {
+      console.error('[ChallengeBattle] 保存单人记录失败:', err.message);
+    }
 
+    // 战绩表写入失败时，不能连带丢失本局错题；错题本独立保存。
+    try {
       if (room.wrongQuestions && room.wrongQuestions.length > 0) {
         const now = new Date().toISOString();
         for (const wq of room.wrongQuestions) {
@@ -569,20 +620,26 @@ class ChallengeBattleService {
           if (existingResult.rows.length > 0) {
             const existing = existingResult.rows[0];
             await db.query(
-              `UPDATE wrong_questions SET wrong_count = wrong_count + 1, user_answer = $1, last_wrong_time = $2, correct_streak = 0, mastered = 0 WHERE id = $3`,
+              `UPDATE wrong_questions
+               SET wrong_count = COALESCE(wrong_count, 1) + 1, user_answer = $1, last_wrong_time = $2,
+                   correct_streak = 0, review_count = 0, interval_days = 1,
+                   next_review = CURRENT_DATE, mastered = 0
+               WHERE id = $3`,
               [wq.userAnswer || '', now, existing.id]
             );
           } else {
             await db.query(
-              `INSERT INTO wrong_questions (user_id, question, answer, user_answer, level, full_poem, author, title, wrong_count, last_wrong_time)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+              `INSERT INTO wrong_questions
+               (user_id, question, answer, user_answer, level, full_poem, author, title,
+                wrong_count, last_wrong_time, correct_streak, review_count, interval_days, next_review)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, 0, 1, CURRENT_DATE)`,
               [room.userId, wq.question, wq.answer, wq.userAnswer || '', 1, wq.fullPoem || '', wq.author || '', wq.title || '', 1, now]
             );
           }
         }
       }
     } catch (err) {
-      console.error('[ChallengeBattle] 保存单人记录失败:', err.message);
+      console.error('[ChallengeBattle] 保存单人错题失败:', err.message);
     }
   }
 
@@ -608,8 +665,8 @@ class ChallengeBattleService {
   // ==============================================================
   // 双人匹配模式
   // ==============================================================
-  addToMatchmaking(userId, username, socketId) {
-    this.matchmakingQueue = this.matchmakingQueue.filter(m => m.userId !== userId);
+  async addToMatchmaking(userId, username, socketId) {
+    this.matchmakingQueue = this.matchmakingQueue.filter(m => String(m.userId) !== String(userId));
     this.matchmakingQueue.push({ userId, username, socketId, joinedAt: Date.now() });
 
     if (this.matchmakingQueue.length >= 2) {
@@ -621,7 +678,7 @@ class ChallengeBattleService {
   }
 
   removeFromMatchmaking(userId) {
-    this.matchmakingQueue = this.matchmakingQueue.filter(m => m.userId !== userId);
+    this.matchmakingQueue = this.matchmakingQueue.filter(m => String(m.userId) !== String(userId));
   }
 
   getMatchmakingQueueSize() {
@@ -643,7 +700,8 @@ class ChallengeBattleService {
       currentRound: 1,
       totalRounds: 30,
       question: { ...question, round: 1 },
-      usedTitles: [question.title],
+      wrongQuestions: [],
+      usedQuestionKeys: [this.getQuestionKey(question)],
       questionStartTime: Date.now(),
       totalTime: 30,
       createdAt: Date.now()
@@ -686,13 +744,11 @@ class ChallengeBattleService {
     if (room.status !== 'playing') return { success: false, error: '游戏未开始或已结束' };
     if (room.mode !== 'dual') return { success: false, error: '不是双人模式' };
 
-    const player = room.players.find(p => p.id === userId);
+    const player = room.players.find(p => String(p.id) === String(userId));
     if (!player) return { success: false, error: '玩家不在此房间' };
     if (player.answered) return { success: false, error: '已回答过本题' };
 
-    const normalizedUser = normalizeStr(answer);
-    const normalizedCorrect = normalizeStr(room.question.answer);
-    const isCorrect = normalizedUser === normalizedCorrect;
+    const isCorrect = answersMatch(answer, room.question.answer);
 
     player.answered = true;
     player.answer = answer;
@@ -702,6 +758,16 @@ class ChallengeBattleService {
       player.correct++;
     } else {
       player.wrong++;
+      room.wrongQuestions.push({
+        userId: player.id,
+        question: room.question.question,
+        answer: room.question.answer,
+        userAnswer: answer,
+        fullPoem: room.question.full_poem,
+        author: room.question.author,
+        title: room.question.title,
+        source: 'battle'
+      });
     }
 
     const allAnswered = room.players.every(p => p.answered);
@@ -723,6 +789,16 @@ class ChallengeBattleService {
     player.answer = '__TIMEOUT__';
     player.isCorrect = false;
     player.wrong++;
+    room.wrongQuestions.push({
+      userId: player.id,
+      question: room.question.question,
+      answer: room.question.answer,
+      userAnswer: '(超时)',
+      fullPoem: room.question.full_poem,
+      author: room.question.author,
+      title: room.question.title,
+      source: 'battle'
+    });
 
     const allAnswered = room.players.every(p => p.answered);
     if (allAnswered) {
@@ -742,7 +818,7 @@ class ChallengeBattleService {
       return this.endDualGame(room);
     }
 
-    const question = await this.generateQuestion(room.usedTitles, nextRound);
+    const question = await this.generateQuestion(room.usedQuestionKeys, nextRound);
 
     room.players.forEach(p => {
       p.answered = false;
@@ -752,7 +828,7 @@ class ChallengeBattleService {
 
     room.currentRound = nextRound;
     room.question = { ...question, round: nextRound };
-    room.usedTitles.push(question.title);
+    room.usedQuestionKeys.push(this.getQuestionKey(question));
     room.questionStartTime = Date.now();
 
     return {
@@ -768,7 +844,7 @@ class ChallengeBattleService {
     };
   }
 
-  endDualGame(room) {
+  endDualGame(room, quitterId = null) {
     room.status = 'finished';
     room.endedAt = Date.now();
 
@@ -783,7 +859,13 @@ class ChallengeBattleService {
     let loser = null;
     let reason = 'completed';
 
-    if (p1.correct > p2.correct) {
+    if (quitterId != null) {
+      const quitter = room.players.find(p => String(p.id) === String(quitterId));
+      const opponent = room.players.find(p => String(p.id) !== String(quitterId));
+      winner = opponent ? { id: opponent.id, username: opponent.username, correct: opponent.correct } : null;
+      loser = quitter ? { id: quitter.id, username: quitter.username, correct: quitter.correct } : null;
+      reason = 'quit';
+    } else if (p1.correct > p2.correct) {
       winner = { id: p1.id, username: p1.username, correct: p1.correct };
       loser = { id: p2.id, username: p2.username, correct: p2.correct };
     } else if (p2.correct > p1.correct) {
@@ -807,6 +889,7 @@ class ChallengeBattleService {
         correct: p.correct,
         wrong: p.wrong
       })),
+      wrongQuestions: room.wrongQuestions || [],
       winner,
       loser
     };
@@ -830,8 +913,51 @@ class ChallengeBattleService {
           room.endedAt || Date.now()
         ]
       );
+
     } catch (err) {
       console.error('[ChallengeBattle] 保存双人对战记录失败:', err.message);
+    }
+    try {
+      await this._saveWrongQuestions(room.wrongQuestions || []);
+    } catch (err) {
+      console.error('[ChallengeBattle] 保存双人错题失败:', err.message);
+    }
+  }
+
+  quitDualGame(roomId, userId) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.status !== 'playing' || room.mode !== 'dual') return null;
+    const quitter = room.players.find(p => String(p.id) === String(userId));
+    if (!quitter) return null;
+    return this.endDualGame(room, userId);
+  }
+
+  async _saveWrongQuestions(wrongQuestions) {
+    for (const wq of wrongQuestions) {
+      const existing = await db.get(
+        'SELECT id FROM wrong_questions WHERE user_id = $1 AND question = $2',
+        [wq.userId, wq.question]
+      );
+      if (existing) {
+        await db.run(
+          `UPDATE wrong_questions
+           SET user_answer = $1, wrong_count = COALESCE(wrong_count, 1) + 1,
+               last_wrong_time = CURRENT_TIMESTAMP, mastered = 0, correct_streak = 0,
+               review_count = 0, interval_days = 1, next_review = CURRENT_DATE,
+               full_poem = COALESCE($2, full_poem), author = COALESCE($3, author),
+               title = COALESCE($4, title), source = COALESCE($5, source)
+           WHERE id = $6`,
+          [wq.userAnswer || '', wq.fullPoem || null, wq.author || null, wq.title || null, wq.source || 'battle', existing.id]
+        );
+      } else {
+        await db.run(
+          `INSERT INTO wrong_questions
+           (user_id, question, answer, user_answer, level, full_poem, author, title,
+            wrong_count, last_wrong_time, correct_streak, review_count, interval_days, next_review, source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, CURRENT_TIMESTAMP, 0, 0, 1, CURRENT_DATE, $9)`,
+          [wq.userId, wq.question, wq.answer, wq.userAnswer || '', 1, wq.fullPoem || '', wq.author || '', wq.title || '', wq.source || 'battle']
+        );
+      }
     }
   }
 
@@ -851,9 +977,11 @@ class ChallengeBattleService {
       ],
       status: 'playing',
       questions,
+      wrongQuestions: [],
       currentQuestionIndex: 0,
-      totalQuestions: 30,
+      totalQuestions: questions.length,
       timeLimit: 30,
+      questionStartedAt: Date.now(),
       createdAt: Date.now()
     };
 
@@ -882,18 +1010,19 @@ class ChallengeBattleService {
 
     const currentQuestionIndex = room.currentQuestionIndex;
     const currentQuestion = room.questions[currentQuestionIndex];
-    const normalizedUser = normalizeStr(answer);
-    const normalizedCorrect = normalizeStr(currentQuestion.answer);
+    if (!currentQuestion || currentQuestionIndex < 0 || currentQuestionIndex >= room.totalQuestions) {
+      room.currentQuestionIndex = room.totalQuestions;
+      return this._endDualInviteGame(room, null, 'completed');
+    }
+    const isCorrect = answersMatch(answer, currentQuestion.answer);
 
     console.log('[ChallengeBattle] 答案判定:', {
       userId, playerIndex, questionIndex: currentQuestionIndex,
       expectedPlayer: expectedPlayerIndex,
       userAnswer: answer,
       correctAnswer: currentQuestion.answer,
-      match: normalizedUser === normalizedCorrect
+      match: isCorrect
     });
-
-    const isCorrect = normalizedUser === normalizedCorrect;
 
     if (isCorrect) {
       room.players[playerIndex].correctAnswers++;
@@ -919,6 +1048,16 @@ class ChallengeBattleService {
     } else {
       // 答错，立即判负
       room.players[playerIndex].wrongAnswers++;
+      room.wrongQuestions.push({
+        userId: room.players[playerIndex].id,
+        question: currentQuestion.question,
+        answer: currentQuestion.answer,
+        userAnswer: answer,
+        fullPoem: currentQuestion.full_poem,
+        author: currentQuestion.author,
+        title: currentQuestion.title,
+        source: 'battle'
+      });
       return this._endDualInviteGame(room, room.players[playerIndex], 'wrong');
     }
   }
@@ -936,6 +1075,11 @@ class ChallengeBattleService {
     }
 
     const currentQuestion = room.questions[room.currentQuestionIndex];
+    if (!currentQuestion) {
+      room.currentQuestionIndex = room.totalQuestions;
+      return this._endDualInviteGame(room, null, 'completed');
+    }
+    room.questionStartedAt = Date.now();
     const currentTurn = room.currentQuestionIndex % 2;
 
     return {
@@ -960,7 +1104,24 @@ class ChallengeBattleService {
     const expectedPlayerIndex = room.currentQuestionIndex % 2;
     if (playerIndex !== expectedPlayerIndex) return null;
 
+    const currentQuestion = room.questions[room.currentQuestionIndex];
+    if (!currentQuestion || room.currentQuestionIndex >= room.totalQuestions) {
+      room.currentQuestionIndex = room.totalQuestions;
+      return this._endDualInviteGame(room, null, 'completed');
+    }
     room.players[playerIndex].wrongAnswers++;
+    if (currentQuestion) {
+      room.wrongQuestions.push({
+        userId: room.players[playerIndex].id,
+        question: currentQuestion.question,
+        answer: currentQuestion.answer,
+        userAnswer: '(超时)',
+        fullPoem: currentQuestion.full_poem,
+        author: currentQuestion.author,
+        title: currentQuestion.title,
+        source: 'battle'
+      });
+    }
     return this._endDualInviteGame(room, room.players[playerIndex], 'timeout');
   }
 
@@ -971,7 +1132,22 @@ class ChallengeBattleService {
     if (room.mode !== 'dual-invite') return null;
 
     const playerIndex = room.currentQuestionIndex % 2;
+    const currentQuestion = room.questions[room.currentQuestionIndex];
+    if (!currentQuestion || room.currentQuestionIndex >= room.totalQuestions) {
+      room.currentQuestionIndex = room.totalQuestions;
+      return this._endDualInviteGame(room, null, 'completed');
+    }
     room.players[playerIndex].wrongAnswers++;
+    room.wrongQuestions.push({
+      userId: room.players[playerIndex].id,
+      question: currentQuestion.question,
+      answer: currentQuestion.answer,
+      userAnswer: '(超时)',
+      fullPoem: currentQuestion.full_poem,
+      author: currentQuestion.author,
+      title: currentQuestion.title,
+      source: 'battle'
+    });
     return this._endDualInviteGame(room, room.players[playerIndex], 'timeout');
   }
 
@@ -984,7 +1160,6 @@ class ChallengeBattleService {
     const playerIndex = room.players.findIndex(p => String(p.id) === String(userId));
     if (playerIndex === -1) return null;
 
-    room.players[playerIndex].wrongAnswers++;
     return this._endDualInviteGame(room, room.players[playerIndex], 'quit');
   }
 
@@ -1030,9 +1205,10 @@ class ChallengeBattleService {
       success: true,
       type: 'finished',
       reason,
-      currentQuestionIndex: room.currentQuestionIndex + 1,
+      currentQuestionIndex: Math.min(room.currentQuestionIndex + 1, room.totalQuestions),
       totalQuestions: room.totalQuestions,
       players: room.players.map(p => ({ id: p.id, username: p.username, correctAnswers: p.correctAnswers, wrongAnswers: p.wrongAnswers })),
+      wrongQuestions: room.wrongQuestions || [],
       winner,
       loser: loserResult
     };
@@ -1052,34 +1228,22 @@ class ChallengeBattleService {
           room.totalQuestions,
           room.players[0].correctAnswers,
           room.players[1].correctAnswers,
-          room.currentQuestionIndex + 1,
+          Math.min(room.currentQuestionIndex + 1, room.totalQuestions),
           room.createdAt,
           room.endedAt || Date.now()
         ]
       );
+
     } catch (err) {
       console.error('[ChallengeBattle] 保存邀请对战记录失败:', err.message);
     }
+    try {
+      // 邀请对战的答错/超时题目也写入统一错题本；按用户+题干幂等更新。
+      await this._saveWrongQuestions(room.wrongQuestions || []);
+    } catch (err) {
+      console.error('[ChallengeBattle] 保存邀请对战错题失败:', err.message);
+    }
   }
-}
-
-// 字符串标准化
-function normalizeStr(str) {
-  if (!str) return '';
-  let s = str.replace(/\s/g, '');
-  s = s.replace(/[，。！？、；：""''（）【】、,.!?;:"'()\[\]\\/]/g, '');
-  const fullWidthMap = {
-    '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
-    '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
-    '　': ''
-  };
-  s = s.split('').map(c => {
-    if (fullWidthMap[c]) return fullWidthMap[c];
-    const code = c.charCodeAt(0);
-    if (code >= 65281 && code <= 65374) return String.fromCharCode(code - 65248);
-    return c;
-  }).join('');
-  return s.replace(/\s/g, '');
 }
 
 module.exports = new ChallengeBattleService();

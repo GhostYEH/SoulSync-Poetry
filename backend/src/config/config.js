@@ -1,5 +1,6 @@
 // 配置文件
-require('dotenv').config({ quiet: true });
+// 本地 backend/.env 是开发环境的单一配置源，避免系统残留的旧 Key 覆盖项目配置。
+require('dotenv').config({ quiet: true, override: true });
 
 const _WEAK_SECRETS = ['your-secret-key', 'your-secret-key-change-in-production', 'secret', '123456', 'password', 'jwt-secret', ''];
 const _jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
@@ -55,6 +56,16 @@ module.exports = {
     apiUrl: process.env.ZHIPU_API_URL || 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
     model: process.env.ZHIPU_MODEL || process.env.AI_MODEL || 'GLM-4-Flash-250414',
     timeout: 60000
+  },
+
+  // 阿里云百炼文生图（Z-Image Turbo）。密钥仅从环境变量读取，绝不写入源码。
+  imageGeneration: {
+    // DASHSCOPE_API_KEY 为当前推荐名称；旧变量仅作为兼容兜底，避免旧失效 Key 覆盖新配置。
+    apiKey: process.env.DASHSCOPE_API_KEY || process.env.ALIYUN_BAILIAN_API_KEY || '',
+    baseUrl: process.env.DASHSCOPE_IMAGE_API_URL || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+    model: process.env.DASHSCOPE_IMAGE_MODEL || 'z-image-turbo',
+    promptVersion: process.env.IMAGE_GENERATION_PROMPT_VERSION || 'z-image-turbo-scene-v13',
+    timeout: Number(process.env.IMAGE_GENERATION_TIMEOUT_MS) || 120000
   },
 
   // 智谱失败时的备用普通文本模型：讯飞星火 Spark Lite HTTP 接口。

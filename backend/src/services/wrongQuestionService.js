@@ -1,5 +1,8 @@
 const db = require('../utils/db');
 const aiService = require('./aiService');
+const { ApiError } = require('../utils/apiResponse');
+const { answersMatch } = require('../utils/answerUtils');
+const { MASTER_REVIEW_COUNT, calculateReviewState } = require('../utils/reviewPolicy');
 
 /**
  * 添加错题到错题本
@@ -21,21 +24,23 @@ async function addWrongQuestion(userId, questionData) {
   if (existing) {
     await db.run(
       `UPDATE wrong_questions
-       SET user_answer = $1, answer = $2, wrong_count = wrong_count + 1,
+     SET user_answer = $1, answer = $2, wrong_count = COALESCE(wrong_count, 1) + 1,
            last_wrong_time = CURRENT_TIMESTAMP, mastered = 0, correct_streak = 0,
+           review_count = 0, interval_days = 1, next_review = CURRENT_DATE,
            full_poem = COALESCE($3, full_poem), author = COALESCE($4, author), title = COALESCE($5, title),
            source = COALESCE($6, source)
        WHERE id = $7`,
       [user_answer || '', answer || '', full_poem || null, author || null, title || null, source || null, existing.id]
     );
-    return { id: existing.id, duplicated: false };
+    return { id: existing.id, duplicated: true };
   }
 
   const result = await db.run(
     `INSERT INTO wrong_questions
      (user_id, question_id, question, answer, user_answer, level, wrong_count,
-      last_wrong_time, correct_streak, mastered, full_poem, author, title, source, added_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 1, CURRENT_TIMESTAMP, 0, 0, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+      last_wrong_time, correct_streak, review_count, interval_days, next_review,
+      mastered, full_poem, author, title, source, added_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 1, CURRENT_TIMESTAMP, 0, 0, 1, CURRENT_DATE, 0, $7, $8, $9, $10, CURRENT_TIMESTAMP)
      RETURNING id`,
     [String(userId), question_id || null, question || '', answer || '', user_answer || '',
      level || null, full_poem || null, author || null, title || null, source || 'challenge']
@@ -122,51 +127,56 @@ async function getReviewStats(userId) {
  * @returns {Promise<object>} {correct, mastered, correctAnswer, correctStreak}
  */
 async function submitReviewAnswer(userId, questionId, userAnswer) {
-  const row = await db.get(
-    `SELECT * FROM wrong_questions WHERE id = $1 AND user_id = $2`,
-    [questionId, String(userId)]
-  );
-
-  if (!row) {
-    throw new Error('错题不存在');
-  }
-
-  const normalize = (s) => String(s || '').trim().replace(/[，。！？、；：""''（）\s]/g, '');
-  const correct = normalize(userAnswer) === normalize(row.answer);
-
-  if (correct) {
-    const newStreak = (row.correct_streak || 0) + 1;
-    const mastered = newStreak >= 2 ? 1 : 0;
-
-    await db.run(
-      `UPDATE wrong_questions
-       SET correct_streak = correct_streak + 1, mastered = CASE WHEN correct_streak + 1 >= 2 THEN 1 ELSE 0 END, last_reviewed_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [questionId]
+  return db.transaction(async (tx) => {
+    const row = await tx.get(
+      `SELECT * FROM wrong_questions WHERE id = $1 AND user_id = $2`,
+      [questionId, String(userId)]
     );
 
-    return {
-      correct: true,
-      mastered: mastered === 1,
-      correctAnswer: row.answer,
-      correctStreak: newStreak
-    };
-  } else {
-    await db.run(
-      `UPDATE wrong_questions
-       SET wrong_count = wrong_count + 1, correct_streak = 0,
-           last_wrong_time = CURRENT_TIMESTAMP, user_answer = $1
-       WHERE id = $2`,
-      [userAnswer || '', questionId]
-    );
+    if (!row) {
+      throw ApiError.notFound('错题不存在');
+    }
+
+    const correct = answersMatch(userAnswer, row.answer);
+    const nextState = calculateReviewState({
+      reviewCount: Math.max(Number(row.review_count) || 0, Number(row.mastered) === 1 ? MASTER_REVIEW_COUNT : 0),
+      correctStreak: row.correct_streak,
+      intervalDays: row.interval_days,
+      correct,
+      mastered: Number(row.mastered) === 1,
+    });
+
+    if (correct) {
+      await tx.run(
+        `UPDATE wrong_questions
+         SET correct_streak = $1, review_count = $2, interval_days = $3,
+             next_review = $4, mastered = $5, last_reviewed_at = CURRENT_TIMESTAMP
+         WHERE id = $6 AND user_id = $7`,
+        [nextState.correctStreak, nextState.reviewCount, nextState.intervalDays,
+          nextState.nextReview, nextState.mastered ? 1 : 0, questionId, String(userId)]
+      );
+    } else {
+      await tx.run(
+        `UPDATE wrong_questions
+         SET wrong_count = COALESCE(wrong_count, 1) + 1, correct_streak = 0, review_count = 0,
+             interval_days = 1, next_review = $1,
+             last_wrong_time = CURRENT_TIMESTAMP, last_reviewed_at = CURRENT_TIMESTAMP,
+             user_answer = $2, mastered = 0
+         WHERE id = $3 AND user_id = $4`,
+        [nextState.nextReview, userAnswer || '', questionId, String(userId)]
+      );
+    }
 
     return {
-      correct: false,
-      mastered: false,
+      correct,
+      mastered: nextState.mastered,
       correctAnswer: row.answer,
-      correctStreak: 0
+      correctStreak: nextState.correctStreak,
+      reviewCount: nextState.reviewCount,
+      intervalDays: nextState.intervalDays,
+      nextReview: nextState.nextReview,
     };
-  }
+  });
 }
 
 /**
@@ -176,11 +186,11 @@ async function submitReviewAnswer(userId, questionId, userAnswer) {
  */
 async function markAsMastered(userId, questionId) {
   const result = await db.run(
-     `UPDATE wrong_questions
-      SET mastered = 1, correct_streak = ${db.greatest('correct_streak', '2')},
-          last_reviewed_at = CURRENT_TIMESTAMP
-      WHERE id = $1 AND user_id = $2`,
-    [questionId, String(userId)]
+      `UPDATE wrong_questions
+      SET mastered = 1, correct_streak = $1, review_count = $1,
+          next_review = NULL, last_reviewed_at = CURRENT_TIMESTAMP
+      WHERE id = $2 AND user_id = $3`,
+    [MASTER_REVIEW_COUNT, questionId, String(userId)]
   );
   return result.rowCount > 0;
 }

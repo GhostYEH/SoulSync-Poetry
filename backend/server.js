@@ -66,7 +66,15 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 app.use('/api/ai', aiLimiter);
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static('public'));
+// 文生图是运行时缓存，独立于前端构建产物，避免 vite build 清空图片。
+const GENERATED_IMAGES_DIR = path.resolve(
+  process.env.IMAGE_GENERATION_CACHE_DIR || path.join(__dirname, 'generated-images')
+);
+fs.mkdirSync(GENERATED_IMAGES_DIR, { recursive: true });
+app.use('/api/generated-images', express.static(GENERATED_IMAGES_DIR));
+// 兼容生产环境里已经保存过的旧图片地址。
+app.use('/generated-images', express.static(GENERATED_IMAGES_DIR));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // 请求ID + 慢请求检测中间件
 app.use((req, res, next) => {
@@ -208,6 +216,17 @@ async function bootstrap() {
 }
 
 bootstrap().then(() => {
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[启动失败] 端口 ${PORT} 已被其他进程占用。`);
+      console.error(`  1) 找到并结束占用进程：netstat -ano | findstr :${PORT}  然后 taskkill /PID <PID> /F`);
+      console.error(`  2) 或换端口启动：在 backend/.env 中设置 PORT=3001（前端需同步改代理目标）`);
+    } else {
+      console.error('[启动失败] 服务器错误:', err.message);
+    }
+    process.exit(1);
+  });
+
   server.listen(PORT, () => {
     console.log(`服务器运行在 http://localhost:${PORT}`);
   });

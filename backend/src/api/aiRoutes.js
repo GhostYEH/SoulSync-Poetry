@@ -3,7 +3,8 @@ const router = express.Router();
 const aiService = require('../services/aiService');
 const { getIO } = require('../utils/socket');
 const crypto = require('crypto');
-const axios = require('axios');
+const { generateCachedImage } = require('../services/imageGenerationService');
+const { createImageGenerationCoordinator } = require('../services/imageGenerationCoordinator');
 const { aiRateLimiter } = require('../middleware/rateLimiter');
 const authenticateToken = require('../middleware/auth');
 const optionalAuthenticateToken = authenticateToken.optionalAuthenticateToken;
@@ -58,8 +59,7 @@ router.post('/stream', aiRateLimiter, async (req, res, next) => {
   }
 });
 
-const imageCache = new Map();
-const generationTasks = new Map();
+const imageGenerationCoordinator = createImageGenerationCoordinator();
 const userRateLimits = new Map();
 const MAX_REQUESTS_PER_MINUTE = 5;
 
@@ -700,80 +700,35 @@ function checkRateLimit(userId) {
   return true;
 }
 
-function generateImageCacheKey(poemId, title, author) {
-  const text = String(poemId) + '_' + String(title) + '_' + String(author);
+function generateImageCacheKey(poemId, title, author, promptVersion = 'scene-v13') {
+  const text = [poemId, title, author, promptVersion].map(String).join('_');
   return crypto.createHash('md5').update(text).digest('hex');
 }
 
-async function generateImage(poemId, title, author, content, socket) {
-  const cacheKey = generateImageCacheKey(poemId, title, author);
+async function generateImage(poemId, title, author, content, socket, promptVersion = 'scene-v13') {
+  const cacheKey = generateImageCacheKey(poemId, title, author, promptVersion);
 
-  if (imageCache.has(cacheKey)) {
-    const cached = imageCache.get(cacheKey);
-    if (Date.now() - cached.timestamp < 30 * 24 * 60 * 60 * 1000) {
-      socket.emit('image-generate-success', {
-        poemId: poemId,
-        url: cached.url
-      });
-      return cached.url;
-    }
+  const cachedUrl = imageGenerationCoordinator.getCached(cacheKey);
+  if (cachedUrl) {
+    socket.emit('image-generate-success', { poemId, url: cachedUrl });
+    return cachedUrl;
   }
 
-  if (generationTasks.has(cacheKey)) {
-    socket.emit('image-generate-pending', {
-      poemId: poemId
-    });
-    return null;
-  }
-
-  generationTasks.set(cacheKey, true);
   socket.emit('image-generate-pending', {
     poemId: poemId
   });
 
   try {
-    const ZHIPU_API_KEY = process.env.ZHIPU_API_KEY;
-
-    if (!ZHIPU_API_KEY) {
-      console.error('智谱API密钥未配置，请在backend/.env文件中设置ZHIPU_API_KEY');
-      socket.emit('image-generate-fail', {
-        poemId: poemId,
-        error: 'API密钥未配置，请联系管理员配置ZHIPU_API_KEY'
-      });
-      return null;
-    }
-
-    const promptText = '根据古诗词《' + title + '》（作者：' + author + '）的内容生成一幅中国风图像，画面要准确描绘诗中所描述的场景和意境，' + content + '，中国传统风格，高清细腻，氛围感强，无任何文字、无水印、无logo，画面干净统一，适合做网页背景图';
-
-    console.log('生成图像的prompt:', promptText);
-    console.log('使用智谱GLM-Image生成意境图');
-
-    const response = await axios.post('https://open.bigmodel.cn/api/paas/v4/images/generations', {
-      model: 'cogview-3-flash',
-      prompt: promptText,
-      size: '1440x720'
-    }, {
-      headers: {
-        'Authorization': 'Bearer ' + ZHIPU_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      timeout: 120000
+    const imageUrl = await imageGenerationCoordinator.getOrGenerate(cacheKey, async () => {
+      const promptText = `${String(content || '').trim()}\n纯场景图，不出现人物。`;
+      console.log('生成图像的prompt:', promptText);
+      console.log('使用阿里云百炼 z-image-turbo 生成意境图');
+      const result = await generateCachedImage({ prompt: promptText, size: '2048*1152' });
+      return result.url;
     });
 
-    console.log('API响应:', JSON.stringify(response.data).slice(0, 500));
-
-    const imageUrl = response.data
-      && Array.isArray(response.data.data)
-      && response.data.data[0]
-      && response.data.data[0].url;
-
     if (imageUrl) {
-      console.log('使用智谱API返回的URL:', imageUrl);
-
-      const cacheEntry = {};
-      cacheEntry.url = imageUrl;
-      cacheEntry.timestamp = Date.now();
-      imageCache.set(cacheKey, cacheEntry);
+      console.log('意境图可用地址:', imageUrl);
 
       socket.emit('image-generate-success', {
         poemId: poemId,
@@ -796,8 +751,6 @@ async function generateImage(poemId, title, author, content, socket) {
       error: error.message
     });
     return null;
-  } finally {
-    generationTasks.delete(cacheKey);
   }
 }
 
@@ -808,6 +761,7 @@ router.post('/image/pregenerate', aiRateLimiter, async function(req, res) {
     const title = req.body.title;
     const author = req.body.author;
     const content = req.body.content;
+    const promptVersion = req.body.promptVersion || 'scene-v13';
     let userId = req.user ? req.user.userId : null;
     
     // 如果没有登录，使用 IP 作为限流依据
@@ -829,9 +783,13 @@ router.post('/image/pregenerate', aiRateLimiter, async function(req, res) {
       return;
     }
 
-    generateImage(poemId, title, author, content, socket);
+    const imageUrl = await generateImage(poemId, title, author, content, socket, promptVersion);
+    if (!imageUrl) {
+      res.status(502).json({ success: false, message: '意境图生成失败' });
+      return;
+    }
 
-    res.json({ success: true, message: '预生成任务已启动' });
+    res.json({ success: true, url: imageUrl, message: '意境图已就绪' });
   } catch (error) {
     console.error('预生成图像失败:', error);
     res.status(500).json({ message: '预生成失败' });
@@ -844,20 +802,19 @@ router.post('/image/get', aiRateLimiter, async function(req, res) {
     const poemId = req.body.poemId;
     const title = req.body.title;
     const author = req.body.author;
+    const promptVersion = req.body.promptVersion || 'scene-v13';
 
     if (!poemId || !title || !author) {
       res.status(400).json({ message: '缺少必要参数' });
       return;
     }
 
-    const cacheKey = generateImageCacheKey(poemId, title, author);
+    const cacheKey = generateImageCacheKey(poemId, title, author, promptVersion);
 
-    if (imageCache.has(cacheKey)) {
-      const cached = imageCache.get(cacheKey);
-      if (Date.now() - cached.timestamp < 30 * 24 * 60 * 60 * 1000) {
-        res.json({ success: true, url: cached.url });
-        return;
-      }
+    const cachedUrl = imageGenerationCoordinator.getCached(cacheKey);
+    if (cachedUrl) {
+      res.json({ success: true, url: cachedUrl });
+      return;
     }
 
     res.json({ success: false, message: '缓存未命中' });
@@ -906,31 +863,9 @@ router.post('/image/carousel', aiRateLimiter, async function(req, res) {
 
     const promptText = '根据古诗词《' + title + '》（作者：' + author + '）的内容生成一幅' + randomStyle + '的中国风图像，画面要准确描绘诗中所描述的场景和意境，' + content + '，中国传统风格，高清细腻，氛围感强，无任何文字、无水印、无logo，画面干净统一，适合做网页背景图';
 
-    const ZHIPU_API_KEY = process.env.ZHIPU_API_KEY;
-    if (!ZHIPU_API_KEY) {
-      throw new Error('智谱API密钥未配置，请在backend/.env文件中设置ZHIPU_API_KEY');
-    }
-
     console.log('轮播图生成的prompt:', promptText);
-
-    const response = await axios.post('https://open.bigmodel.cn/api/paas/v4/images/generations', {
-      model: 'cogview-3-flash',
-      prompt: promptText,
-      size: '1440x720'
-    }, {
-      headers: {
-        'Authorization': 'Bearer ' + ZHIPU_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      timeout: 120000
-    });
-
-    console.log('轮播图API响应:', JSON.stringify(response.data).slice(0, 500));
-
-    const generatedUrl = response.data
-      && Array.isArray(response.data.data)
-      && response.data.data[0]
-      && response.data.data[0].url;
+    const generated = await generateCachedImage({ prompt: promptText, size: '1280*720' });
+    const generatedUrl = generated.url;
 
     if (generatedUrl) {
       const imageUrl = generatedUrl;
@@ -951,7 +886,7 @@ router.post('/image/carousel', aiRateLimiter, async function(req, res) {
   }
 });
 
-// 智谱AI文生图 - 为选中的诗句生成意境画面
+// 百炼 Z-Image Turbo - 为选中的诗句生成意境画面
 router.post('/scene-image', aiRateLimiter, async function(req, res) {
   try {
     const poemLine = req.body.poemLine;
@@ -1004,27 +939,9 @@ router.post('/scene-image', aiRateLimiter, async function(req, res) {
   }
 });
 
-// 诗人头像生成接口
+// 诗人头像已改为前端本地静态资源，不再触发文生图调用。
 router.post('/author-avatar', aiRateLimiter, async function(req, res) {
-  try {
-    const author = req.body.author;
-
-    if (!author) {
-      res.status(400).json({ message: '缺少诗人姓名' });
-      return;
-    }
-
-    const result = await aiService.generateAuthorAvatar(author);
-
-    if (result.success) {
-      res.json({ success: true, url: result.url });
-    } else {
-      res.json({ success: false, message: result.message || '生成失败' });
-    }
-  } catch (error) {
-    console.error('诗人头像生成失败:', error);
-    res.status(500).json({ message: '生成失败，请稍后重试' });
-  }
+  res.status(410).json({ success: false, message: '诗人头像已使用本地静态资源' });
 });
 
 // 飞花令诗句AI验证接口

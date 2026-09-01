@@ -319,7 +319,6 @@ function bindSocketEvents() {
     ['online-list-update', updateOnlineUsers],
     ['online-users', updateOnlineUsers],
     ['game-start', handleSocketGameStart],
-    ['receive-invitation', handleReceivedInvitation],
     ['invitation-rejected', handleInvitationRejected],
     ['invitation-cancelled', handleInvitationCancelled],
     ['poem-submitted', handleOnlinePoemSubmitted],
@@ -373,6 +372,8 @@ function playerLevel(player) {
 function handleSocketGameStart(data) {
   const room = data?.room
   if (!room) return
+  selectedMode.value = room.isRanking ? 'ranking' : 'online'
+  localStorage.removeItem('pendingFeihuaGame')
   onlineRoomId.value = room.id
   onlineWinnerId.value = null
   selectedKeyword.value = room.keyword || selectedKeyword.value
@@ -829,6 +830,23 @@ function openErrorBook() { router.push('/error-book') }
 
 onMounted(() => {
   if (!selectedKeyword.value) selectedKeyword.value = '花'
+
+  // 全局邀请中心负责接收邀请；本页只负责消费已经建立的房间事件。
+  const token = localStorage.getItem('token')
+  if (token) {
+    boundSocketEvents = bindSocketEvents()
+    feihualingSocket.connect(token)
+    try {
+      const pending = localStorage.getItem('pendingFeihuaGame')
+      if (pending) {
+        localStorage.removeItem('pendingFeihuaGame')
+        handleSocketGameStart(JSON.parse(pending))
+      }
+    } catch (error) {
+      localStorage.removeItem('pendingFeihuaGame')
+      console.warn('[飞花令] 恢复待进入房间失败', error)
+    }
+  }
 })
 onUnmounted(() => {
   stopTimer()

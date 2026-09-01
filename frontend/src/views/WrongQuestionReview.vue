@@ -62,7 +62,7 @@
             <span class="pill-label">总题数</span>
           </div>
           <div class="stat-pill remaining">
-            <span class="pill-num">{{ questions.length - currentIndex }}</span>
+            <span class="pill-num">{{ remainingCount }}</span>
             <span class="pill-label">剩余</span>
           </div>
           <div class="stat-pill mastered">
@@ -130,6 +130,7 @@
               :disabled="answerSubmitting"
             />
           </div>
+          <p v-if="answerError" class="answer-error" role="alert">{{ answerError }}</p>
           <div class="action-row">
             <button class="hint-toggle-btn" @click="toggleHints" :class="{ active: showHints }">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -310,6 +311,7 @@ export default {
     const currentIndex = ref(0);
     const answerInput = ref('');
     const answerSubmitting = ref(false);
+    const answerError = ref('');
     const answerResult = ref(null);
     const alreadyMastered = ref(false);
 
@@ -327,10 +329,14 @@ export default {
     const isLastQuestion = computed(() => currentIndex.value >= questions.value.length - 1);
     const progressPercent = computed(() => {
       if (questions.value.length === 0) return 0;
-      return Math.round((currentIndex.value / questions.value.length) * 100);
+      return Math.round(((currentIndex.value + 1) / questions.value.length) * 100);
     });
     const masteredCount = computed(() => {
       return questions.value.filter(q => q.mastered === 1 || q.mastered === true).length;
+    });
+    const remainingCount = computed(() => {
+      const currentFinished = Boolean(answerResult.value) || alreadyMastered.value;
+      return Math.max(0, questions.value.length - currentIndex.value - (currentFinished ? 1 : 0));
     });
 
     const answerInputPlaceholder = computed(() => {
@@ -354,13 +360,18 @@ export default {
           api.challenge.getErrorBook().catch(() => [])
         ]);
 
-        // 优先使用 wrongQuestions 数据，否则用 errorBook
-        if (questionsData && questionsData.length > 0) {
-          questions.value = questionsData;
-        } else if (errorBookData && errorBookData.length > 0) {
-          questions.value = errorBookData.map(item => ({
+        const targetId = route.query.questionId ? Number(route.query.questionId) : null;
+        const targetSource = route.query.source || null;
+        const wrongQuestionItems = (questionsData || []).map(item => ({
+          ...item,
+          reviewSource: 'wrong-questions',
+          question: item.question || item.question_content || item.q,
+          answer: item.answer || item.correct_answer || item.correctAnswer,
+        }));
+        const errorBookItems = (errorBookData || [])
+          .map(item => ({
             id: item.id,
-            question_id: item.question_id || item.id,
+            reviewSource: 'error-book',
             question: item.question_content || item.question || item.q,
             answer: item.correct_answer || item.correctAnswer || item.answer,
             correct_answer: item.correct_answer || item.correctAnswer || item.answer,
@@ -372,9 +383,23 @@ export default {
             level: item.level,
             explanation: item.explanation,
             wrong_count: item.wrong_count || item.wrongTimes || 1,
-            mastered: item.mastered
+            review_count: item.review_count,
+            interval_days: item.interval_days,
+            next_review: item.next_review,
+            added_at: item.added_at,
+            mastered: item.is_reviewed === 1 || item.is_reviewed === true
           }));
-        }
+        const mergedQuestions = [...wrongQuestionItems, ...errorBookItems]
+          .sort((a, b) => new Date(b.last_wrong_time || b.added_at || 0) - new Date(a.last_wrong_time || a.added_at || 0));
+        const today = new Date();
+        const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const isDue = (item) => !item.next_review || String(item.next_review).slice(0, 10) <= todayKey;
+        questions.value = mergedQuestions.filter(item => {
+          const isTarget = targetId
+            && item.id === targetId
+            && (!targetSource || item.reviewSource === targetSource);
+          return isTarget || (!(item.mastered === 1 || item.mastered === true) && isDue(item));
+        });
       } catch (error) {
         console.error('加载错题失败:', error);
         questions.value = [];
@@ -383,7 +408,7 @@ export default {
         // 如果URL有questionId参数，跳转到对应题目
         const questionId = route.query.questionId;
         if (questionId) {
-          const idx = questions.value.findIndex(q => (q.id || q.question_id) === Number(questionId));
+          const idx = questions.value.findIndex(q => q.id === Number(questionId) && (!route.query.source || q.reviewSource === route.query.source));
           if (idx !== -1) {
             currentIndex.value = idx;
           }
@@ -394,29 +419,36 @@ export default {
 
     // ---- 答题 ----
     const submitAnswer = async () => {
-      if (!answerInput.value.trim() || !currentQuestion.value) return;
+      if (answerSubmitting.value || answerResult.value || !answerInput.value.trim() || !currentQuestion.value) return;
 
       answerSubmitting.value = true;
+      answerError.value = '';
       try {
-        const questionId = currentQuestion.value.question_id || currentQuestion.value.id;
-        const result = await api.wrongQuestions.submitAnswer(questionId, answerInput.value);
+        const result = currentQuestion.value.reviewSource === 'error-book'
+          ? await api.challenge.reviewErrorBook(currentQuestion.value.id, answerInput.value)
+          : await api.wrongQuestions.submitAnswer(currentQuestion.value.id, answerInput.value);
 
         answerResult.value = {
           ...result,
           userAnswer: answerInput.value
         };
 
+        currentQuestion.value.correct_streak = result.correctStreak || 0;
+        if (result.reviewCount !== undefined) currentQuestion.value.review_count = result.reviewCount;
+        if (result.intervalDays !== undefined) currentQuestion.value.interval_days = result.intervalDays;
+        if (result.nextReview !== undefined) currentQuestion.value.next_review = result.nextReview;
+        if (!result.correct) {
+          currentQuestion.value.wrong_count = (Number(currentQuestion.value.wrong_count) || 1) + 1;
+        }
+        if (result.mastered) currentQuestion.value.mastered = 1;
+
         alreadyMastered.value = currentQuestion.value.mastered === 1 || currentQuestion.value.mastered === true;
 
         // 获取AI解析
         fetchAIExplanation();
       } catch (error) {
-        // fallback: 简单字符串比较
-        const correctAns = currentQuestion.value.answer || currentQuestion.value.correct_answer;
-        const correct = answerInput.value.trim() === correctAns;
-        answerResult.value = { correct, userAnswer: answerInput.value };
-        alreadyMastered.value = currentQuestion.value.mastered === 1 || currentQuestion.value.mastered === true;
-        fetchAIExplanation();
+        // 判题必须以服务端结果为准；网络/服务异常时允许用户重试，不能本地猜测对错。
+        answerError.value = error?.message || '提交失败，请检查网络后重试';
       } finally {
         answerSubmitting.value = false;
       }
@@ -510,11 +542,13 @@ export default {
     // ---- 操作 ----
     const markMastered = async () => {
       if (!currentQuestion.value) return;
-      const questionId = currentQuestion.value.question_id || currentQuestion.value.id;
       try {
-        await api.wrongQuestions.markAsMastered(questionId);
+        const result = currentQuestion.value.reviewSource === 'error-book'
+          ? await api.challenge.markErrorBookReviewed(currentQuestion.value.id)
+          : await api.wrongQuestions.markAsMastered(currentQuestion.value.id);
+        if (result?.success === false) throw new Error('标记失败');
         alreadyMastered.value = true;
-        const q = questions.value.find(q => (q.question_id || q.id) === questionId);
+        const q = questions.value.find(q => q.id === currentQuestion.value.id && q.reviewSource === currentQuestion.value.reviewSource);
         if (q) q.mastered = 1;
         if (answerResult.value) {
           answerResult.value = { ...answerResult.value, mastered: true };
@@ -526,15 +560,12 @@ export default {
 
     const deleteCurrentQuestion = async () => {
       if (!currentQuestion.value || !await askConfirm('确定要删除这道错题吗？', { title: '删除错题', confirmText: '删除', danger: true })) return;
-      const questionId = currentQuestion.value.question_id || currentQuestion.value.id;
-      const itemId = currentQuestion.value.id;
-
       try {
-        // 尝试从两个API删除
-        await Promise.all([
-          api.wrongQuestions.delete(questionId).catch(() => {}),
-          api.challenge.removeFromErrorBook(itemId).catch(() => {})
-        ]);
+        if (currentQuestion.value.reviewSource === 'error-book') {
+          await api.challenge.removeFromErrorBook(currentQuestion.value.id);
+        } else {
+          await api.wrongQuestions.delete(currentQuestion.value.id);
+        }
 
         questions.value.splice(currentIndex.value, 1);
 
@@ -566,6 +597,7 @@ export default {
 
     const resetState = () => {
       answerInput.value = '';
+      answerError.value = '';
       answerResult.value = null;
       showHints.value = false;
       hints.value = [null, null, null];
@@ -582,7 +614,7 @@ export default {
     // 监听路由变化，支持从错题本跳转单个题目
     watch(() => route.query.questionId, (newId) => {
       if (newId && !loading.value) {
-        const idx = questions.value.findIndex(q => (q.id || q.question_id) === Number(newId));
+        const idx = questions.value.findIndex(q => q.id === Number(newId) && (!route.query.source || q.reviewSource === route.query.source));
         if (idx !== -1) {
           currentIndex.value = idx;
           resetState();
@@ -592,8 +624,8 @@ export default {
 
     return {
       loading, questions, currentIndex, currentQuestion, isLastQuestion,
-      progressPercent, masteredCount,
-      answerInput, answerSubmitting, answerResult, alreadyMastered,
+      progressPercent, masteredCount, remainingCount,
+      answerInput, answerSubmitting, answerError, answerResult, alreadyMastered,
       showHints, hints, hintRevealed, hintsLoading, aiExplanation,
       answerInputRef, answerInputPlaceholder,
       submitAnswer, toggleHints, fetchHints, revealHint,
@@ -970,6 +1002,12 @@ export default {
 }
 .answer-input-field::placeholder { color: rgba(139,69,19,0.4); }
 .answer-input-field:disabled { opacity: 0.6; }
+.answer-error {
+  margin: 10px 0 0;
+  color: #a14d45;
+  font-size: 13px;
+  line-height: 1.5;
+}
 
 .action-row {
   display: flex;

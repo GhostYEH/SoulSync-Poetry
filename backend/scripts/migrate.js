@@ -124,6 +124,9 @@ const tables = [
       wrong_count INTEGER DEFAULT 1,
       last_wrong_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       correct_streak INTEGER DEFAULT 0,
+      review_count INTEGER DEFAULT 0,
+      interval_days INTEGER DEFAULT 1,
+      next_review DATE DEFAULT CURRENT_DATE,
       mastered INTEGER DEFAULT 0,
       full_poem TEXT,
       author TEXT,
@@ -203,6 +206,12 @@ const tables = [
       explanation TEXT,
       added_at TEXT NOT NULL,
       is_reviewed INTEGER DEFAULT 0,
+      wrong_count INTEGER DEFAULT 1,
+      review_streak INTEGER DEFAULT 0,
+      review_count INTEGER DEFAULT 0,
+      interval_days INTEGER DEFAULT 1,
+      next_review DATE DEFAULT CURRENT_DATE,
+      last_reviewed_at TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (record_id) REFERENCES user_challenge_records(id)
     )`
@@ -635,7 +644,16 @@ const alterColumns = [
   { name: 'cq_question_id_unique', sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_challenge_questions_question_id ON challenge_questions(question_id)` },
   { name: 'wq_added_at', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` },
   { name: 'wq_last_reviewed_at', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS last_reviewed_at TIMESTAMP` },
+  { name: 'wq_review_count', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS review_count INTEGER DEFAULT 0` },
+  { name: 'wq_interval_days', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS interval_days INTEGER DEFAULT 1` },
+  { name: 'wq_next_review', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS next_review DATE DEFAULT CURRENT_DATE` },
   { name: 'wq_source', sql: `ALTER TABLE wrong_questions ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'challenge'` },
+  { name: 'ueb_wrong_count', sql: `ALTER TABLE user_error_book ADD COLUMN IF NOT EXISTS wrong_count INTEGER DEFAULT 1` },
+  { name: 'ueb_review_streak', sql: `ALTER TABLE user_error_book ADD COLUMN IF NOT EXISTS review_streak INTEGER DEFAULT 0` },
+  { name: 'ueb_review_count', sql: `ALTER TABLE user_error_book ADD COLUMN IF NOT EXISTS review_count INTEGER DEFAULT 0` },
+  { name: 'ueb_interval_days', sql: `ALTER TABLE user_error_book ADD COLUMN IF NOT EXISTS interval_days INTEGER DEFAULT 1` },
+  { name: 'ueb_next_review', sql: `ALTER TABLE user_error_book ADD COLUMN IF NOT EXISTS next_review DATE DEFAULT CURRENT_DATE` },
+  { name: 'ueb_last_reviewed_at', sql: `ALTER TABLE user_error_book ADD COLUMN IF NOT EXISTS last_reviewed_at TIMESTAMP` },
 ];
 
 async function migrate() {

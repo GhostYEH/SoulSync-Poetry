@@ -170,6 +170,22 @@ function migrate(dbPath) {
       addColumnIfMissing(db, 'wrong_questions', 'last_reviewed_at', 'TEXT');
       addColumnIfMissing(db, 'wrong_questions', 'question_id', 'INTEGER');
       addColumnIfMissing(db, 'wrong_questions', 'source', "TEXT DEFAULT 'challenge'");
+      addColumnIfMissing(db, 'wrong_questions', 'review_count', 'INTEGER DEFAULT 0');
+      addColumnIfMissing(db, 'wrong_questions', 'interval_days', 'INTEGER DEFAULT 1');
+      // SQLite does not allow a non-constant default in ALTER TABLE.
+      addColumnIfMissing(db, 'wrong_questions', 'next_review', 'TEXT');
+      db.exec("UPDATE wrong_questions SET next_review = DATE('now') WHERE next_review IS NULL");
+    }
+
+    // 6.1 user_error_book — 统一错题复习状态与间隔字段
+    if (tableExists(db, 'user_error_book')) {
+      addColumnIfMissing(db, 'user_error_book', 'wrong_count', 'INTEGER DEFAULT 1');
+      addColumnIfMissing(db, 'user_error_book', 'review_streak', 'INTEGER DEFAULT 0');
+      addColumnIfMissing(db, 'user_error_book', 'review_count', 'INTEGER DEFAULT 0');
+      addColumnIfMissing(db, 'user_error_book', 'interval_days', 'INTEGER DEFAULT 1');
+      addColumnIfMissing(db, 'user_error_book', 'next_review', 'TEXT');
+      addColumnIfMissing(db, 'user_error_book', 'last_reviewed_at', 'TEXT');
+      db.exec("UPDATE user_error_book SET next_review = DATE('now') WHERE next_review IS NULL");
     }
 
     // 7. student_tags 表
@@ -183,7 +199,27 @@ function migrate(dbPath) {
       )
     `);
 
-    // 8. 补充高频查询索引（仅在表存在时创建，兼容空数据库）
+    // 8. 复习会话 — 复习服务的会话接口依赖这两张表。
+    createTableIfNotExists(db, 'review_sessions', `
+      CREATE TABLE review_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        started_at TEXT DEFAULT (datetime('now')),
+        completed_at TEXT,
+        total_poems INTEGER DEFAULT 0
+      )
+    `);
+    createTableIfNotExists(db, 'review_session_items', `
+      CREATE TABLE review_session_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        poem_id INTEGER NOT NULL,
+        score INTEGER,
+        reviewed_at TEXT
+      )
+    `);
+
+    // 9. 补充高频查询索引（仅在表存在时创建，兼容空数据库）
     function createIndexIfTableExists(indexSql, table) {
       if (tableExists(db, table)) {
         try { db.exec(indexSql); } catch (e) { console.warn('  [!] 索引跳过:', e.message); }
@@ -203,6 +239,8 @@ function migrate(dbPath) {
     createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_challenge_questions_poem ON challenge_questions(poem_id)", 'challenge_questions');
     createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_users_class ON users(class_id)", 'users');
     createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_learning_events_user_created ON learning_events(user_id, created_at)", 'learning_events');
+    createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_review_sessions_user_started ON review_sessions(user_id, started_at)", 'review_sessions');
+    createIndexIfTableExists("CREATE INDEX IF NOT EXISTS idx_review_session_items_session ON review_session_items(session_id)", 'review_session_items');
 
     db.exec('COMMIT');
     console.log('[sqlite-migration] 迁移完成');

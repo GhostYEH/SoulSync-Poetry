@@ -5,6 +5,7 @@ const { getCacheFilePath, readCache, writeCache } = require('../utils/cache');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
 const { AIClient, AIError, AI_ERRORS, robustJSONParse } = require('../utils/aiClient');
+const { generateCachedImage } = require('./imageGenerationService');
 
 const PROMPT_VERSION = 'v1.0';
 const CACHE_VERSION = 'v1.0';
@@ -1142,53 +1143,13 @@ async function getAIGeneratedQuestions(prompt) {
 // 生成意境图
 async function generatePoemImage(poem, title, author) {
   try {
-    const apiKey = process.env.ZHIPU_API_KEY;
-    if (!apiKey) {
-      console.log('[aiService] 缺少智谱API密钥，无法生成图片');
-      return null;
-    }
-
-    const imagePrompt = `中国传统水墨画风格，描绘诗词《${title}》的意境。${poem}。画面要体现诗中的意象和情感，淡雅古朴，意境深远，高清细腻，无文字，无水印。`;
-
+    const imagePrompt = `生成一幅中国古典山水纯风景画。
+场景灵感（只用于理解景物，不得抄写或呈现在画面中）：${poem}
+把场景灵感转译成真实可见的自然景物与氛围，采用淡彩水墨或青绿山水风格，构图疏朗，意境深远，高清细腻。
+重要限制：画面中严禁出现任何可读文字、汉字、诗句、标题、书法、题款、印章、牌匾、水印、logo、边框、字幕或海报排版；只输出没有文字的风景画。`;
     console.log('[aiService] 生成诗词意境图:', { title, author, promptLength: imagePrompt.length });
-
-    const response = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'cogview-3-flash',
-        prompt: imagePrompt,
-        size: '1024x1024'
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('[aiService] 图片生成失败:', response.status, response.statusText, errorData);
-      return null;
-    }
-
-    const responseData = await response.json();
-    console.log('[aiService] 图片生成成功:', responseData);
-
-    const imageUrl = responseData
-      && Array.isArray(responseData.data)
-      && responseData.data[0]
-      && responseData.data[0].url;
-
-    if (imageUrl) {
-      return {
-        success: true,
-        imageUrl: imageUrl,
-        prompt: imagePrompt,
-        message: '图片生成成功'
-      };
-    }
-
-    return null;
+    const result = await generateCachedImage({ prompt: imagePrompt, size: '1024*1024' });
+    return { success: true, imageUrl: result.url, prompt: imagePrompt, message: result.cached ? '已读取图片缓存' : '图片生成成功', model: result.model };
   } catch (error) {
     console.error('[aiService] 生成诗词意境图失败:', error);
     return null;
@@ -2310,7 +2271,6 @@ module.exports = {
   aiPoemSearch,
   analyzeSearchResults,
   detectSearchEmotion,
-  generateAuthorAvatar,
   generateTTS,
   streamAIText
 };
@@ -2318,72 +2278,25 @@ module.exports = {
 // 生成诗句意境图
 async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumber = null, totalLines = null) {
   try {
-    const apiKey = process.env.ZHIPU_API_KEY;
-    if (!apiKey) {
-      console.error('[aiService] 缺少智谱API密钥');
-      throw new AIError(AI_ERRORS.AUTH_FAILED, 'AI生图服务未配置API密钥');
-    }
-
     const lineHint =
       lineNumber != null && totalLines != null && totalLines > 0
         ? `全诗共${totalLines}句，当前要画的是其中第${lineNumber}句。`
         : '';
 
-    const prompt = `你正在为古诗《${poemTitle}》（作者：${poemAuthor}）生成一幅「单句诗意图」配图。${lineHint}
-【必须表现的诗句】「${poemLine}」
+    const prompt = `生成一幅中国古典山水纯风景画。${lineHint}
+场景灵感（只用于理解景物，不得抄写或呈现在画面中）：${poemLine}
 
 画面要求：
-1. 紧扣这一句诗里出现的具体意象（如烟霞、香炉峰、飞瀑、明月、孤舟、杨柳等），画出中国古典诗词应有的意境美与诗意氛围
-2. 采用中国传统审美：水墨晕染、青绿山水、工笔意境或淡彩写意均可，整体典雅含蓄、留白有度、富有诗意
-3. 不要出现现代建筑、轮船铁塔、公路汽车等与古诗意境不符的元素
-4. 高清、构图疏朗，光影柔和，画面中不要出现任何文字、水印、logo`;
+1. 把场景灵感完整转译为具体自然景物，如烟霞、山峰、江河、飞瀑、明月、孤舟或杨柳，营造含蓄深远的东方意境
+2. 采用水墨晕染、青绿山水、工笔意境或淡彩写意，构图疏朗，光影柔和，高清细腻
+3. 只画古典自然风景和必要点景，不要现代建筑、轮船、铁塔、公路、汽车，也不要人物特写
+4. 重要限制：这不是诗词海报、书法作品或插页。画面中严禁出现任何可读文字、汉字、诗句、标题、书法、题款、印章、牌匾、水印、logo、边框、字幕或排版元素；只输出没有文字的风景画`;
 
     console.log('[aiService] 文生图请求:', { title: poemTitle, promptLength: prompt.length });
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
-
-    try {
-      const response = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'cogview-3-flash',
-          prompt: prompt,
-          size: '1024x1024'
-        }),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('[aiService] 文生图失败:', response.status, errorData);
-        return { success: false, url: null, message: '图像生成请求失败' };
-      }
-
-      const data = await response.json();
-      const imageUrl = data
-        && Array.isArray(data.data)
-        && data.data[0]
-        && data.data[0].url;
-
-      if (!imageUrl) {
-        console.error('[aiService] 文生图API返回格式错误:', JSON.stringify(data).slice(0, 500));
-        return { success: false, url: null, message: 'API返回格式错误' };
-      }
-
-      console.log('[aiService] 文生图成功:', imageUrl);
-      return {
-        success: true,
-        url: imageUrl,
-        model: 'cogview-3-flash'
-      };
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    const result = await generateCachedImage({ prompt, size: '1024*1024' });
+    console.log('[aiService] 文生图成功:', { cached: result.cached, model: result.model });
+    return { success: true, url: result.url, model: result.model, cached: result.cached };
   } catch (error) {
     console.error('[aiService] 文生图失败:', error);
     return { success: false, url: null, message: '文生图请求失败' };
@@ -2391,68 +2304,6 @@ async function generatePoemSceneImage(poemLine, poemTitle, poemAuthor, lineNumbe
 }
 
 
-
-async function generateAuthorAvatar(author) {
-  try {
-    const apiKey = process.env.ZHIPU_API_KEY;
-    if (!apiKey) {
-      console.error('[aiService] 缺少智谱API密钥');
-      return { success: false, url: null, message: 'API密钥未配置' };
-    }
-
-    const prompt = `一位中国古代诗人${author}的肖像画，中国传统水墨画风格，文人雅士形象，身着古代服饰，气质儒雅，背景淡雅，工笔细腻，高清画质，无文字无水印，正面半身像`;
-
-    console.log('[aiService] 生成诗人头像:', { author, promptLength: prompt.length });
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
-
-    try {
-      const response = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: 'cogview-3-flash',
-          prompt: prompt,
-          size: '1024x1024'
-        }),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('[aiService] 生成头像失败:', response.status, errorData);
-        return { success: false, url: null, message: '图像生成请求失败' };
-      }
-
-      const data = await response.json();
-      const imageUrl = data
-        && Array.isArray(data.data)
-        && data.data[0]
-        && data.data[0].url;
-
-      if (!imageUrl) {
-        console.error('[aiService] 头像API返回格式错误:', JSON.stringify(data).slice(0, 500));
-        return { success: false, url: null, message: 'API返回格式错误' };
-      }
-
-      console.log('[aiService] 诗人头像生成成功:', imageUrl);
-      return {
-        success: true,
-        url: imageUrl,
-        model: 'cogview-3-flash'
-      };
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  } catch (error) {
-    console.error('[aiService] 生成诗人头像失败:', error);
-    return { success: false, url: null, message: '生成失败，请稍后重试' };
-  }
-}
 
 // 语音合成：MiMo 的 TTS 接口遵循 OpenAI Chat Completions 格式，
 // 目标播报文本必须放在 assistant 消息中，user 消息用于描述演绎风格。
@@ -2552,7 +2403,6 @@ module.exports = {
   evaluateFeihuaPoem,
   evaluateFeihua,
   repairDuelQuestionFromFullPoem,
-  generateAuthorAvatar,
   generatePoemSceneImage,
   getPoemBackground,
   getPoemStory,

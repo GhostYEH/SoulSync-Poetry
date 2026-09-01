@@ -16,8 +16,6 @@ const PoetryCardCatch = () => import('../views/PoetryCardCatch.vue')
 // Vue Router 只会为浏览器前进/后退提供 savedPosition。应用内按钮通常使用
 // push，因此额外记录每个路由离开时的位置，保证从二级页点回首页也能回到原处。
 const routeScrollPositions = new Map()
-const ROUTE_TRANSITION_MS = 220
-
 function readWindowScrollPosition() {
   return {
     left: Math.max(0, window.scrollX || window.pageXOffset || 0),
@@ -27,12 +25,11 @@ function readWindowScrollPosition() {
 
 function restoreAfterLayout(position) {
   return new Promise((resolve) => {
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    window.setTimeout(() => {
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => resolve({ ...position, behavior: 'auto' }))
-      })
-    }, reduceMotion ? 0 : ROUTE_TRANSITION_MS)
+    // Wait only for Vue to paint the destination route. The previous fixed
+    // transition delay left restored pages visibly idle before they reacted.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve({ ...position, behavior: 'auto' }))
+    })
   })
 }
 
@@ -123,11 +120,6 @@ const routes = [
     meta: {
       title: '注册 - 古诗词学习系统'
     }
-  },
-  // 404 路由
-  {
-    path: '/:pathMatch(.*)*',
-    redirect: '/'
   },
   // 创作模块路由
   {
@@ -276,6 +268,11 @@ const routes = [
       title: '语音背诵 - 古诗词学习系统',
       requiresAuth: true
     }
+  },
+  // 404 路由必须放在所有正式路由之后，否则会吞掉闯关、错题本等路径。
+  {
+    path: '/:pathMatch(.*)*',
+    redirect: '/'
   }
 ]
 
@@ -316,44 +313,8 @@ export function prefetchRoute(path) {
   return loadPromise
 }
 
-function warmUpCommonRoutes() {
-  const commonRoutes = [
-    '/search',
-    '/dashboard',
-    '/feihualing/single',
-    '/challenge',
-    '/creation',
-    '/profile',
-    '/learning-path',
-    '/parkour',
-    '/card-catch'
-  ]
-  let index = 0
-  const requestIdle = window.requestIdleCallback
-    ? (callback) => window.requestIdleCallback(callback, { timeout: 4000 })
-    : (callback) => window.setTimeout(callback, 500)
-
-  const warmNext = () => {
-    if (index >= commonRoutes.length) return
-    requestIdle(() => {
-      // 预取是尽力而为的后台工作；真正导航仍由 Vue Router 管理错误。
-      prefetchRoute(commonRoutes[index++]).catch(() => {})
-      // 将模块解析摊到多个空闲窗口，避免首屏刚可交互时集中占用主线程。
-      window.setTimeout(warmNext, 400)
-    })
-  }
-
-  warmNext()
-}
-
-router.isReady().then(() => {
-  const scheduleWarmUp = () => window.setTimeout(warmUpCommonRoutes, 800)
-  if (document.readyState === 'complete') {
-    scheduleWarmUp()
-  } else {
-    window.addEventListener('load', scheduleWarmUp, { once: true })
-  }
-})
+// 路由模块只在用户悬停、聚焦或实际导航时预取；避免首页空闲时把游戏、创作
+// 等大页面全部下载并解析，保留首次进入目标页面时的按需加载能力。
 
 // 主导航栏顺序，用于判定页面切换方向（替代路径深度，解决同级切换方向恒 forward 的问题）
 const navOrder = [

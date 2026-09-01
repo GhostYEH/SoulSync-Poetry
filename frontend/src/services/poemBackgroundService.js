@@ -1,4 +1,22 @@
-import { request, TIMEOUTS } from './api'
+import { API_BASE_URL, request, TIMEOUTS } from './api'
+
+function normalizeGeneratedImageUrl(url) {
+  if (typeof url !== 'string') return url
+  const value = url.trim()
+  if (!value) return null
+
+  // 后端返回的是同源相对地址；独立部署时也要把图片请求发到 API 主机，
+  // 不能让浏览器把它错误地发到前端站点或 file:// 页面。
+  const apiOrigin = /^https?:\/\//i.test(API_BASE_URL)
+    ? new URL(API_BASE_URL).origin
+    : ''
+  const path = value.startsWith('/generated-images/')
+    ? `/api${value}`
+    : value
+  if (path.startsWith('/api/') && apiOrigin) return `${apiOrigin}${path}`
+  if (path.startsWith('//')) return `${window.location.protocol}${path}`
+  return path
+}
 
 export class ImageGenerationProvider {
   async getCached(_input, _options = {}) { return null }
@@ -9,14 +27,17 @@ export class ExistingApiImageProvider extends ImageGenerationProvider {
   async getCached(input, { signal } = {}) {
     const result = await request('/ai/image/get', {
       method: 'POST', signal, timeout: TIMEOUTS.SHORT,
-      body: JSON.stringify({ poemId: input.poemId, title: input.title, author: input.author })
+      body: JSON.stringify({
+        poemId: input.poemId, title: input.title, author: input.author,
+        promptVersion: input.promptVersion
+      })
     })
-    return result?.success ? result.url : null
+    return result?.success ? normalizeGeneratedImageUrl(result.url) : null
   }
 
   async generate(input, { signal } = {}) {
     return request('/ai/image/pregenerate', {
-      method: 'POST', signal, timeout: TIMEOUTS.LONG,
+      method: 'POST', signal, timeout: TIMEOUTS.LONG + 15000,
       body: JSON.stringify({
         poemId: input.poemId, title: input.title, author: input.author,
         dynasty: input.dynasty, content: input.poemContent,
@@ -30,7 +51,7 @@ export class ExistingApiImageProvider extends ImageGenerationProvider {
 export class PoemBackgroundService {
   constructor(provider = new ExistingApiImageProvider()) {
     this.provider = provider
-    this.promptVersion = 'v3'
+    this.promptVersion = 'scene-v13'
     this.controller = null
     this.requestId = 0
   }
@@ -47,13 +68,18 @@ export class PoemBackgroundService {
 
   cacheKey(poem) { return `poem-bg:${poem?.id}:${this.promptVersion}` }
 
-  async load(poem, { onGenerated } = {}) {
+  async load(poem, { onGenerated, ignoreLocalCache = false } = {}) {
     this.cancel()
     const requestId = ++this.requestId
     this.controller = new AbortController()
     const input = this.buildInput(poem)
-    const local = localStorage.getItem(this.cacheKey(poem))
-    if (local) return { url: local, source: 'local-cache' }
+    const cacheKey = this.cacheKey(poem)
+    const local = ignoreLocalCache ? null : localStorage.getItem(cacheKey)
+    if (local) {
+      const normalized = normalizeGeneratedImageUrl(local)
+      if (normalized !== local) localStorage.setItem(cacheKey, normalized)
+      return { url: normalized, source: 'local-cache' }
+    }
     try {
       const cached = await this.provider.getCached(input, { signal: this.controller.signal })
       if (requestId !== this.requestId) return null
@@ -61,7 +87,13 @@ export class PoemBackgroundService {
         localStorage.setItem(this.cacheKey(poem), cached)
         return { url: cached, source: 'provider-cache' }
       }
-      await this.provider.generate(input, { signal: this.controller.signal })
+      const generated = await this.provider.generate(input, { signal: this.controller.signal })
+      if (requestId !== this.requestId) return null
+      const generatedUrl = normalizeGeneratedImageUrl(generated?.url)
+      if (generatedUrl) {
+        localStorage.setItem(this.cacheKey(poem), generatedUrl)
+        return { url: generatedUrl, source: 'generated' }
+      }
       onGenerated?.({ pending: true, requestId })
       return { url: null, source: 'fallback', pending: true }
     } catch (error) {
@@ -71,7 +103,11 @@ export class PoemBackgroundService {
   }
 
   remember(poem, url) {
-    if (poem?.id && url) localStorage.setItem(this.cacheKey(poem), url)
+    if (poem?.id && url) localStorage.setItem(this.cacheKey(poem), normalizeGeneratedImageUrl(url))
+  }
+
+  forget(poem) {
+    if (poem?.id) localStorage.removeItem(this.cacheKey(poem))
   }
 
   cancel() { this.controller?.abort(); this.controller = null }

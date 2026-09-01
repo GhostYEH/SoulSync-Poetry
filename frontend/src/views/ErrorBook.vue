@@ -14,7 +14,7 @@
           <router-link to="/challenge" class="quiet-action">
             <PhArrowLeft :size="17" />返回闯关
           </router-link>
-          <button type="button" class="primary-action" :disabled="errors.length === 0" @click="startSmartReview">
+          <button type="button" class="primary-action" :disabled="!hasPendingErrors" @click="startSmartReview">
             <PhBookOpenText :size="18" />开始复习
           </button>
         </div>
@@ -55,7 +55,7 @@
             <span>本周新增</span>
             <strong>{{ stats.weekCount }}</strong>
           </div>
-          <button type="button" class="overview-review" @click="startSmartReview">
+          <button type="button" class="overview-review" :disabled="!hasPendingErrors" @click="startSmartReview">
             继续巩固<PhArrowRight :size="17" />
           </button>
         </section>
@@ -123,11 +123,11 @@
           <div class="question-list">
             <article
               v-for="item in paginatedErrors"
-              :key="item.id"
+              :key="itemKey(item)"
               class="question-row"
-              :class="{ mastered: item.mastered === 1 || item.mastered === true, expanded: expandedPoems[item.id] }"
+              :class="{ mastered: item.mastered === 1 || item.mastered === true, expanded: expandedPoems[itemKey(item)] }"
             >
-              <button type="button" class="question-summary" :aria-expanded="Boolean(expandedPoems[item.id])" @click="togglePoem(item.id)">
+              <button type="button" class="question-summary" :aria-expanded="Boolean(expandedPoems[itemKey(item)])" @click="togglePoem(itemKey(item))">
                 <span class="question-status" :class="{ mastered: item.mastered === 1 || item.mastered === true }">
                   {{ item.mastered === 1 || item.mastered === true ? '已掌握' : '待复习' }}
                 </span>
@@ -146,7 +146,7 @@
               </button>
 
               <Transition name="answer-reveal">
-                <div v-if="expandedPoems[item.id]" class="question-detail">
+                <div v-if="expandedPoems[itemKey(item)]" class="question-detail">
                   <div class="answer-compare">
                     <div class="answer-block wrong-answer">
                       <span>你的答案</span>
@@ -168,7 +168,7 @@
                   </div>
                   <div class="detail-actions">
                     <button type="button" class="review-single" @click="reviewSingle(item)"><PhBookOpenText :size="16" />专项复习</button>
-                    <button type="button" class="delete-single" @click="removeSingle(item.id)"><PhTrash :size="16" />移出错题本</button>
+                    <button type="button" class="delete-single" @click="removeSingle(item)"><PhTrash :size="16" />移出错题本</button>
                   </div>
                 </div>
               </Transition>
@@ -254,9 +254,6 @@ export default {
       feihualing_hint: '飞花令提示'
     }[source] || '学习练习');
 
-    // ---- 复习模式状态（错题复习页使用，此处仅保留兼容） ----
-    const reviewMode = ref(false);
-
     // ---- 计算属性 ----
     const stats = computed(() => {
       const total = errors.value.length;
@@ -271,6 +268,16 @@ export default {
       if (errors.value.length === 0) return 100;
       return Math.round((stats.value.mastered / stats.value.total) * 100);
     });
+
+    const isDueForReview = (item) => {
+      if (item.mastered === 1 || item.mastered === true) return false;
+      if (!item.next_review) return true;
+      const today = new Date();
+      const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      return String(item.next_review).slice(0, 10) <= todayKey;
+    };
+
+    const hasPendingErrors = computed(() => errors.value.some(isDueForReview));
 
     const filteredErrors = computed(() => {
       let result = [...errors.value];
@@ -365,32 +372,26 @@ export default {
 
         // 合并两个数据源
         const allErrors = [];
-        const addedQuestions = new Set();
 
         // 添加 user_error_book 的数据
         (errorBookData || []).forEach(item => {
-          const questionKey = item.question_content || item.question || '';
-          if (!addedQuestions.has(questionKey)) {
-            allErrors.push({
-              ...item,
-              question: item.question_content || item.question,
-              source: 'challenge'
-            });
-            addedQuestions.add(questionKey);
-          }
+          allErrors.push({
+            ...item,
+            question: item.question_content || item.question,
+            mastered: Number(item.is_reviewed) === 1 || item.mastered === 1 || item.mastered === true,
+            source: 'challenge',
+            reviewSource: 'error-book'
+          });
         });
 
         // 添加 wrong_questions 的数据
         (reviewQuestions || []).forEach(item => {
-          const questionKey = item.question || '';
-          if (!addedQuestions.has(questionKey)) {
-            allErrors.push({
-              ...item,
-              // 新记录由后端写入来源；旧记录没有 source 时继续按跑酷兼容展示。
-              source: item.source || 'parkour'
-            });
-            addedQuestions.add(questionKey);
-          }
+          allErrors.push({
+            ...item,
+            // 新记录由后端写入来源；旧记录没有 source 时继续按跑酷兼容展示。
+            source: item.source || 'parkour',
+            reviewSource: 'wrong-questions'
+          });
         });
 
         // 按时间排序
@@ -412,11 +413,17 @@ export default {
 
 
     // ---- 错题操作 ----
-    const removeSingle = async (id) => {
+    const itemKey = (item) => `${item.reviewSource || 'unknown'}:${item.id}`;
+
+    const removeSingle = async (item) => {
       if (!await askConfirm('确定要删除这道错题吗？', { title: '删除错题', confirmText: '删除', danger: true })) return;
       try {
-        await api.challenge.removeFromErrorBook(id);
-        errors.value = errors.value.filter(e => e.id !== id);
+        if (item?.reviewSource === 'wrong-questions') {
+          await api.wrongQuestions.delete(item.id);
+        } else {
+          await api.challenge.removeFromErrorBook(item.id);
+        }
+        errors.value = errors.value.filter(e => itemKey(e) !== itemKey(item));
       } catch (error) {
         console.error('删除错题失败:', error);
       }
@@ -425,7 +432,11 @@ export default {
     const confirmClearAll = async () => {
       if (!await askConfirm(`确定要清空所有 ${errors.value.length} 道错题吗？此操作不可恢复！`, { title: '清空错题本', confirmText: '全部清空', danger: true })) return;
       try {
-        await Promise.all(errors.value.map(e => api.challenge.removeFromErrorBook(e.id).catch(() => {})));
+        await Promise.all(errors.value.map(e => (
+          e.reviewSource === 'wrong-questions'
+            ? api.wrongQuestions.delete(e.id)
+            : api.challenge.removeFromErrorBook(e.id)
+        ).catch(() => {})));
         errors.value = [];
       } catch (error) {
         console.error('清空错题失败:', error);
@@ -443,7 +454,7 @@ export default {
 
     const reviewSingle = (item) => {
       // 跳转到错题复习页面并携带题目ID
-      router.push({ path: '/challenge/review', query: { questionId: item.id } });
+      router.push({ path: '/challenge/review', query: { questionId: item.id, source: item.reviewSource || 'wrong-questions' } });
     };
 
     // ---- 工具函数 ----
@@ -470,10 +481,11 @@ export default {
     return {
       loading, errors, filterType, filterSource, sortType,
       currentPage, pageSize, totalPages, paginatedErrors, visiblePages,
-      stats, masteryRate, filteredErrors,
+      stats, masteryRate, hasPendingErrors, filteredErrors,
       reviewRhythm,
       sourceLabel,
-      expandedPoems, reviewMode,
+      expandedPoems,
+      itemKey,
       removeSingle, confirmClearAll, togglePoem,
       startSmartReview, reviewSingle,
       formatDate

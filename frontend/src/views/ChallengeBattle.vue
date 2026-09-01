@@ -346,6 +346,18 @@
           <div class="result-accuracy">
             共 {{ dualResult?.totalQuestions || 30 }} 题
           </div>
+          <div v-if="dualResult?.wrongQuestions?.length" class="wrong-questions-section">
+            <h4 class="wrong-title"><span class="wrong-icon">✗</span>错题收录 ({{ dualResult.wrongQuestions.length }}题)</h4>
+            <div class="wrong-list">
+              <div v-for="(wq, idx) in dualResult.wrongQuestions" :key="`${wq.userId || 'player'}-${idx}`" class="wrong-item">
+                <div class="wrong-q">{{ wq.question }}</div>
+                <div class="wrong-a">
+                  <span class="wrong-yours">你的答案：{{ wq.userId === myUserId ? wq.userAnswer : '对手答错' }}</span>
+                  <span class="wrong-correct">正确答案：{{ wq.answer }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </template>
 
         <div class="result-actions">
@@ -364,8 +376,8 @@
 <script>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
-import io from 'socket.io-client';
-import api, { SOCKET_URL } from '../services/api';
+import api from '../services/api';
+import feihualingSocket from '../services/feihualingSocket';
 import { askConfirm } from '../services/appFeedback';
 
 export default {
@@ -468,14 +480,14 @@ export default {
     // ========== Socket 初始化 ==========
     const initSocket = () => {
       if (socket.value && socket.value.connected) return;
-      if (socket.value) { socket.value.disconnect(); socket.value = null; }
+      socket.value?.dispose?.();
+      socket.value = null;
 
-      socket.value = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+      feihualingSocket.connect(localStorage.getItem('token'));
+      socket.value = feihualingSocket.channel();
 
       socket.value.on('connect', () => {
         console.log('[ChallengeBattle] Socket已连接');
-        const token = localStorage.getItem('token');
-        if (token) socket.value.emit('authenticate', { token });
       });
 
       socket.value.on('authenticated', (data) => {
@@ -514,18 +526,8 @@ export default {
           correctAnswer: data.correctAnswer
         };
 
-        if (!data.isCorrect && currentQuestion.value) {
-          const q = currentQuestion.value;
-          api.wrongQuestions.add({
-            question: q.question || q.question_content || '',
-            answer: data.correctAnswer || q.answer || '',
-            user_answer: userAnswer.value || '',
-            level: q.level || 1,
-            full_poem: q.full_poem || '',
-            author: q.author || '',
-            title: q.title || ''
-          }).catch(err => console.error('[ChallengeBattle] 同步错题失败:', err.message));
-        }
+        // 单人房间结束时由服务端统一落库 room.wrongQuestions，
+        // 这里不再即时写入，避免同一道错题被累计两次。
 
         setTimeout(() => {
           answerFeedback.value = null;
@@ -681,6 +683,7 @@ export default {
         stopDualTimer();
         gameEnded.value = true;
         dualResult.value = data;
+        wrongQuestions.value = data.wrongQuestions || [];
 
         // 更新最终分数
         if (data.players) {
@@ -718,8 +721,8 @@ export default {
             }
           });
         }
-        dualRemainingTime.value = 30;
-        startDualTimer();
+        dualRemainingTime.value = data.remainingTime ?? 30;
+        startDualTimer(dualRemainingTime.value);
       });
 
       // 计时器心跳（仅双人对战）
@@ -787,9 +790,10 @@ export default {
       });
     };
 
-    const startDualTimer = () => {
+    const startDualTimer = (initialTimeValue = dualRemainingTime.value) => {
       stopDualTimer();
-      dualRemainingTime.value = 30;
+      const initialTime = Number(initialTimeValue);
+      dualRemainingTime.value = Number.isFinite(initialTime) ? Math.max(0, initialTime) : 30;
       dualTimerInterval = setInterval(() => {
         if (dualRemainingTime.value > 0) dualRemainingTime.value--;
         else {
@@ -974,6 +978,10 @@ export default {
       console.log('[ChallengeBattle] onMounted, isLoggedIn:', isLoggedIn.value);
       if (isLoggedIn.value) {
         initSocket();
+        if (feihualingSocket.connected) {
+          myPlayer.value = { id: myUserId.value, username: myUsername.value, correct: 0 };
+          loadHistory();
+        }
         checkPendingDualGame();
       }
     });
@@ -981,10 +989,8 @@ export default {
     onUnmounted(() => {
       stopSingleTimer();
       stopDualTimer();
-      if (socket.value) {
-        socket.value.disconnect();
-        socket.value = null;
-      }
+      socket.value?.dispose?.();
+      socket.value = null;
     });
 
     return {
@@ -1010,302 +1016,88 @@ export default {
 
 <style scoped>
 .challenge-battle {
-  min-height: 100vh;
-  width: 100%;
-  position: relative;
-  overflow-x: hidden;
+  --ink: #234f49;
+  --muted: #789087;
+  --jade: #238f7c;
+  --jade-deep: #176f61;
+  --gold: #b9853e;
+  min-height: calc(100dvh - 84px);
+  padding: 28px clamp(16px, 4vw, 64px) 56px;
+  color: var(--ink);
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  background:
+    linear-gradient(135deg, rgba(239, 247, 242, .9), rgba(246, 242, 229, .88)),
+    url('../assets/jade-paper-ambient.png') center / cover fixed;
 }
 .challenge-battle::before {
   content: '';
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  width: 100vw; height: 100vh;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  z-index: -2;
-  pointer-events: none;
-}
-.challenge-battle::after {
-  content: '';
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  width: 100vw; height: 100vh;
-  background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><text x="50" y="50" font-family="SimSun" font-size="20" text-anchor="middle" fill="rgba(255,255,255,0.03)">诗</text></svg>') repeat;
-  pointer-events: none;
+  inset: 84px 0 0;
   z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(circle at 78% 15%, rgba(255,255,255,.68), transparent 36%), linear-gradient(180deg, rgba(255,255,255,.14), transparent 58%);
 }
 .glass-card {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 24px;
-  padding: 32px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   position: relative;
-  z-index: 1;
+  padding: 26px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.72);
+  border-radius: 22px;
+  background: rgba(250,253,249,.66);
+  box-shadow: 0 18px 48px rgba(42,84,73,.1), inset 0 1px 0 rgba(255,255,255,.88);
+  backdrop-filter: blur(18px) saturate(118%);
 }
-.glass-card::after {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%);
-  pointer-events: none;
-  border-radius: 24px;
-}
-.glass-button {
-  padding: 12px 28px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.4), rgba(118, 75, 162, 0.4));
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(102, 126, 234, 0.5);
-  border-radius: 16px;
+.glass-card::after { content:''; position:absolute; inset:0; pointer-events:none; background:linear-gradient(120deg,rgba(255,255,255,.2),transparent 46%); }
+.glass-button,.glass-nav-button,.quit-game-btn {
+  border: 1px solid rgba(47,131,115,.22);
+  border-radius: 999px;
   color: #fff;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 16px;
-  font-weight: 500;
+  background: linear-gradient(180deg,#2a8178,#216d65);
+  box-shadow: 0 8px 18px rgba(29,90,81,.18);
   cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+  transition: transform .2s ease, filter .2s ease, box-shadow .2s ease;
+  font: 600 13px 'Noto Sans SC','Microsoft YaHei',sans-serif;
 }
-.glass-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.6), rgba(118, 75, 162, 0.6));
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
-}
-.glass-button:disabled { opacity: 0.6; cursor: not-allowed; }
-.glass-nav-button {
-  padding: 10px 20px;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 20px;
-  color: #fff;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 14px;
-  text-decoration: none;
-  transition: all 0.3s ease;
-  cursor: pointer;
-}
-.glass-nav-button:hover { background: rgba(255,255,255,0.2); transform: translateY(-2px); }
-
-/* 登录提示 */
-.login-prompt { text-align: center; padding: 80px 20px; position: relative; z-index: 1; }
-.login-prompt .glass-card h3 { font-family: 'Noto Serif SC', serif; color: #fff; font-size: 28px; margin-bottom: 16px; }
-.login-prompt .glass-card p { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.7); margin-bottom: 24px; }
-
-/* 开始界面 */
-.start-panel { position: relative; z-index: 1; min-height: 100vh; padding: 40px; display: flex; flex-direction: column; }
-.start-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; }
-.start-title { font-family: 'Noto Serif SC', serif; color: #fff; margin: 0; font-size: 36px; font-weight: bold; }
-.mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; max-width: 1000px; margin: 0 auto 40px; width: 100%; }
-@media (max-width: 700px) { .mode-cards { grid-template-columns: 1fr; } }
-.mode-card { text-align: center; }
-.mode-icon {
-  width: 90px; height: 90px; margin: 0 auto 20px;
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  border-radius: 50%; display: flex; align-items: center; justify-content: center;
-  font-size: 42px; color: white; font-family: 'Noto Serif SC', serif;
-  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4);
-}
-.dual-icon { background: linear-gradient(135deg, #f093fb, #f5576c); box-shadow: 0 8px 32px rgba(245, 87, 108, 0.4); }
-.mode-heading { font-family: 'Noto Serif SC', serif; color: #fff; font-size: 24px; margin: 0 0 12px 0; }
-.mode-desc { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.7); font-size: 14px; line-height: 1.7; margin: 0 0 24px 0; }
-.rule-list { text-align: left; margin-bottom: 28px; }
-.rule-item { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
-.rule-icon { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); color: white; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; flex-shrink: 0; }
-.rule-text { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.8); font-size: 14px; }
-.start-btn { padding: 14px 48px; font-size: 18px; background: linear-gradient(135deg, rgba(102,126,234,0.5), rgba(118,75,162,0.5)); font-weight: bold; }
-.dual-start-btn { padding: 14px 48px; font-size: 18px; background: linear-gradient(135deg, rgba(245,87,108,0.5), rgba(240,147,251,0.5)); font-weight: bold; }
-
-/* 历史战绩 */
-.history-card { max-width: 1000px; margin: 0 auto; width: 100%; }
-.history-card .panel-title { font-family: 'Noto Serif SC', serif; color: #fff; margin: 0 0 20px 0; font-size: 18px; font-weight: bold; }
-.loading-mini { display: flex; align-items: center; gap: 12px; justify-content: center; padding: 24px; color: rgba(255,255,255,0.7); font-family: 'Noto Serif SC', serif; }
-.spinner { width: 24px; height: 24px; border: 2px solid rgba(102,126,234,0.3); border-top-color: #667eea; border-radius: 50%; animation: spin 0.8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.no-history { text-align: center; padding: 24px; }
-.no-history p { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.6); margin: 0 0 8px 0; }
-.no-history .tip { font-size: 13px; color: rgba(255,255,255,0.4); }
-.history-list { display: flex; flex-direction: column; gap: 12px; }
-.history-item { padding: 14px 18px; background: rgba(255,255,255,0.05); border-radius: 14px; border: 1px solid rgba(255,255,255,0.08); }
-.history-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.history-date { font-family: 'Noto Serif SC', serif; font-size: 13px; color: rgba(255,255,255,0.6); }
-.history-mode-tag { padding: 3px 10px; border-radius: 10px; font-size: 12px; font-family: 'Noto Serif SC', serif; }
-.history-mode-tag.single { background: rgba(102,126,234,0.3); color: #a5b4fc; }
-.history-mode-tag.dual { background: rgba(245,87,108,0.3); color: #fda4af; }
-.history-detail { margin-bottom: 10px; }
-.history-players, .history-score { font-family: 'Noto Serif SC', serif; font-size: 14px; color: rgba(255,255,255,0.85); }
-.vs { color: rgba(255,255,255,0.4); margin: 0 8px; }
-.history-bar-wrap { height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
-.history-bar { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 3px; transition: width 0.5s ease; }
-
-/* 匹配界面 */
-.matching-panel { position: relative; z-index: 1; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-.matching-card { text-align: center; max-width: 400px; width: 90%; }
-.matching-spinner { width: 64px; height: 64px; border: 4px solid rgba(102,126,234,0.3); border-top-color: #667eea; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 24px; }
-.matching-title { font-family: 'Noto Serif SC', serif; color: #fff; font-size: 28px; margin: 0 0 12px 0; }
-.matching-desc { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.6); font-size: 15px; margin: 0 0 24px 0; }
-.matching-dots { display: flex; gap: 8px; justify-content: center; margin-bottom: 28px; }
-.matching-dots span { width: 10px; height: 10px; background: #667eea; border-radius: 50%; animation: dot-bounce 1.4s ease-in-out infinite; }
-.matching-dots span:nth-child(2) { animation-delay: 0.2s; }
-.matching-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes dot-bounce { 0%, 80%, 100% { transform: scale(1); opacity: 0.5; } 40% { transform: scale(1.3); opacity: 1; } }
-.cancel-btn { background: rgba(239,68,68,0.3); border-color: rgba(239,68,68,0.4); }
-
-/* ========== 全屏游戏界面 ========== */
-.game-room-fullscreen { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
-.dual-mode { background: linear-gradient(135deg, #1a1a2e 0%, #1f1035 50%, #0f3460 100%); }
-.game-hud-full { display: flex; justify-content: space-between; align-items: center; padding: 24px 48px; background: rgba(0,0,0,0.3); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255,255,255,0.1); }
-.hud-left { display: flex; align-items: center; gap: 24px; }
-.game-title { font-family: 'Noto Serif SC', serif; color: #fff; margin: 0; font-size: 28px; font-weight: bold; }
-.round-badge { padding: 10px 24px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border-radius: 24px; font-family: 'Noto Serif SC', serif; font-weight: bold; font-size: 15px; }
-.hud-center { display: flex; align-items: center; }
-.score-display { font-family: 'Noto Serif SC', serif; font-size: 18px; display: flex; align-items: center; gap: 12px; }
-.score-correct { color: #4ade80; font-weight: bold; }
-.score-wrong { color: #f87171; font-weight: bold; }
-.score-sep { color: rgba(255,255,255,0.4); }
-
-/* 双人分数 */
-.dual-scores { display: flex; align-items: center; gap: 20px; }
-.dual-player-score { text-align: center; }
-.dual-player-name { display: block; font-family: 'Noto Serif SC', serif; color: #fff; font-size: 16px; font-weight: bold; }
-.dual-correct { display: block; font-family: 'Noto Serif SC', serif; color: #4ade80; font-size: 20px; font-weight: bold; }
-.dual-player-score.opponent .dual-player-name { color: rgba(255,255,255,0.7); }
-.dual-player-score.opponent .dual-correct { color: #a5b4fc; }
-.vs-badge { padding: 6px 16px; background: rgba(245,87,108,0.2); border: 1px solid rgba(245,87,108,0.3); border-radius: 12px; color: #fda4af; font-family: 'Noto Serif SC', serif; font-size: 14px; font-weight: bold; }
-.dual-player-score.is-current-turn { position: relative; }
-.turn-indicator { display: block; font-family: 'Noto Serif SC', serif; color: #fbbf24; font-size: 12px; margin-top: 4px; animation: pulse 1s ease-in-out infinite; }
-@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
-.hud-right { display: flex; align-items: center; }
-.quit-game-btn { padding: 10px 24px; background: rgba(239,68,68,0.2); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); border-radius: 12px; font-size: 14px; cursor: pointer; transition: all 0.3s ease; font-family: 'Noto Serif SC', serif; }
-.quit-game-btn:hover { background: rgba(239,68,68,0.3); }
-
-/* 主游戏区域 */
-.game-main-area { flex: 1; display: grid; grid-template-columns: 200px 1fr 240px; gap: 40px; padding: 40px 48px; align-items: start; }
-@media (max-width: 900px) { .game-main-area { grid-template-columns: 1fr; gap: 24px; padding: 24px; } }
-
-/* 计时器 */
-.timer-section { position: sticky; top: 40px; }
-.timer-ring { width: 160px; height: 160px; position: relative; background: rgba(255,255,255,0.05); border-radius: 50%; padding: 16px; box-sizing: border-box; }
-.timer-ring.warning .timer-number { color: #fbbf24; animation: pulse 0.5s ease-in-out infinite; }
-.timer-ring.danger .timer-number { color: #f87171; animation: pulse 0.3s ease-in-out infinite; }
-.timer-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.timer-bg { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 8; }
-.timer-progress { fill: none; stroke: #667eea; stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
-.timer-ring.warning .timer-progress { stroke: #fbbf24; }
-.timer-ring.danger .timer-progress { stroke: #f87171; }
-.timer-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.timer-number { font-family: 'Noto Serif SC', serif; font-size: 42px; font-weight: bold; color: #fff; transition: color 0.3s; }
-.timer-label { font-family: 'Noto Serif SC', serif; font-size: 14px; color: rgba(255,255,255,0.6); }
-
-/* 中央题目区域 */
-.question-area { display: flex; flex-direction: column; gap: 28px; }
-.question-card { background: rgba(255,255,255,0.08); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.15); border-radius: 24px; padding: 36px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
-.question-meta { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
-.question-type { padding: 8px 18px; background: rgba(102,126,234,0.2); border: 1px solid rgba(102,126,234,0.3); border-radius: 12px; color: #a5b4fc; font-family: 'Noto Serif SC', serif; font-size: 14px; font-weight: bold; }
-.question-poem-info { padding: 8px 18px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: rgba(255,255,255,0.7); font-family: 'Noto Serif SC', serif; font-size: 14px; }
-.question-text { font-size: 34px; font-family: 'Noto Serif SC', serif; text-align: center; color: #fff; padding: 36px; background: linear-gradient(135deg, rgba(102,126,234,0.1), rgba(118,75,162,0.1)); border: 1px solid rgba(102,126,234,0.2); border-radius: 18px; line-height: 1.5; letter-spacing: 4px; }
-
-/* 答题区 */
-.answer-section { display: flex; gap: 14px; background: rgba(255,255,255,0.08); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 22px; }
-.answer-input { flex: 1; padding: 16px 22px; background: rgba(0,0,0,0.3); border: 2px solid rgba(102,126,234,0.3); border-radius: 14px; font-size: 20px; font-family: 'Noto Serif SC', serif; color: #fff; outline: none; transition: all 0.3s ease; }
-.answer-input:focus { border-color: #667eea; box-shadow: 0 0 20px rgba(102,126,234,0.3); }
-.answer-input::placeholder { color: rgba(255,255,255,0.4); }
-.submit-btn { padding: 16px 36px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; border-radius: 14px; font-size: 17px; font-weight: bold; cursor: pointer; transition: all 0.3s ease; font-family: 'Noto Serif SC', serif; white-space: nowrap; }
-.submit-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(102,126,234,0.4); }
-.submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-
-/* 等待对方答题区域 */
-.waiting-opponent-section { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; background: rgba(255,255,255,0.08); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; gap: 16px; }
-.waiting-icon { display: flex; align-items: center; justify-content: center; }
-.waiting-spinner-small { width: 48px; height: 48px; border: 3px solid rgba(102,126,234,0.3); border-top-color: #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
-.waiting-text { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.8); font-size: 18px; margin: 0; }
-
-/* 双人答题反馈 */
-.dual-feedback-card { text-align: center; padding: 24px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(20px); }
-.dual-feedback-card.feedback-correct { border-color: rgba(74,222,128,0.5); background: linear-gradient(135deg, rgba(74,222,128,0.15), rgba(255,255,255,0.1)); }
-.dual-feedback-card.feedback-wrong { border-color: rgba(248,113,113,0.4); background: linear-gradient(135deg, rgba(248,113,113,0.15), rgba(255,255,255,0.1)); }
-.dual-feedback-card .feedback-icon { font-size: 40px; margin-bottom: 8px; }
-.feedback-correct .feedback-icon { color: #4ade80; }
-.feedback-wrong .feedback-icon { color: #f87171; }
-.dual-feedback-card .feedback-title { font-family: 'Noto Serif SC', serif; font-size: 20px; font-weight: bold; margin: 0 0 8px 0; }
-.feedback-correct .feedback-title { color: #4ade80; }
-.feedback-wrong .feedback-title { color: #f87171; }
-.dual-feedback-card .feedback-answer { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.8); font-size: 16px; margin: 0; }
-.dual-feedback-card .feedback-answer strong { color: #4ade80; }
-
-/* 右侧进度 */
-.progress-section { position: sticky; top: 40px; display: flex; flex-direction: column; gap: 20px; }
-.progress-card, .accuracy-card { background: rgba(255,255,255,0.08); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.15); border-radius: 18px; padding: 22px; }
-.progress-title, .accuracy-title { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.7); font-size: 14px; margin-bottom: 14px; }
-.progress-bar { height: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; overflow: hidden; margin-bottom: 10px; }
-.progress-fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 5px; transition: width 0.5s ease; }
-.progress-fill.dual-fill { background: linear-gradient(90deg, #f093fb, #f5576c); }
-.progress-text { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.9); font-size: 20px; font-weight: bold; text-align: center; }
-.accuracy-value { font-family: 'Noto Serif SC', serif; color: #a5b4fc; font-size: 32px; font-weight: bold; text-align: center; }
-.dual-accuracy-card .accuracy-value { font-size: 18px; }
-
-/* 答题反馈 */
-.feedback-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.feedback-card { text-align: center; padding: 44px; max-width: 460px; width: 90%; border-radius: 24px; }
-.feedback-correct { border: 1px solid rgba(74,222,128,0.5); background: linear-gradient(135deg, rgba(74,222,128,0.2), rgba(255,255,255,0.1)); }
-.feedback-wrong { border: 1px solid rgba(248,113,113,0.4); background: linear-gradient(135deg, rgba(248,113,113,0.2), rgba(255,255,255,0.1)); }
-.feedback-icon { font-size: 68px; margin-bottom: 18px; }
-.feedback-correct .feedback-icon { color: #4ade80; }
-.feedback-wrong .feedback-icon { color: #f87171; }
-.feedback-title { font-family: 'Noto Serif SC', serif; font-size: 24px; font-weight: bold; margin: 0 0 10px 0; }
-.feedback-correct .feedback-title { color: #4ade80; }
-.feedback-wrong .feedback-title { color: #f87171; }
-.feedback-answer { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.8); font-size: 17px; margin: 0; }
-.feedback-answer strong { color: #4ade80; }
-.feedback-analysis { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.6); font-size: 14px; margin: 18px 0 0 0; line-height: 1.6; }
-.feedback-fade-enter-active, .feedback-fade-leave-active { transition: opacity 0.3s ease; }
-.feedback-fade-enter-from, .feedback-fade-leave-to { opacity: 0; }
-
-/* 结果弹窗 */
-.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; }
-.modal-content { max-width: 520px; width: 100%; text-align: center; padding: 40px; max-height: 85vh; overflow-y: auto; }
-.modal-title { font-family: 'Noto Serif SC', serif; color: #fff; font-size: 28px; font-weight: bold; margin: 0 0 20px 0; }
-.result-score-big { margin-bottom: 10px; }
-.score-num { font-family: 'Noto Serif SC', serif; font-size: 68px; font-weight: bold; color: #4ade80; line-height: 1; }
-.score-denom { font-family: 'Noto Serif SC', serif; font-size: 20px; color: rgba(255,255,255,0.7); }
-.result-accuracy { font-family: 'Noto Serif SC', serif; color: #a5b4fc; font-size: 17px; margin-bottom: 24px; }
-.result-summary { display: flex; gap: 28px; justify-content: center; margin-bottom: 24px; }
-.summary-item { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.summary-num { font-family: 'Noto Serif SC', serif; font-size: 34px; font-weight: bold; }
-.correct-item .summary-num { color: #4ade80; }
-.wrong-item .summary-num { color: #f87171; }
-.summary-label { font-family: 'Noto Serif SC', serif; font-size: 14px; color: rgba(255,255,255,0.6); }
-
-/* 双人结果 */
-.dual-result-scores { display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 20px; }
-.dual-result-player { padding: 20px 28px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; text-align: center; }
-.dual-result-player.winner { background: linear-gradient(135deg, rgba(255,215,0,0.2), rgba(255,165,0,0.1)); border-color: rgba(255,215,0,0.4); }
-.result-player-name { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.8); font-size: 15px; margin-bottom: 6px; }
-.result-player-score { font-family: 'Noto Serif SC', serif; color: #4ade80; font-size: 22px; font-weight: bold; }
-.dual-result-vs { font-family: 'Noto Serif SC', serif; font-size: 20px; color: rgba(255,255,255,0.4); font-weight: bold; }
-
-/* 错题列表 */
-.wrong-questions-section { text-align: left; margin-bottom: 24px; max-height: 220px; overflow-y: auto; }
-.wrong-title { font-family: 'Noto Serif SC', serif; color: #f87171; font-size: 15px; margin: 0 0 14px 0; display: flex; align-items: center; gap: 8px; }
-.wrong-icon { font-size: 16px; }
-.wrong-list { display: flex; flex-direction: column; gap: 10px; }
-.wrong-item { padding: 12px 16px; background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.2); border-radius: 12px; }
-.wrong-q { font-family: 'Noto Serif SC', serif; color: rgba(255,255,255,0.85); font-size: 14px; margin-bottom: 6px; }
-.wrong-a { display: flex; flex-direction: column; gap: 3px; }
-.wrong-yours { font-family: 'Noto Serif SC', serif; font-size: 12px; color: #f87171; }
-.wrong-correct { font-family: 'Noto Serif SC', serif; font-size: 12px; color: #4ade80; }
-.no-wrong { padding: 22px; text-align: center; }
-.no-wrong p { font-family: 'Noto Serif SC', serif; color: #4ade80; font-size: 15px; margin: 0; }
-
-.result-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
-.review-btn { background: linear-gradient(135deg, rgba(248,113,113,0.4), rgba(220,38,38,0.4)); color: #fca5a5; border-color: rgba(248,113,113,0.5); }
-.retry-btn { background: linear-gradient(135deg, rgba(74,222,128,0.4), rgba(22,163,74,0.4)); color: #86efac; border-color: rgba(74,222,128,0.5); font-weight: bold; }
-.return-btn { background: linear-gradient(135deg, rgba(102,126,234,0.4), rgba(118,75,162,0.4)); font-weight: bold; }
-
-/* Toast */
-.toast { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); padding: 14px 30px; border-radius: 14px; font-family: 'Noto Serif SC', serif; font-size: 15px; z-index: 300; animation: toast-in 0.3s ease; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-.toast.info { background: rgba(102,126,234,0.95); color: white; }
-.toast.success { background: rgba(74,222,128,0.95); color: white; }
-.toast.error { background: rgba(248,113,113,0.95); color: white; }
-@keyframes toast-in { 0% { opacity: 0; transform: translateX(-50%) translateY(20px); } 100% { opacity: 1; transform: translateX(-50%) translateY(0); } }
+.glass-button { min-height: 42px; padding: 9px 22px; }
+.glass-button:hover:not(:disabled),.glass-nav-button:hover,.quit-game-btn:hover { transform: translateY(-2px); filter: brightness(1.05); }
+.glass-button:disabled { opacity:.48; cursor:not-allowed; }
+.glass-nav-button { padding: 8px 16px; color:var(--ink); background:rgba(255,255,255,.64); box-shadow:0 6px 16px rgba(41,86,74,.08); }
+.login-prompt { display:grid; place-items:center; min-height:56vh; }
+.login-prompt .glass-card { width:min(420px,100%); text-align:center; }
+.login-prompt h3,.login-prompt p { position:relative; z-index:1; }
+.login-prompt h3 { margin:0 0 10px; font:600 24px 'Noto Serif SC',serif; }
+.login-prompt p { margin:0 0 20px; color:var(--muted); font-size:13px; }
+.start-panel { position:relative; z-index:1; width:min(1180px,100%); margin:0 auto; }
+.start-header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:24px; }
+.start-title { margin:0; color:var(--ink); font:600 clamp(28px,3vw,42px) 'Noto Serif SC',serif; letter-spacing:.08em; }
+.mode-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+.mode-card { display:flex; flex-direction:column; align-items:center; min-height:440px; text-align:center; }
+.mode-icon { display:grid; place-items:center; width:72px; height:72px; margin:0 auto 16px; border:1px solid rgba(47,131,115,.2); border-radius:50%; color:#fff; background:linear-gradient(145deg,#65ad94,#2b8874); box-shadow:0 10px 24px rgba(38,111,91,.2); font:44px 'Noto Serif SC',serif; }
+.dual-icon { color:#fff8e8; background:linear-gradient(145deg,#d7ad69,#b37b39); }
+.mode-heading { margin:0 0 10px; color:var(--ink); font:600 24px 'Noto Serif SC',serif; }
+.mode-desc { min-height:48px; margin:0 0 18px; color:var(--muted); font-size:13px; line-height:1.7; }
+.rule-list { align-self:stretch; margin:0 0 22px; text-align:left; }
+.rule-item { display:flex; align-items:center; gap:10px; margin:10px 0; color:#55756c; font-size:12px; }
+.rule-icon { display:grid; place-items:center; flex:0 0 25px; width:25px; height:25px; border-radius:50%; color:#fff; background:var(--jade); font-size:11px; font-weight:700; }
+.dual-card .rule-icon { background:var(--gold); }
+.rule-text { color:inherit; }
+.mode-card .glass-button { margin-top:auto; min-width:150px; }
+.start-btn { background:linear-gradient(180deg,#2a8178,#216d65); }
+.dual-start-btn { background:linear-gradient(180deg,#c39858,#a66e30); }
+.history-card { width:100%; margin-top:18px; }
+.panel-title { position:relative; z-index:1; margin:0 0 16px; color:var(--ink); font:600 18px 'Noto Serif SC',serif; }
+.no-history,.loading-mini { position:relative; z-index:1; color:var(--muted); text-align:center; font-size:12px; }
+.no-history p { margin:6px 0; }.no-history .tip { color:#9aaba4; }
+.history-list { position:relative; z-index:1; display:grid; gap:9px; }
+.history-item { padding:12px 15px; border:1px solid rgba(79,132,116,.14); border-radius:13px; background:rgba(255,255,255,.42); }
+.history-info,.history-detail { display:flex; justify-content:space-between; gap:10px; }.history-info { margin-bottom:7px; }
+.history-date,.history-players,.history-score { color:var(--muted); font-size:11px; }.history-mode-tag { padding:3px 8px; border-radius:99px; color:#317967; background:#e4f2e9; font-size:10px; }.history-mode-tag.dual { color:#9a6e32; background:#f7ecd8; }
+.history-bar-wrap { height:5px; margin-top:9px; overflow:hidden; border-radius:99px; background:rgba(65,122,105,.12); }.history-bar { height:100%; border-radius:inherit; background:linear-gradient(90deg,#53a98e,#267565); }
+.matching-panel { display:grid; place-items:center; min-height:64vh; }.matching-card { width:min(420px,100%); text-align:center; }.matching-spinner,.waiting-spinner { width:58px; height:58px; margin:0 auto 18px; border:4px solid rgba(47,131,115,.16); border-top-color:var(--jade); border-radius:50%; animation:spin .9s linear infinite; }.matching-title { margin:0 0 8px; color:var(--ink); font:600 25px 'Noto Serif SC',serif; }.matching-desc { margin:0 0 18px; color:var(--muted); font-size:13px; }.matching-dots { display:flex; justify-content:center; gap:7px; margin-bottom:22px; }.matching-dots span { width:8px; height:8px; border-radius:50%; background:var(--jade); animation:dot-bounce 1.2s ease-in-out infinite; }.matching-dots span:nth-child(2){animation-delay:.15s}.matching-dots span:nth-child(3){animation-delay:.3s}.cancel-btn { color:#9c604d; background:#fff2e9; border-color:#e8c0a6; box-shadow:none; }
+.game-room-fullscreen { position:relative; z-index:1; width:min(1440px,100%); min-height:calc(100dvh - 140px); margin:0 auto; padding:20px; border:1px solid rgba(255,255,255,.72); border-radius:24px; background:rgba(241,248,243,.66); box-shadow:0 18px 52px rgba(40,87,73,.1); backdrop-filter:blur(18px); }
+.game-hud-full { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:4px 4px 18px; border-bottom:1px solid rgba(60,110,94,.13); }.hud-left,.hud-center,.hud-right{display:flex;align-items:center;gap:14px}.game-title { margin:0; color:var(--ink); font:600 24px 'Noto Serif SC',serif; }.round-badge { padding:7px 12px; border-radius:99px; color:#9b6d2f; background:#f7ecd5; font-size:11px; }.score-display,.dual-scores { color:var(--muted); font-size:12px; }.score-correct,.dual-correct { color:var(--jade-deep); font-weight:700; }.score-wrong { color:#af6b58; font-weight:700; }.score-sep { color:#b4c4bd; }.dual-player-score { padding:7px 12px; border:1px solid transparent; border-radius:12px; text-align:center; }.dual-player-score.is-current-turn { border-color:rgba(47,131,115,.24); background:rgba(227,244,235,.7); }.dual-player-name { display:block; color:var(--ink); font-size:12px; }.dual-correct { display:block; font-size:16px; }.opponent .dual-correct { color:#9a7a47; }.turn-indicator { display:block; margin-top:2px; color:var(--gold); font-size:10px; }.vs-badge { color:#a87835; font-weight:700; }
+.game-main-area { display:grid; grid-template-columns:170px minmax(0,1fr) 210px; gap:24px; align-items:start; padding:26px 4px 4px; }.timer-section,.progress-section{position:sticky;top:112px}.timer-ring { position:relative; width:150px; height:150px; margin:auto; padding:15px; border-radius:50%; background:rgba(255,255,255,.55); box-shadow:inset 0 0 0 1px rgba(73,129,111,.12); }.timer-svg{width:100%;height:100%;transform:rotate(-90deg)}.timer-bg{fill:none;stroke:rgba(75,132,113,.16);stroke-width:8}.timer-progress{fill:none;stroke:var(--jade);stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset 1s linear}.timer-ring.warning .timer-progress{stroke:#c8984f}.timer-ring.danger .timer-progress{stroke:#b46150}.timer-text{position:absolute;inset:0;display:grid;place-content:center;justify-items:center}.timer-number{color:var(--ink);font:600 38px 'Noto Serif SC',serif}.timer-label{color:var(--muted);font-size:11px}.question-area{display:grid;gap:16px}.question-card,.answer-section,.waiting-opponent-section,.progress-card,.accuracy-card{border:1px solid rgba(255,255,255,.72);border-radius:18px;background:rgba(255,255,255,.56);box-shadow:0 10px 28px rgba(40,88,74,.06);backdrop-filter:blur(14px)}.question-card{padding:24px}.question-meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}.question-type,.question-poem-info{padding:6px 10px;border-radius:99px;font-size:11px}.question-type{color:var(--jade-deep);background:#e4f3eb}.question-poem-info{color:var(--muted);background:rgba(237,242,236,.8)}.question-text{padding:28px 18px;color:var(--ink);background:rgba(246,241,225,.6);border:1px solid rgba(184,139,70,.16);border-radius:13px;text-align:center;font:500 clamp(22px,2.5vw,34px)/1.65 'Noto Serif SC',serif;letter-spacing:.12em}.answer-section{display:flex;gap:10px;padding:14px}.answer-input{flex:1;min-width:0;padding:12px 15px;border:1px solid rgba(65,126,107,.22);border-radius:12px;outline:0;color:var(--ink);background:rgba(255,255,255,.72);font:15px 'Noto Serif SC',serif}.answer-input:focus{border-color:var(--jade);box-shadow:0 0 0 3px rgba(47,131,115,.12)}.answer-input::placeholder{color:#9aaba4}.submit-btn{min-width:110px}.waiting-opponent-section{display:grid;place-items:center;gap:12px;padding:32px}.waiting-spinner-small{width:42px;height:42px;border:3px solid rgba(47,131,115,.16);border-top-color:var(--jade);border-radius:50%;animation:spin .9s linear infinite}.waiting-text{margin:0;color:var(--muted);font-size:13px}.progress-section{display:grid;gap:14px}.progress-card,.accuracy-card{padding:18px}.progress-title,.accuracy-title{margin-bottom:10px;color:var(--muted);font-size:11px}.progress-bar{height:8px;overflow:hidden;border-radius:99px;background:rgba(65,126,107,.13)}.progress-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,#55aa8f,#287866)}.progress-fill.dual-fill{background:linear-gradient(90deg,#c99d59,#a87638)}.progress-text,.accuracy-value{margin-top:9px;color:var(--ink);font:600 21px 'Noto Serif SC',serif;text-align:center}.accuracy-value{color:var(--jade-deep);font-size:24px}.feedback-overlay,.modal-overlay{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:20px;background:rgba(26,70,61,.32);backdrop-filter:blur(8px)}.feedback-card,.modal-content{position:relative;width:min(620px,100%);max-height:86vh;overflow:auto;padding:34px;border:1px solid rgba(255,255,255,.82);border-radius:22px;background:rgba(250,253,249,.92);box-shadow:0 24px 70px rgba(26,70,61,.2);text-align:center}.feedback-icon{font-size:56px}.feedback-correct .feedback-icon,.feedback-correct .feedback-title{color:var(--jade-deep)}.feedback-wrong .feedback-icon,.feedback-wrong .feedback-title{color:#ae6651}.feedback-title,.modal-title{margin:10px 0;color:var(--ink);font:600 24px 'Noto Serif SC',serif}.feedback-answer,.feedback-analysis{color:var(--muted);font-size:13px}.feedback-answer strong{color:var(--jade-deep)}.result-score-big{margin:16px 0}.score-num{color:var(--jade-deep);font:600 64px 'Noto Serif SC',serif}.score-denom,.result-accuracy,.summary-label{color:var(--muted);font-size:13px}.result-summary,.dual-result-scores{display:flex;justify-content:center;gap:18px;margin:18px 0}.summary-item,.dual-result-player{padding:12px 20px;border:1px solid rgba(75,132,113,.15);border-radius:14px;background:#f1f8f2}.summary-num{font:600 25px 'Noto Serif SC',serif}.correct-item .summary-num,.result-player-score{color:var(--jade-deep)}.wrong-item .summary-num{color:#ae6651}.result-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin-top:18px}.review-btn{color:#9b6049;background:#fff0e7;box-shadow:none}.retry-btn{background:linear-gradient(180deg,#2a8178,#216d65)}.return-btn{color:var(--ink);background:rgba(255,255,255,.72);box-shadow:none}.wrong-questions-section{text-align:left;max-height:220px;overflow:auto}.wrong-title{color:#ae6651;font-size:13px}.wrong-item{margin:8px 0;padding:10px 12px;border-radius:10px;background:#fff2eb}.wrong-q,.wrong-a span{font-size:11px}.wrong-yours{color:#ae6651}.wrong-correct{color:var(--jade-deep)}.toast{position:fixed;left:50%;bottom:28px;z-index:300;padding:11px 18px;border-radius:99px;transform:translateX(-50%);color:#fff;background:#246f62;box-shadow:0 12px 30px rgba(25,76,66,.2);font-size:12px}.toast.success{background:#2e8d74}.toast.error{background:#ad6652}
+@keyframes spin{to{transform:rotate(360deg)}}@keyframes dot-bounce{0%,80%,100%{transform:scale(1);opacity:.5}40%{transform:scale(1.3);opacity:1}}
+@media(max-width:900px){.game-main-area{grid-template-columns:1fr}.timer-section,.progress-section{position:static}.timer-ring{margin:0 auto}.mode-cards{grid-template-columns:1fr}.game-hud-full{flex-wrap:wrap}.hud-center{order:3;width:100%;justify-content:center}}
+@media(max-width:620px){.challenge-battle{padding:18px 12px 38px}.start-header{align-items:flex-start}.start-title{font-size:28px}.mode-card{min-height:auto}.game-room-fullscreen{padding:14px}.game-hud-full{gap:10px}.game-title{font-size:20px}.question-card{padding:16px}.question-text{padding:20px 12px;font-size:21px}.answer-section{flex-direction:column}.submit-btn{width:100%}.feedback-card,.modal-content{padding:24px 18px}}
 </style>

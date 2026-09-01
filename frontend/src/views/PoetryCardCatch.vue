@@ -487,6 +487,7 @@
 </template>
 
 <script>
+import '../assets/game-suite.css'
 import { ref, onMounted, onUnmounted, onActivated, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import questionsData from '@/data/poetryQuestions.json';

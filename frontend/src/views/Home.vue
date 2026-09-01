@@ -58,6 +58,7 @@
 import AIPersonalizedSection from '@/components/AIPersonalizedSection.vue'
 import api, { request, TIMEOUTS } from '@/services/api.js'
 import { prefetchRoute } from '@/router'
+import { gsap, isReducedMotion, ScrollTrigger } from '@/utils/gsapMotion'
 import scrollArt from '@/assets/jade-poetry-scroll.png'
 import challengeFeatureArt from '@/assets/feature-challenge.png'
 import feihualingFeatureArt from '@/assets/feature-feihualing.png'
@@ -87,6 +88,33 @@ const POSITIVE_HITOKOTO = [
 ]
 const HITOKOTO_API_URL = 'https://v1.hitokoto.cn/?c=i&c=k&min_length=8&max_length=60'
 const HITOKOTO_NEGATIVE_PATTERN = /自杀|死亡|杀戮|血腥|仇恨|绝望|恐怖|色情|淫秽|辱骂|垃圾|傻逼|操你|滚蛋|去死|毒品|战争|暴力|犯罪|颓废|抑郁|痛苦|悲伤|哭泣|遗憾|后悔|失败|病痛|灾难|地狱|末日|毁灭/
+const HOME_SECTION_SELECTOR = '.explore-section, .path-section, .daily-poem-section, .library-section, .footprint-section'
+const FEATURE_CARD_SELECTOR = '.explore-card, .daily-poem-card, .scroll-poem-card'
+const MOTION_MEDIA_QUERIES = {
+  allowsMotion: '(prefers-reduced-motion: no-preference)',
+  slowDisplay: '(update: slow)'
+}
+const FEATURE_CARD_MEDIA_QUERY = '(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)'
+
+function animateFeatureCardEnter(event) {
+  gsap.to(event.currentTarget, {
+    y: -7,
+    scale: 1.012,
+    duration: 0.32,
+    ease: 'power3.out',
+    overwrite: 'auto'
+  })
+}
+
+function animateFeatureCardLeave(event) {
+  gsap.to(event.currentTarget, {
+    y: 0,
+    scale: 1,
+    duration: 0.44,
+    ease: 'power3.out',
+    overwrite: 'auto'
+  })
+}
 
 export default {
   name: 'Home', components: { AIPersonalizedSection },
@@ -102,9 +130,131 @@ export default {
     rankingTabs: [{ key: 'feihua', label: '飞花令' }, { key: 'challenge', label: '闯关' }, { key: 'creation', label: '创作' }], activeRankingTab: 'feihua', rankingData: { feihua: [], challenge: [], creation: [] }, rankingLoading: false, featureImagesReady: {}
   } },
   computed: { currentMonth() { return `${this.currentDate.getMonth() + 1}月` }, currentDay() { return this.currentDate.getDate() }, currentPathIndex() { return Math.min(3, Math.floor(this.learningProgress / 25)) }, learningProgress() { return Math.round(this.userStatsData[2]?.percentage || 0) }, pathProgress() { return this.learningProgress }, currentRankingList() { return this.rankingData[this.activeRankingTab] || [] }, weekDays() { return ['一', '二', '三', '四', '五', '六', '日'] } },
-  mounted() { this.checkLoginStatus(); this.fetchDailyPoem(); this.fetchHitokoto(); this.fetchPoems(); this.fetchRankingData(); this.fetchLearningStats(); this.$nextTick(this.observeFeatureImages) },
-  beforeUnmount() { this.stopReading(); this.featureImageObserver?.disconnect(); this.poemScrollResizeObserver?.disconnect() },
+  mounted() {
+    this.checkLoginStatus()
+    this.fetchDailyPoem()
+    this.fetchHitokoto()
+    this.fetchPoems()
+    this.fetchRankingData()
+    this.fetchLearningStats()
+
+    this.$nextTick(() => {
+      this.observeFeatureImages()
+      this.initializeMotion()
+    })
+  },
+  activated() {
+    if (!this.homeMedia) this.$nextTick(() => this.initializeMotion())
+  },
+  deactivated() {
+    this.disposeMotion()
+  },
+  beforeUnmount() {
+    this.stopReading()
+    this.featureImageObserver?.disconnect()
+    this.poemScrollResizeObserver?.disconnect()
+    this.disposeMotion()
+    if (this.motionRefreshFrame) cancelAnimationFrame(this.motionRefreshFrame)
+  },
   methods: {
+    disposeMotion() {
+      this.homeMedia?.revert()
+      this.homeMedia = null
+      this.clearHomeMotion()
+      this.removeFeatureCardMotion()
+    },
+    clearHomeMotion() {
+      this.libraryParallax?.kill()
+      this.libraryParallax = null
+      this.homeMotion?.revert()
+      this.homeMotion = null
+    },
+    initializeMotion() {
+      if (this.homeMedia) return
+      const root = this.$el
+      if (!root) return
+
+      this.homeMedia = gsap.matchMedia()
+      this.homeMedia.add(MOTION_MEDIA_QUERIES, (context) => {
+        if (!context.conditions.allowsMotion || context.conditions.slowDisplay) return
+
+        this.homeMotion = gsap.context(() => {
+          const intro = gsap.timeline({ defaults: { ease: 'power3.out' } })
+          intro
+            .from('.intro-copy > *', { y: 20, autoAlpha: 0, duration: 0.68, stagger: 0.1 })
+            .from('.intro-note > *', { x: 16, autoAlpha: 0, duration: 0.5, stagger: 0.08 }, '-=0.45')
+            .from('.learning-hero', { y: 26, autoAlpha: 0, scale: 0.985, duration: 0.78 }, '-=0.2')
+            .from('.learning-copy > *', { y: 16, autoAlpha: 0, duration: 0.48, stagger: 0.07 }, '-=0.48')
+            .from('.learning-status > *', { x: 14, autoAlpha: 0, duration: 0.42, stagger: 0.08 }, '-=0.36')
+
+          gsap.to('.orbit-core', { y: -7, scale: 1.025, duration: 3.6, ease: 'sine.inOut', yoyo: true, repeat: -1 })
+          gsap.to('.ring-large', { rotation: '+=360', duration: 38, ease: 'none', repeat: -1 })
+          gsap.to('.ring-small', { rotation: '-=360', duration: 28, ease: 'none', repeat: -1 })
+          gsap.to('.orbit-label', { y: (index) => index % 2 ? 8 : -8, duration: 2.7, ease: 'sine.inOut', yoyo: true, repeat: -1, stagger: 0.35 })
+
+          const sections = gsap.utils.toArray(HOME_SECTION_SELECTOR)
+          ScrollTrigger.batch(sections, {
+            start: 'top 83%',
+            once: true,
+            onEnter: (batch) => gsap.from(batch, { y: 34, autoAlpha: 0, duration: 0.72, ease: 'power3.out', stagger: 0.11, overwrite: 'auto' })
+          })
+
+        }, root)
+        this.installLibraryParallax()
+        this.animateProgress()
+        this.scheduleMotionRefresh()
+        return () => this.clearHomeMotion()
+      })
+      this.homeMedia.add(FEATURE_CARD_MEDIA_QUERY, () => this.setupFeatureCardMotion())
+    },
+    installLibraryParallax() {
+      if (isReducedMotion() || !this.homeMedia) return
+      const artwork = this.$el?.querySelector('.poem-scroll-art')
+      const section = this.$el?.querySelector('.library-section')
+      if (!artwork || !section || this.libraryParallax) return
+      this.libraryParallax = gsap.to(artwork, {
+        yPercent: 7,
+        ease: 'none',
+        scrollTrigger: { trigger: section, start: 'top bottom', end: 'bottom top', scrub: 0.7 }
+      })
+    },
+    setupFeatureCardMotion() {
+      this.removeFeatureCardMotion()
+      this.featureMotionCards = Array.from(this.$el.querySelectorAll(FEATURE_CARD_SELECTOR))
+      this.featureMotionCards.forEach((card) => {
+        card.addEventListener('pointerenter', animateFeatureCardEnter)
+        card.addEventListener('pointerleave', animateFeatureCardLeave)
+      })
+      return () => this.removeFeatureCardMotion()
+    },
+    removeFeatureCardMotion() {
+      this.featureMotionCards?.forEach((card) => {
+        card.removeEventListener('pointerenter', animateFeatureCardEnter)
+        card.removeEventListener('pointerleave', animateFeatureCardLeave)
+        gsap.killTweensOf(card)
+      })
+      this.featureMotionCards = []
+    },
+    animateProgress() {
+      if (isReducedMotion()) return
+      const progress = this.$el?.querySelector('.progress-track span')
+      if (!progress) return
+      gsap.fromTo(progress, { scaleX: 0, transformOrigin: 'left center' }, { scaleX: 1, duration: 1.05, ease: 'power3.out', overwrite: 'auto' })
+    },
+    animateRankingRows() {
+      if (isReducedMotion()) return
+      this.$nextTick(() => {
+        const rows = this.$el?.querySelectorAll('.ranking-row')
+        if (rows?.length) gsap.fromTo(rows, { x: 14, autoAlpha: 0 }, { x: 0, autoAlpha: 1, duration: 0.42, ease: 'power2.out', stagger: 0.06, overwrite: 'auto' })
+      })
+    },
+    scheduleMotionRefresh() {
+      if (!this.homeMotion || this.motionRefreshFrame) return
+      this.motionRefreshFrame = requestAnimationFrame(() => {
+        this.motionRefreshFrame = null
+        ScrollTrigger.refresh()
+      })
+    },
     checkLoginStatus() { this.isLoggedIn = !!localStorage.getItem('token') }, prefetchNavigation(path) { prefetchRoute(path).catch(() => {}) }, navigateTo(path) { this.prefetchNavigation(path); this.$router.push(path) }, navigateToDetail(id) { if (id) this.$router.push(`/poem/${id}`) }, getModuleProgress(index) { return index === 0 || index === 2 ? this.learningProgress : 0 },
     observeFeatureImages() {
       const loadImage = (card) => {
@@ -125,7 +275,7 @@ export default {
       }, { rootMargin: '360px 0px' })
       cards.forEach((card) => this.featureImageObserver.observe(card))
     },
-    async fetchDailyPoem() { try { this.dailyPoem = await request('/daily-poem', { includeAuth: false, timeout: TIMEOUTS.SHORT }) || null } catch { this.dailyPoem = null } if (!this.dailyPoem) this.dailyPoem = { id: 1, title: '静夜思', author: '李白', dynasty: '唐', content: '床前明月光，疑是地上霜。\n举头望明月，低头思故乡。' } },
+    async fetchDailyPoem() { try { this.dailyPoem = await request('/daily-poem', { includeAuth: false, timeout: TIMEOUTS.SHORT }) || null } catch { this.dailyPoem = null } if (!this.dailyPoem) this.dailyPoem = { id: 1, title: '静夜思', author: '李白', dynasty: '唐', content: '床前明月光，疑是地上霜。\n举头望明月，低头思故乡。' }; await this.$nextTick(); this.scheduleMotionRefresh() },
     async fetchHitokoto() {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 3500)
@@ -147,8 +297,8 @@ export default {
     },
     pickFallbackHitokoto() { const quote = POSITIVE_HITOKOTO[Math.floor(Math.random() * POSITIVE_HITOKOTO.length)]; this.hitokotoText = quote.text; this.hitokotoFrom = quote.from },
     async fetchLearningStats() { try { const result = await api.home.getLearningStats(); if (result.success && result.data) { if (result.data.loggedIn) { this.isLoggedIn = true; this.updateUserStats(result.data) } else this.isLoggedIn = false } } catch { this.isLoggedIn = !!localStorage.getItem('token') } },
-    updateUserStats(data) { const values = [data.poemsStudied || 0, Math.round((data.totalStudyTime || 0) / 60), data.challengeLevel || 0, data.feihuaRating || 1000, data.totalCreations || 0, data.weeklyCheckins || 0]; const maxes = [100, 1000, 100, 2000, 50, 7]; values.forEach((value, index) => { this.userStatsData[index].value = value; this.userStatsData[index].displayValue = Number(value).toLocaleString(); this.userStatsData[index].percentage = Math.min(100, (value / maxes[index]) * 100) }) },
-    async fetchPoems() { try { if (this.page === 1) this.loading = true; this.error = ''; let url = `/poems?page=${this.page}&pageSize=${this.pageSize}&random=true`; if (this.dynastyFilter) url += `&dynasty=${encodeURIComponent(this.dynastyFilter)}`; const data = await request(url, { includeAuth: false, timeout: TIMEOUTS.SHORT }); this.hasMore = data.length === this.pageSize; this.poems = this.page === 1 ? data : [...this.poems, ...data]; this.filteredPoems = this.poems } catch (err) { this.error = err.message || '诗词库暂时未能打开' } finally { this.loading = false; this.loadingMore = false; await this.$nextTick(); this.setupPoemScrollbar() } },
+    updateUserStats(data) { const values = [data.poemsStudied || 0, Math.round((data.totalStudyTime || 0) / 60), data.challengeLevel || 0, data.feihuaRating || 1000, data.totalCreations || 0, data.weeklyCheckins || 0]; const maxes = [100, 1000, 100, 2000, 50, 7]; values.forEach((value, index) => { this.userStatsData[index].value = value; this.userStatsData[index].displayValue = Number(value).toLocaleString(); this.userStatsData[index].percentage = Math.min(100, (value / maxes[index]) * 100) }); this.$nextTick(() => this.animateProgress()) },
+    async fetchPoems() { try { if (this.page === 1) this.loading = true; this.error = ''; let url = `/poems?page=${this.page}&pageSize=${this.pageSize}&random=true`; if (this.dynastyFilter) url += `&dynasty=${encodeURIComponent(this.dynastyFilter)}`; const data = await request(url, { includeAuth: false, timeout: TIMEOUTS.SHORT }); this.hasMore = data.length === this.pageSize; this.poems = this.page === 1 ? data : [...this.poems, ...data]; this.filteredPoems = this.poems } catch (err) { this.error = err.message || '诗词库暂时未能打开' } finally { this.loading = false; this.loadingMore = false; await this.$nextTick(); this.setupPoemScrollbar(); this.installLibraryParallax(); this.scheduleMotionRefresh(); if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) this.setupFeatureCardMotion() } },
     loadMore() { if (this.loadingMore || !this.hasMore) return; this.loadingMore = true; this.page += 1; this.fetchPoems() }, handleSearch() { if (this.searchQuery.trim()) this.$router.push({ path: '/search', query: { q: this.searchQuery } }) }, filterPoems() { this.page = 1; this.poems = []; this.hasMore = true; this.fetchPoems() }, getShortContent(content) { const clean = (content || '').replace(/\s+/g, ' ').trim(); return clean.length > 58 ? `${clean.substring(0, 58)}...` : clean },
     setupPoemScrollbar() {
       this.poemScrollResizeObserver?.disconnect()
@@ -241,16 +391,16 @@ export default {
       event.preventDefault()
     },
     openPoemFromScroll(id) { if (!this.scrollDrag.suppressClick) this.navigateToDetail(id) },
-    async fetchRankingData() { this.rankingLoading = true; try { const tabs = ['feihua', 'challenge', 'creation']; const results = await Promise.all(tabs.map(tab => api.home.getLeaderboard(tab))); tabs.forEach((tab, index) => { if (results[index]?.success) this.rankingData[tab] = results[index].data || [] }) } catch { /* empty state remains useful */ } finally { this.rankingLoading = false } }, switchRankingTab(key) { this.activeRankingTab = key }, toggleRead(poem) { if (this.isReading) return this.stopReading(); this.startReading(poem) }, stopReading() { if (this.audio) { this.audio.pause(); this.audio.currentTime = 0; this.audio = null } if (this.speechSynthesisSupported) speechSynthesis.cancel(); this.isReading = false; this.readingPoemId = null }, async startReading(poem) { if (!poem?.content) return; this.stopReading(); this.isReading = true; this.readingPoemId = poem.id; try { const audioBlob = await api.ai.tts(poem.content.replace(/\n/g, '。')); const audioUrl = URL.createObjectURL(audioBlob); this.audio = new Audio(audioUrl); this.audio.onended = () => { this.isReading = false; this.readingPoemId = null; URL.revokeObjectURL(audioUrl) }; await this.audio.play() } catch { this.stopReading() } }
+    async fetchRankingData() { this.rankingLoading = true; try { const tabs = ['feihua', 'challenge', 'creation']; const results = await Promise.all(tabs.map(tab => api.home.getLeaderboard(tab))); tabs.forEach((tab, index) => { if (results[index]?.success) this.rankingData[tab] = results[index].data || [] }) } catch { /* empty state remains useful */ } finally { this.rankingLoading = false; this.animateRankingRows() } }, switchRankingTab(key) { this.activeRankingTab = key; this.animateRankingRows() }, toggleRead(poem) { if (this.isReading) return this.stopReading(); this.startReading(poem) }, stopReading() { if (this.audio) { this.audio.pause(); this.audio.currentTime = 0; this.audio = null } if (this.speechSynthesisSupported) speechSynthesis.cancel(); this.isReading = false; this.readingPoemId = null }, async startReading(poem) { if (!poem?.content) return; this.stopReading(); this.isReading = true; this.readingPoemId = poem.id; try { const audioBlob = await api.ai.tts(poem.content.replace(/\n/g, '。')); const audioUrl = URL.createObjectURL(audioBlob); this.audio = new Audio(audioUrl); this.audio.onended = () => { this.isReading = false; this.readingPoemId = null; URL.revokeObjectURL(audioUrl) }; await this.audio.play() } catch { this.stopReading() } }
   }
 }
 </script>
 
 <style scoped>
 .cockpit-home { --jade-deep:#164b48; --jade:#2f8a7b; --jade-soft:#cfe8df; --ink:#213534; --muted:#6d817d; --line:rgba(51,103,94,.16); max-width:1680px; margin:0 auto; padding:48px clamp(28px,4vw,72px) 108px; color:var(--ink); font-size:17px; }
-.cockpit-home button,.cockpit-home input,.cockpit-home select{font:inherit}.cockpit-home button{cursor:pointer}.home-intro{display:flex;justify-content:space-between;align-items:flex-end;gap:32px;padding:30px 6px 34px;animation:rise-in .7s ease both}.intro-copy{max-width:720px}.eyebrow{display:block;color:var(--jade);font:600 11px/1.3 var(--font-sans);letter-spacing:.18em;text-transform:uppercase}.intro-copy h1{margin:15px 0 10px;color:var(--jade-deep);font:600 clamp(36px,5vw,64px)/1.08 var(--font-ancient);letter-spacing:-.05em}.intro-copy p{margin:0;color:var(--muted);font:15px/1.8 var(--font-sans)}.intro-note{min-width:240px;padding:15px 0 0 22px;border-left:1px solid var(--line)}.note-kicker{color:var(--jade);font:600 11px/1 var(--font-sans);letter-spacing:.15em}.intro-note p{margin:14px 0 3px;color:var(--ink);font:18px/1.55 var(--font-ancient)}.intro-note small{color:var(--muted);font:12px var(--font-sans)}
-.learning-hero{display:grid;grid-template-columns:minmax(0,1fr) 260px;min-height:420px;overflow:hidden;border:1px solid rgba(97,157,143,.28);border-radius:28px;background:linear-gradient(115deg,rgba(245,252,248,.92),rgba(220,240,232,.7));box-shadow:0 26px 70px rgba(45,94,83,.12);animation:rise-in .75s .08s ease both}.learning-main{display:grid;grid-template-columns:minmax(0,1fr) 280px;align-items:center;padding:50px 56px;position:relative}.section-kicker{display:flex;align-items:center;gap:10px;color:var(--jade);font:600 12px var(--font-sans);letter-spacing:.12em}.kicker-line{width:34px;height:1px;background:currentColor}.learning-copy h2{margin:20px 0 6px;color:var(--jade-deep);font:600 clamp(34px,4.2vw,58px)/1.12 var(--font-ancient);letter-spacing:-.05em}.learning-author{margin:0;color:#64847c;font:13px var(--font-sans)}.learning-advice{max-width:430px;margin:24px 0 25px;color:var(--muted);font:15px/1.85 var(--font-sans)}.learning-actions{display:flex;align-items:center;gap:14px}.primary-action,.quiet-action,.text-action{border:0;background:transparent;color:var(--jade-deep)}.primary-action{padding:12px 18px;border-radius:12px;background:var(--jade-deep);color:#fff;box-shadow:0 8px 20px rgba(22,75,72,.18);transition:transform .25s ease,box-shadow .25s ease}.primary-action:hover{transform:translateY(-2px);box-shadow:0 12px 24px rgba(22,75,72,.24)}.quiet-action{padding:10px 2px;color:var(--jade);font:600 13px var(--font-sans)}.quiet-action span,.primary-action span{margin-left:8px}.progress-block{max-width:460px;margin-top:38px}.progress-label,.progress-meta{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font:12px var(--font-sans)}.progress-label strong{color:var(--jade-deep)}.progress-track{height:5px;margin:10px 0 8px;overflow:hidden;border-radius:10px;background:rgba(47,138,123,.12)}.progress-track span{display:block;height:100%;border-radius:inherit;background:var(--jade);transition:width .6s ease}.progress-meta{color:#79958e;font-size:11px}.progress-meta button{padding:0;border:0;background:transparent;color:var(--jade)}
-.hero-orbit{position:relative;min-height:265px;align-self:center}.orbit-ring{position:absolute;border:1px solid rgba(47,138,123,.28);border-radius:50%;transform:rotate(-18deg)}.ring-large{inset:22px 10px;animation:drift 12s ease-in-out infinite}.ring-small{inset:53px 43px;border-style:dashed;animation:drift 9s ease-in-out infinite reverse}.orbit-core{position:absolute;inset:89px 79px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.8);border-radius:50%;background:rgba(255,255,255,.65);box-shadow:0 14px 34px rgba(47,138,123,.14)}.orbit-core strong{color:var(--jade-deep);font:700 24px var(--font-sans);letter-spacing:.08em}.orbit-core span{margin-top:4px;color:var(--muted);font:11px var(--font-sans)}.orbit-label{position:absolute;z-index:1;display:grid;place-items:center;width:38px;height:38px;border:1px solid rgba(47,138,123,.22);border-radius:50%;background:rgba(255,255,255,.74);color:var(--jade-deep);font:18px var(--font-ancient);box-shadow:0 8px 20px rgba(47,138,123,.1)}.label-poem{top:16px;left:26px}.label-meaning{top:22px;right:18px}.label-rhythm{right:7px;bottom:16px}.learning-status{display:flex;flex-direction:column;padding:32px 28px;border-left:1px solid rgba(76,132,119,.18);background:rgba(255,255,255,.38)}.status-heading{display:flex;justify-content:space-between;color:var(--jade-deep);font:600 13px var(--font-sans)}.status-live{color:var(--jade);font-size:11px}.status-live:before{content:'';display:inline-block;width:6px;height:6px;margin:0 5px 1px 0;border-radius:50%;background:var(--jade)}.status-level{display:flex;flex-direction:column;align-items:center;justify-content:center;width:130px;height:130px;margin:36px auto 30px;border:1px solid rgba(47,138,123,.28);border-radius:50%;background:radial-gradient(circle,#fff 0 54%,transparent 55%),conic-gradient(var(--jade) 0 26%,rgba(47,138,123,.1) 26% 100%);box-shadow:inset 0 0 0 10px rgba(255,255,255,.3)}.status-level strong{color:var(--jade-deep);font:600 34px var(--font-sans)}.status-level span{color:var(--muted);font:11px var(--font-sans)}.status-list{margin-top:auto}.status-list div{display:flex;justify-content:space-between;align-items:baseline;padding:13px 0;border-top:1px solid rgba(76,132,119,.14);color:var(--muted);font:12px var(--font-sans)}.status-list strong{color:var(--jade-deep);font-size:16px}.status-list small{margin-left:3px;color:var(--muted);font-size:10px;font-weight:400}
+.cockpit-home button,.cockpit-home input,.cockpit-home select{font:inherit}.cockpit-home button{cursor:pointer}.home-intro{display:flex;justify-content:space-between;align-items:flex-end;gap:32px;padding:30px 6px 34px}.intro-copy{max-width:720px}.eyebrow{display:block;color:var(--jade);font:600 11px/1.3 var(--font-sans);letter-spacing:.18em;text-transform:uppercase}.intro-copy h1{margin:15px 0 10px;color:var(--jade-deep);font:600 clamp(36px,5vw,64px)/1.08 var(--font-ancient);letter-spacing:-.05em}.intro-copy p{margin:0;color:var(--muted);font:15px/1.8 var(--font-sans)}.intro-note{min-width:240px;padding:15px 0 0 22px;border-left:1px solid var(--line)}.note-kicker{color:var(--jade);font:600 11px/1 var(--font-sans);letter-spacing:.15em}.intro-note p{margin:14px 0 3px;color:var(--ink);font:18px/1.55 var(--font-ancient)}.intro-note small{color:var(--muted);font:12px var(--font-sans)}
+.learning-hero{display:grid;grid-template-columns:minmax(0,1fr) 260px;min-height:420px;overflow:hidden;border:1px solid rgba(97,157,143,.28);border-radius:28px;background:linear-gradient(115deg,rgba(245,252,248,.92),rgba(220,240,232,.7));box-shadow:0 26px 70px rgba(45,94,83,.12);will-change:transform,opacity}.learning-main{display:grid;grid-template-columns:minmax(0,1fr) 280px;align-items:center;padding:50px 56px;position:relative}.section-kicker{display:flex;align-items:center;gap:10px;color:var(--jade);font:600 12px var(--font-sans);letter-spacing:.12em}.kicker-line{width:34px;height:1px;background:currentColor}.learning-copy h2{margin:20px 0 6px;color:var(--jade-deep);font:600 clamp(34px,4.2vw,58px)/1.12 var(--font-ancient);letter-spacing:-.05em}.learning-author{margin:0;color:#64847c;font:13px var(--font-sans)}.learning-advice{max-width:430px;margin:24px 0 25px;color:var(--muted);font:15px/1.85 var(--font-sans)}.learning-actions{display:flex;align-items:center;gap:14px}.primary-action,.quiet-action,.text-action{border:0;background:transparent;color:var(--jade-deep)}.primary-action{padding:12px 18px;border-radius:12px;background:var(--jade-deep);color:#fff;box-shadow:0 8px 20px rgba(22,75,72,.18);transition:transform .25s ease,box-shadow .25s ease}.primary-action:hover{transform:translateY(-2px);box-shadow:0 12px 24px rgba(22,75,72,.24)}.quiet-action{padding:10px 2px;color:var(--jade);font:600 13px var(--font-sans)}.quiet-action span,.primary-action span{margin-left:8px}.progress-block{max-width:460px;margin-top:38px}.progress-label,.progress-meta{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font:12px var(--font-sans)}.progress-label strong{color:var(--jade-deep)}.progress-track{height:5px;margin:10px 0 8px;overflow:hidden;border-radius:10px;background:rgba(47,138,123,.12)}.progress-track span{display:block;height:100%;border-radius:inherit;background:var(--jade);transition:width .6s ease;will-change:transform}.progress-meta{color:#79958e;font-size:11px}.progress-meta button{padding:0;border:0;background:transparent;color:var(--jade)}
+.hero-orbit{position:relative;min-height:265px;align-self:center}.orbit-ring{position:absolute;border:1px solid rgba(47,138,123,.28);border-radius:50%;transform:rotate(-18deg);will-change:transform}.ring-large{inset:22px 10px}.ring-small{inset:53px 43px;border-style:dashed}.orbit-core{position:absolute;inset:89px 79px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,.8);border-radius:50%;background:rgba(255,255,255,.65);box-shadow:0 14px 34px rgba(47,138,123,.14);will-change:transform}.orbit-core strong{color:var(--jade-deep);font:700 24px var(--font-sans);letter-spacing:.08em}.orbit-core span{margin-top:4px;color:var(--muted);font:11px var(--font-sans)}.orbit-label{position:absolute;z-index:1;display:grid;place-items:center;width:38px;height:38px;border:1px solid rgba(47,138,123,.22);border-radius:50%;background:rgba(255,255,255,.74);color:var(--jade-deep);font:18px var(--font-ancient);box-shadow:0 8px 20px rgba(47,138,123,.1);will-change:transform}.label-poem{top:16px;left:26px}.label-meaning{top:22px;right:18px}.label-rhythm{right:7px;bottom:16px}.learning-status{display:flex;flex-direction:column;padding:32px 28px;border-left:1px solid rgba(76,132,119,.18);background:rgba(255,255,255,.38)}.status-heading{display:flex;justify-content:space-between;color:var(--jade-deep);font:600 13px var(--font-sans)}.status-live{color:var(--jade);font-size:11px}.status-live:before{content:'';display:inline-block;width:6px;height:6px;margin:0 5px 1px 0;border-radius:50%;background:var(--jade)}.status-level{display:flex;flex-direction:column;align-items:center;justify-content:center;width:130px;height:130px;margin:36px auto 30px;border:1px solid rgba(47,138,123,.28);border-radius:50%;background:radial-gradient(circle,#fff 0 54%,transparent 55%),conic-gradient(var(--jade) 0 26%,rgba(47,138,123,.1) 26% 100%);box-shadow:inset 0 0 0 10px rgba(255,255,255,.3)}.status-level strong{color:var(--jade-deep);font:600 34px var(--font-sans)}.status-level span{color:var(--muted);font:11px var(--font-sans)}.status-list{margin-top:auto}.status-list div{display:flex;justify-content:space-between;align-items:baseline;padding:13px 0;border-top:1px solid rgba(76,132,119,.14);color:var(--muted);font:12px var(--font-sans)}.status-list strong{color:var(--jade-deep);font-size:16px}.status-list small{margin-left:3px;color:var(--muted);font-size:10px;font-weight:400}
 .section-heading-row{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:23px}.section-heading-row h2{margin:8px 0 0;color:var(--jade-deep);font:600 30px/1.2 var(--font-ancient);letter-spacing:-.03em}.section-note{padding-bottom:3px;color:var(--muted);font:13px var(--font-sans)}.explore-section,.path-section,.daily-poem-section,.library-section,.footprint-section{margin-top:92px}.explore-layout{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:minmax(218px,auto);gap:16px}.explore-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;min-height:218px;overflow:hidden;isolation:isolate;padding:23px 24px 21px;border:1px solid rgba(94,139,125,.25);border-radius:18px;background-color:#edf5ef;background-image:linear-gradient(110deg,rgba(246,251,247,.96) 0%,rgba(246,251,247,.78) 47%,rgba(239,247,241,.42) 100%),var(--feature-image);background-position:center;background-size:cover;color:var(--jade-deep);text-align:left;box-shadow:0 10px 24px rgba(43,97,86,.045);transition:transform .3s ease,box-shadow .3s ease,border-color .3s ease}.explore-card::after{position:absolute;inset:0;z-index:-1;border:1px solid rgba(255,255,255,.52);border-radius:inherit;content:'';pointer-events:none}.explore-card:hover{transform:translateY(-4px);border-color:rgba(47,138,123,.42);box-shadow:0 18px 34px rgba(43,97,86,.12)}.explore-card:focus-visible{outline:3px solid rgba(47,138,123,.28);outline-offset:3px}.explore-card.is-primary{border-color:rgba(47,138,123,.38);background-image:linear-gradient(110deg,rgba(232,247,239,.95) 0%,rgba(235,247,240,.72) 48%,rgba(229,242,236,.38) 100%),var(--feature-image);box-shadow:0 12px 28px rgba(43,97,86,.09)}.feature-card-wash{position:absolute;inset:0;z-index:-1;background:radial-gradient(circle at 92% 84%,rgba(255,255,255,.2),transparent 33%),linear-gradient(180deg,transparent 46%,rgba(225,240,231,.24));pointer-events:none}.feature-card-watermark{position:absolute;right:20px;top:15px;color:rgba(47,138,123,.14);font:72px/1 var(--font-ancient);pointer-events:none}.feature-card-topline{display:flex;align-items:center;justify-content:space-between;width:100%}.feature-index{color:#7e9f95;font:11px var(--font-sans);letter-spacing:.12em}.feature-symbol{display:grid;place-items:center;width:34px;height:34px;border:1px solid rgba(47,138,123,.2);border-radius:50%;background:rgba(255,255,255,.58);color:var(--jade-deep);font:17px var(--font-ancient);box-shadow:0 5px 13px rgba(43,97,86,.07)}.feature-card-copy{display:flex;flex-direction:column;gap:5px;margin-top:auto}.feature-card-copy strong{color:var(--jade-deep);font:600 23px var(--font-ancient);letter-spacing:-.02em}.feature-card-copy small{max-width:19em;color:#58726b;font:12px/1.6 var(--font-sans)}.feature-cta{margin-top:17px;color:var(--jade);font:600 12px var(--font-sans)}.feature-cta i{margin-left:7px;font-style:normal}
 .path-rail{position:relative;display:grid;grid-template-columns:repeat(4,1fr);gap:18px;padding-top:24px}.path-line{position:absolute;top:43px;left:9%;right:9%;height:1px;background:rgba(47,138,123,.16)}.path-line span{display:block;height:100%;background:var(--jade);transition:width .5s ease}.path-step{position:relative;padding:0 3px}.path-node{position:relative;z-index:1;display:grid;place-items:center;width:38px;height:38px;margin-bottom:18px;border:1px solid rgba(47,138,123,.25);border-radius:50%;background:rgba(246,251,247,.92);color:#78918a;font:11px var(--font-sans)}.path-step.current .path-node{border-color:var(--jade);background:var(--jade);color:#fff;box-shadow:0 8px 18px rgba(47,138,123,.2)}.path-step.completed .path-node{background:var(--jade-soft);color:var(--jade-deep)}.path-step-copy{min-height:190px;padding-right:12px}.path-status{color:var(--jade);font:600 11px var(--font-sans)}.path-step:not(.current) .path-status{color:#97a9a4}.path-step h3{margin:9px 0 7px;color:var(--jade-deep);font:600 22px var(--font-ancient)}.path-step p{margin:0;color:var(--muted);font:12px/1.7 var(--font-sans)}.path-lessons{display:flex;flex-direction:column;gap:8px;margin-top:18px;color:#71847f;font:11px var(--font-sans)}.path-lessons span{display:flex;align-items:center;gap:7px}.path-lessons i{width:6px;height:6px;border:1px solid #9eb5ad;border-radius:50%}.path-lessons .complete i{border-color:var(--jade);background:var(--jade)}.path-lessons .current{color:var(--jade-deep)}.path-step-meta{display:flex;justify-content:space-between;color:#91a49e;font:11px var(--font-sans)}.path-step-meta strong{color:var(--jade);font-size:14px}
 .daily-poem-card{position:relative;display:grid;grid-template-columns:90px minmax(0,1fr) 185px;gap:28px;align-items:center;min-height:310px;overflow:hidden;padding:52px 58px;border:1px solid rgba(117,152,136,.25);border-radius:20px;background:linear-gradient(90deg,rgba(250,251,246,.95),rgba(237,246,239,.77)),url('../assets/jade-paper-ambient.png') center/cover;box-shadow:0 18px 40px rgba(61,100,83,.08);cursor:pointer}.date-stamp{align-self:start;display:flex;flex-direction:column;color:var(--jade-deep)}.date-stamp strong{font:600 64px/.9 var(--font-sans);letter-spacing:-.08em}.date-stamp span{margin-top:9px;color:var(--jade);font:12px var(--font-sans)}.poem-label{color:var(--jade);font:600 11px var(--font-sans);letter-spacing:.14em}.daily-poem-copy h3{margin:12px 0 1px;color:var(--jade-deep);font:600 34px var(--font-ancient)}.daily-poem-copy p{margin:0;color:var(--muted);font:13px var(--font-sans)}.daily-poem-copy blockquote{max-width:640px;margin:25px 0 0;color:#45645d;font:21px/1.85 var(--font-ancient)}.daily-poem-actions{display:flex;flex-direction:column;align-items:flex-start;gap:24px}.poem-detail-link{padding:0;border:0;background:transparent;color:var(--jade-deep);font:600 12px var(--font-sans)}.poem-detail-link span{margin-left:7px;color:var(--jade)}
@@ -259,6 +409,6 @@ export default {
 @keyframes rise-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}@keyframes drift{0%,100%{transform:rotate(-18deg) translate(0)}50%{transform:rotate(-12deg) translate(4px,-5px)}}
 @media (prefers-reduced-motion:reduce){.home-intro,.learning-hero{animation:none}.ring-large,.ring-small{animation:none}*{scroll-behavior:auto!important}}
 @media (max-width:980px){.cockpit-home{padding-inline:20px}.learning-main{grid-template-columns:1fr 220px;padding:40px}.learning-hero{grid-template-columns:1fr 220px}.explore-layout{grid-template-columns:repeat(2,minmax(0,1fr))}.path-rail{grid-template-columns:repeat(2,1fr);gap:34px 18px}.path-line{display:none}.path-step-copy{min-height:0}.daily-poem-card{grid-template-columns:70px minmax(0,1fr)}.daily-poem-actions{grid-column:2;flex-direction:row;align-items:center;gap:18px}.ai-home-section{margin-inline:-20px}}
-@media (max-width:700px){.cockpit-home{padding:20px 14px 68px}.home-intro{display:block;padding:22px 4px 28px}.intro-copy h1{font-size:42px}.intro-note{margin-top:28px;padding:15px 0 0;border-top:1px solid var(--line);border-left:0}.learning-hero{display:block}.learning-main{display:block;padding:30px 24px 26px}.learning-copy h2{font-size:42px}.hero-orbit{min-height:200px;margin-top:20px}.orbit-core{inset:66px calc(50% - 52px)}.ring-large{inset:14px 15%}.ring-small{inset:40px 29%}.label-poem{left:23%}.label-meaning{right:20%}.label-rhythm{right:17%;bottom:4px}.learning-status{display:grid;grid-template-columns:auto 1fr;gap:15px 20px;padding:22px 24px;border-top:1px solid rgba(76,132,119,.18);border-left:0}.status-heading{grid-column:1/-1}.status-level{width:90px;height:90px;margin:0}.status-level strong{font-size:25px}.status-list{margin:0}.status-list div{padding:7px 0}.section-heading-row{display:block}.section-note{display:block;margin-top:9px}.explore-section,.path-section,.daily-poem-section,.library-section,.footprint-section{margin-top:68px}.explore-layout{grid-template-columns:1fr;gap:12px}.explore-card{min-height:196px;padding:20px}.feature-card-copy strong{font-size:21px}.feature-card-watermark{font-size:64px}.path-rail{grid-template-columns:1fr;gap:24px}.path-step{display:grid;grid-template-columns:42px 1fr;gap:12px}.path-node{margin-bottom:0}.path-step-meta{grid-column:2}.daily-poem-card{display:block;padding:28px 24px}.date-stamp{flex-direction:row;align-items:baseline;gap:8px}.date-stamp strong{font-size:52px}.daily-poem-copy blockquote{font-size:18px}.daily-poem-actions{flex-wrap:wrap;margin-top:26px}.library-toolbar{flex-wrap:wrap}.search-field{flex-basis:100%;max-width:none}.library-toolbar select{flex:1}.poem-scroll-shell{padding:24px 16px 20px}.scroll-hint{display:none}.footprint-summary,.ranking-card{padding:22px 18px}.summary-number{margin-top:32px}.summary-number strong{font-size:62px}.ranking-card-head{display:block}.ranking-tabs{margin-top:16px}.ranking-row{grid-template-columns:32px 34px minmax(0,1fr) auto;gap:9px;padding:0 4px;min-height:50px;font-size:14px}.ranking-score{min-width:0;padding-right:0;font-size:15px}.ai-home-section{margin-inline:-14px}}
+@media (max-width:700px){.cockpit-home{padding:20px 14px 68px}.home-intro{display:block;padding:22px 4px 28px}.intro-copy h1{font-size:42px}.intro-note{margin-top:28px;padding:15px 0 0;border-top:1px solid var(--line);border-left:0}.learning-hero{display:block}.learning-main{display:block;padding:30px 24px 26px}.learning-copy h2{font-size:42px}.hero-orbit{min-height:200px;margin-top:20px}.orbit-core{inset:66px calc(50% - 52px)}.ring-large{inset:14px 15%}.ring-small{inset:40px 29%}.label-poem{left:23%}.label-meaning{right:20%}.label-rhythm{right:17%;bottom:4px}.learning-status{display:grid;grid-template-columns:auto 1fr;gap:15px 20px;padding:22px 24px;border-top:1px solid rgba(76,132,119,.18);border-left:0}.status-heading{grid-column:1/-1}.status-level{width:90px;height:90px;margin:0}.status-level strong{font-size:25px}.status-list{margin:0}.status-list div{padding:7px 0}.section-heading-row{display:block}.section-note{display:block;margin-top:9px}.explore-section,.path-section,.daily-poem-section,.library-section,.footprint-section{margin-top:68px}.explore-layout{grid-template-columns:1fr;gap:12px}.explore-card{min-height:196px;padding:20px}.feature-card-copy strong{font-size:21px}.feature-card-watermark{font-size:64px}.path-rail{grid-template-columns:1fr;gap:24px}.path-step{display:grid;grid-template-columns:42px 1fr;gap:12px}.path-node{margin-bottom:0}.path-step-meta{grid-column:2}.daily-poem-card{display:block;padding:28px 24px}.date-stamp{flex-direction:row;align-items:baseline;gap:8px}.date-stamp strong{font-size:52px}.daily-poem-copy blockquote{font-size:18px}.daily-poem-actions{flex-wrap:wrap;margin-top:26px}.library-toolbar{flex-wrap:wrap}.search-field{flex-basis:100%;max-width:none}.library-toolbar select{flex:1}.poem-scroll-shell{padding:24px 16px 20px}.scroll-hint{display:none}.footprint-summary,.ranking-card{padding:22px 18px}.summary-number{margin-top:32px}.summary-number strong{font-size:62px}.ranking-card-head{display:block}.ranking-tabs{margin-top:16px}.ai-home-section{margin-inline:-14px}}
 .poem-scroll-viewport{scrollbar-width:none;touch-action:pan-y;user-select:none}.poem-scroll-viewport::-webkit-scrollbar{display:none}.poem-scrollbar{position:relative;z-index:1;height:10px;margin-top:8px;border-radius:999px;background:rgba(33,53,52,.12);outline:none;touch-action:none}.poem-scrollbar:focus-visible{box-shadow:0 0 0 3px rgba(47,138,123,.2)}.poem-scrollbar.is-disabled{opacity:.35}.poem-scrollbar-thumb{display:block;height:100%;min-width:56px;border-radius:inherit;background:rgba(33,53,52,.72);box-shadow:0 1px 4px rgba(22,75,72,.16);transition:background .16s ease}.poem-scrollbar:hover .poem-scrollbar-thumb,.poem-scrollbar:focus-visible .poem-scrollbar-thumb,.poem-scrollbar.is-dragging .poem-scrollbar-thumb{background:var(--jade-deep)}
 </style>

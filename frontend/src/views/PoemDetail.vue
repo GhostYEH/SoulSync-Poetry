@@ -1,5 +1,5 @@
 <template>
-  <div class="poem-detail" :class="{ 'immersive-mode': isImmersiveMode }">
+  <div class="poem-detail">
     <!-- 划词选择弹窗 -->
     <div
       v-if="selectionPopup.show"
@@ -53,37 +53,27 @@
       </div>
     </transition>
 
-    <button class="back-btn" @click="goBack">← 返回</button>
-    
     <div v-if="loading" class="loading">加载中...</div>
     <div v-else-if="error" class="error">{{ error }}</div>
     <div v-else-if="!poem" class="empty">诗词不存在</div>
     
-    <!-- 初始状态：只显示开始学习按钮 -->
-    <div v-else-if="!isImmersiveMode" class="initial-state">
-      <button class="start-learning-btn" @click="enterImmersiveMode">
-        开始学习
-      </button>
-      <div v-if="imageStatus === 'pending'" class="loading-indicator">
-        <div class="loading-spinner"></div>
-        <p>正在生成诗意图境...</p>
-      </div>
-    </div>
-    
     <!-- 沉浸式学习模式背景 -->
-    <div v-if="canRenderPoem" class="immersive-background">
+    <div v-if="canRenderPoem" class="immersive-background" :class="{ 'has-generated-background': bgImageFadingIn }">
       <div class="background-container">
-        <!-- 默认古风背景（始终存在，垫底） -->
-        <div class="default-background">
+        <!-- 生成图加载完成后，默认背景直接移除，不再与生成图叠加。 -->
+        <div v-if="!bgImageFadingIn" class="default-background">
           <div class="ancient-style-bg"></div>
         </div>
-        <!-- AI 意境图：双层结构实现交叉淡入淡出 -->
+        <!-- AI 意境图：加载完成后完全替换默认背景。 -->
         <img
-          v-if="backgroundImage || bgImageLoading"
+          v-if="backgroundImage"
           :src="backgroundImage"
           class="background-image"
           :class="{ 'fade-in': bgImageFadingIn }"
+          alt=""
+          aria-hidden="true"
           @load="onBgImageLoaded"
+          @error="onBgImageError"
         />
         <div v-if="imageStatus === 'pending' && !backgroundImage" class="loading-overlay">
           <div class="loading-content">
@@ -92,9 +82,6 @@
           </div>
         </div>
       </div>
-      <button class="exit-immersive-btn" @click="exitImmersiveMode">
-        退出学习
-      </button>
     </div>
     
     <div v-if="canRenderPoem" class="poem-glass-shell">
@@ -111,12 +98,16 @@
             @stop="stopDigitalHuman"
           />
 
-          <section class="glass-card action-card accent-gold illustrated-card learning-map-card" :class="{ 'has-generated-content': tutorData }">
+          <section class="glass-card action-card accent-gold illustrated-card learning-map-card" :class="{ 'has-generated-content': tutorData || personalizedTutorLoading, 'is-generating': personalizedTutorLoading }">
             <div><h2><GraduationCap :size="24" weight="duotone" />个性化教学</h2><p>基于你的学习进度与练习表现，为你推荐专属学习路径。</p></div>
             <button class="gold-pill arrow-pill" type="button" :disabled="personalizedTutorLoading" @click="loadPersonalizedTutor"><span>{{ personalizedTutorLoading ? '分析学习状态…' : '获取个性化教学' }}</span><ArrowRight :size="15" /></button>
+            <div v-if="personalizedTutorLoading && !tutorData" class="personalized-result personalized-loading" aria-live="polite">
+              <strong>正在整理专属教学内容</strong>
+              <span>学习进度、薄弱知识点与练习表现正在汇总中…</span>
+            </div>
             <div v-if="tutorData" class="personalized-result">
               <div class="weak-tags"><span v-for="wp in tutorData.weakPoints || []" :key="wp.code">{{ wp.name }} · {{ wp.mastery }}%</span></div>
-              <div v-if="tutorData.teaching?.explanation" class="stream-markdown" v-html="renderMarkdown(tutorData.teaching.explanation)"></div>
+              <SafeMarkdown v-if="tutorData.teaching?.explanation" class="stream-markdown" :content="tutorData.teaching.explanation" />
               <p v-if="tutorData.teaching?.practiceAdvice"><strong>下一步：</strong>{{ tutorData.teaching.practiceAdvice }}</p>
             </div>
             <p v-if="tutorError" class="inline-error">{{ tutorError }}</p>
@@ -140,7 +131,7 @@
                     <button type="button" @click="askSuggestion('这首诗最值得品味的名句是哪句？')">哪句最值得细细品味？</button>
                   </div>
                   <article v-for="(message,index) in tutorMessages" :key="index" class="chat-bubble" :class="[message.role, { 'is-streaming': tutorLoading && message.role === 'bot' && index === tutorMessages.length - 1 }]">
-                    <div class="stream-markdown" v-html="renderMarkdown(message.content)"></div>
+                    <SafeMarkdown class="stream-markdown" :content="message.content" />
                     <button v-if="message.role === 'bot' && message.content" type="button" class="speak-link" @click="speakWithDigitalHuman(message.content, 'explaining')">让数字人讲解</button>
                   </article>
                   <div v-if="tutorLoading" class="chat-bubble bot">正在组织讲解…</div>
@@ -152,10 +143,10 @@
               </div>
             </div>
           </section>
-          <section class="glass-card action-card accent-jade illustrated-card analysis-card" :class="{ 'has-generated-content': aiExplanations.markdown }">
+          <section class="glass-card action-card accent-jade illustrated-card analysis-card" :class="{ 'has-generated-content': aiExplanations.markdown || allAiLoading, 'is-generating': allAiLoading }">
             <div class="analysis-intro"><h2><Sparkle :size="24" weight="duotone" />AI 赏析古诗文</h2><p>一键生成多维度赏析，帮你深入理解诗词的意境与情感。</p><button class="primary-pill" type="button" :disabled="allAiLoading" @click="getAIExplanation"><Sparkle :size="17" weight="fill" />{{ allAiLoading ? '生成赏析中…' : '生成赏析' }}</button></div>
             <div class="analysis-output">
-              <div v-if="aiExplanations.markdown" class="generated-copy stream-markdown" :class="{ 'is-streaming': allAiLoading }" v-html="renderMarkdown(aiExplanations.markdown)"></div>
+              <SafeMarkdown v-if="aiExplanations.markdown" class="generated-copy stream-markdown" :class="{ 'is-streaming': allAiLoading }" :content="aiExplanations.markdown" />
               <div v-else class="analysis-placeholder"><span>赏析内容将显示在此处</span><small>点击生成赏析后，情感、意象与写作手法会在这里呈现</small></div>
             </div>
           </section>
@@ -177,14 +168,37 @@
             <div class="cloze-poem">
               <p v-for="(sentence,index) in splitSentences(poem.content)" :key="index">
                 <template v-if="recitationMode && hiddenLineIndices.includes(index)">
-                  <button class="cloze-blank" :class="{ revealed: revealedCloze.includes(index) }" type="button" @click="toggleCloze(index)">
-                    {{ revealedCloze.includes(index) ? `${sentence}${index % 2 === 0 ? '，' : '。'}` : '············' }}
-                  </button>
+                  <input
+                    class="cloze-blank"
+                    :class="clozeResultClass(index)"
+                    type="text"
+                    v-model="clozeAnswers[index]"
+                    :placeholder="clozePlaceholder(sentence.length)"
+                    :disabled="clozeSubmitted"
+                    autocomplete="off"
+                  >{{ index % 2 === 0 ? '，' : '。' }}
                 </template>
                 <template v-else>{{ sentence }}{{ index % 2 === 0 ? '，' : '。' }}</template>
               </p>
             </div>
-            <footer><span>点击空白可显示或再次隐藏答案</span><strong>已遮挡 {{ recitationMode ? hiddenLineIndices.length : 0 }}/{{ splitSentences(poem.content).length }} 句</strong></footer>
+            <footer>
+              <span v-if="!recitationMode">开启遮挡后，随机一半诗句将变为横线，请补充后提交验证</span>
+              <span v-else>已挖空 {{ hiddenLineIndices.length }}/{{ splitSentences(poem.content).length }} 句，补充后点击提交验证</span>
+              <div class="cloze-footer-actions" v-if="recitationMode">
+                <button class="soft-button" type="button" :disabled="clozeSubmitted || !clozeAllFilled" @click="submitCloze">提交验证</button>
+                <button class="soft-button" type="button" v-if="clozeResult" @click="resetClozeAnswer">重做</button>
+              </div>
+            </footer>
+            <div v-if="clozeResult" class="cloze-result">
+              <strong>正确率 {{ clozeResult.score }}%</strong>
+              <p v-if="clozeResult.score === 100">全部正确，背诵扎实！</p>
+              <p v-else>共 {{ clozeResult.totalChars }} 字，正确 {{ clozeResult.correctChars }} 字，错 {{ clozeResult.wrongChars.length }} 句</p>
+              <div class="cloze-error-detail" v-if="clozeResult.wrongChars.length">
+                <span v-for="(item, i) in clozeResult.wrongChars" :key="i" class="cloze-error-item">
+                  第{{ item.index + 1 }}句：<em>{{ item.input || '（空）' }}</em> → <em class="right">{{ item.original }}</em>
+                </span>
+              </div>
+            </div>
           </section>
 
           <section class="glass-card recite-assessment">
@@ -222,800 +236,47 @@
       </div>
 
       <div class="story-card-grid">
-        <section class="glass-card story-card creation-art" :class="{ 'has-generated-content': poemBackground }"><h2><BookOpenText :size="25" weight="duotone" />诗词创作背景</h2><div v-if="poemBackground" class="generated-copy stream-markdown" :class="{ 'is-streaming': poemBackgroundLoading }" v-html="renderMarkdown(poemBackground)"></div><p v-else>此诗作于诗人行旅途中。借节令、烟雨与行人写出含蓄悠长的诗意。</p><button class="primary-pill arrow-pill" type="button" :disabled="poemBackgroundLoading" @click="fetchPoemBackground"><span>{{ poemBackgroundLoading ? '生成中…' : poemBackground ? '重新梳理背景' : '了解创作背景' }}</span><ArrowRight :size="15" /></button></section>
-        <section class="glass-card story-card story-art" :class="{ 'has-generated-content': poemStory }"><h2><MaskHappy :size="25" weight="duotone" />诗词趣味故事</h2><div v-if="poemStory" class="generated-copy stream-markdown" :class="{ 'is-streaming': poemStoryLoading }" v-html="renderMarkdown(poemStory)"></div><p v-else>相传诗人写下此诗后，曾将诗意告诉一位老农，留下了一段有趣佳话。</p><div class="card-button-row"><button class="primary-pill arrow-pill" type="button" :disabled="poemStoryLoading" @click="fetchPoemStory"><span>{{ poemStoryLoading ? '生成中…' : poemStory ? '换个故事' : '听诗人的故事' }}</span><ArrowRight :size="15" /></button><button v-if="poemStory" class="soft-button" type="button" @click="speakWithDigitalHuman(poemStory, 'explaining')">数字人讲述</button></div></section>
-        <section class="glass-card story-card gold guide-art" :class="{ 'has-generated-content': recitationGuideMarkdown || recitationGuide }"><h2><MicrophoneStage :size="25" weight="duotone" />诵读技巧指南</h2><div v-if="recitationGuideMarkdown || recitationGuide" class="generated-copy stream-markdown" :class="{ 'is-streaming': recitationGuideLoading }" v-html="renderMarkdown(recitationGuideMarkdown || recitationGuide)"></div><p v-else>本诗情感含蓄，语调宜平缓沉郁。前两句重在营造氛围，后两句转折自然。</p><div class="card-button-row"><button class="gold-pill arrow-pill" type="button" :disabled="recitationGuideLoading" @click="fetchRecitationGuide"><span>{{ recitationGuideLoading ? '生成中…' : recitationGuide ? '更新技巧' : '获取诵读技巧' }}</span><ArrowRight :size="15" /></button><button v-if="recitationGuideMarkdown || recitationGuide" class="soft-button" type="button" @click="speakWithDigitalHuman(recitationGuideMarkdown || recitationGuide, 'reading')">数字人示范</button></div></section>
+        <section class="glass-card story-card creation-art" :class="{ 'has-generated-content': poemBackground }"><h2><BookOpenText :size="25" weight="duotone" />诗词创作背景</h2><SafeMarkdown v-if="poemBackground" class="generated-copy stream-markdown" :class="{ 'is-streaming': poemBackgroundLoading }" :content="poemBackground" /><p v-else>此诗作于诗人行旅途中。借节令、烟雨与行人写出含蓄悠长的诗意。</p><button class="primary-pill arrow-pill" type="button" :disabled="poemBackgroundLoading" @click="fetchPoemBackground"><span>{{ poemBackgroundLoading ? '生成中…' : poemBackground ? '重新梳理背景' : '了解创作背景' }}</span><ArrowRight :size="15" /></button></section>
+        <section class="glass-card story-card story-art" :class="{ 'has-generated-content': poemStory }"><h2><MaskHappy :size="25" weight="duotone" />诗词趣味故事</h2><SafeMarkdown v-if="poemStory" class="generated-copy stream-markdown" :class="{ 'is-streaming': poemStoryLoading }" :content="poemStory" /><p v-else>相传诗人写下此诗后，曾将诗意告诉一位老农，留下了一段有趣佳话。</p><div class="card-button-row"><button class="primary-pill arrow-pill" type="button" :disabled="poemStoryLoading" @click="fetchPoemStory"><span>{{ poemStoryLoading ? '生成中…' : poemStory ? '换个故事' : '听诗人的故事' }}</span><ArrowRight :size="15" /></button><button v-if="poemStory" class="soft-button" type="button" @click="speakWithDigitalHuman(poemStory, 'explaining')">数字人讲述</button></div></section>
+        <section class="glass-card story-card gold guide-art" :class="{ 'has-generated-content': recitationGuideMarkdown || recitationGuide }"><h2><MicrophoneStage :size="25" weight="duotone" />诵读技巧指南</h2><SafeMarkdown v-if="recitationGuideMarkdown || recitationGuide" class="generated-copy stream-markdown" :class="{ 'is-streaming': recitationGuideLoading }" :content="recitationGuideMarkdown || recitationGuide" /><p v-else>本诗情感含蓄，语调宜平缓沉郁。前两句重在营造氛围，后两句转折自然。</p><div class="card-button-row"><button class="gold-pill arrow-pill" type="button" :disabled="recitationGuideLoading" @click="fetchRecitationGuide"><span>{{ recitationGuideLoading ? '生成中…' : recitationGuide ? '更新技巧' : '获取诵读技巧' }}</span><ArrowRight :size="15" /></button><button v-if="recitationGuideMarkdown || recitationGuide" class="soft-button" type="button" @click="speakWithDigitalHuman(recitationGuideMarkdown || recitationGuide, 'reading')">数字人示范</button></div></section>
       </div>
 
       <KnowledgeSummary :poem="poem" @explain="focusTutor" />
     </div>
 
-    <div v-if="canRenderPoem" class="poem-layout" :class="{ 'content-entering': contentEntering }">
-      <!-- 左侧栏 -->
-      <div class="left-column">
-        <!-- 诗词基本信息 -->
-        <div class="poem-header">
-          <div class="title-container">
-            <h1 class="poem-title">{{ poem.title }}</h1>
-            <button 
-              class="collect-btn" 
-              @click="toggleCollect" 
-              :class="{ collected: isCollected }"
-            >
-              {{ isCollected ? '❤️ 已收藏' : '🤍 收藏' }}
-            </button>
-          </div>
-          <p class="poem-author">{{ poem.author }} · {{ poem.dynasty }}</p>
-        </div>
-        
-        <!-- 诗词正文 -->
-        <div class="poem-text" :class="{ 'blurred': recitationMode }" id="poem-text-area">
-          <p v-for="(line, index) in poemLines" :key="index" class="poem-line">
-            <template v-for="(char, charIndex) in line" :key="charIndex">
-              <span v-if="char >= '\u4e00' && char <= '\u9fff'" class="poem-char">{{ char }}</span>
-              <span v-else class="poem-punctuation">{{ char }}</span>
-            </template>
-          </p>
-          <!-- 朗读按钮 -->
-          <button 
-            class="read-btn"
-            @click="toggleRead"
-          >
-            {{ isReading ? '⏹ 停止' : '🔊 朗读' }}
-          </button>
-        </div>
-        
-        <!-- 遮挡背诵功能 -->
-        <div class="recitation-section">
-          <h2 class="section-title">遮挡背诵</h2>
-          <div class="recitation-controls">
-            <label class="switch">
-              <input type="checkbox" v-model="recitationMode">
-              <span class="slider"></span>
-            </label>
-            <span>启用遮挡背诵</span>
-            <button 
-              class="refresh-btn" 
-              @click="refreshRecitation"
-              :disabled="!recitationMode"
-            >
-              🔄 刷新题目
-            </button>
-          </div>
-          <div class="recitation-content">
-            <div v-if="recitationMode">
-              <div v-for="(sentence, index) in splitSentences(poem.content)" :key="index" class="recitation-line">
-                <div v-if="hiddenLineIndices.includes(index)" class="hidden-line">
-                  <label class="sentence-label">第{{ index + 1 }}句：</label>
-                  <input 
-                    type="text" 
-                    v-model="userInput[hiddenLineIndices.indexOf(index)]" 
-                    placeholder="请输入诗句"
-                    class="recitation-input"
-                  >
-                  <div
-                    v-if="showResult[hiddenLineIndices.indexOf(index)]"
-                    class="recitation-result"
-                    :class="isCorrect[hiddenLineIndices.indexOf(index)] ? 'correct' : 'incorrect'"
-                  >
-                    {{ isCorrect[hiddenLineIndices.indexOf(index)] ? '✓ 正确' : '✗ 错误，正确答案：' + sentence }}
-                  </div>
-                </div>
-                <div v-else class="visible-line">第{{ index + 1 }}句：{{ sentence }}</div>
-              </div>
-            </div>
-            <div v-else>
-              <div v-for="(line, index) in poemLines" :key="index" class="recitation-line">
-                <div class="visible-line">{{ line }}</div>
-              </div>
-            </div>
-            <button 
-              v-if="recitationMode" 
-              class="submit-btn" 
-              @click="checkRecitation"
-            >
-              📝 提交核对
-            </button>
-          </div>
-        </div>
-        
-        <!-- AI背诵检测功能 -->
-        <div class="recite-check-card">
-          <h2 class="section-title">📝 AI背诵检测</h2>
-          <div class="recite-check-content">
-            <div class="form-group">
-              <label for="recite-input" class="form-label">请默写全诗：</label>
-              <textarea 
-                id="recite-input"
-                v-model="reciteInput"
-                placeholder="请输入您默写的内容..."
-                class="recite-input"
-                rows="6"
-                @focus="startRecitationMode"
-                @blur="stopRecitationMode"
-              ></textarea>
-            </div>
-            <button 
-              class="btn btn-primary recite-check-btn"
-              @click="checkRecite"
-              :disabled="reciteLoading"
-            >
-              <span v-if="reciteLoading" class="loading-spinner"></span>
-              {{ reciteLoading ? '检测中...' : '🎯 提交检测' }}
-            </button>
-            
-            <!-- 检测结果 -->
-            <div v-if="reciteResult" class="recite-result-section">
-              <!-- 正确率板块 -->
-              <div class="result-section accuracy-section">
-                <h3 class="result-title">📊 正确率</h3>
-                <div class="accuracy-display">
-                  <div class="accuracy-circle" :class="getScoreClass(reciteResult.score)">
-                    <span class="accuracy-number">{{ reciteResult.score }}</span>
-                    <span class="accuracy-unit">分</span>
-                  </div>
-                  <div class="accuracy-message">{{ getScoreMessage(reciteResult.score) }}</div>
-                </div>
-              </div>
-              
-              <!-- 问题板块 -->
-              <div class="result-section problem-section">
-                <h3 class="result-title">❌ 问题分析</h3>
-                <div class="problem-list">
-                  <div v-if="reciteResult.wrongChars.length > 0" class="problem-item">
-                    <span class="problem-label">错字：</span>
-                    <span class="problem-detail">
-                      <span v-for="(error, index) in reciteResult.wrongChars" :key="index" class="error-tag">
-                        "{{ error.input }}" → "{{ error.original }}"
-                      </span>
-                    </span>
-                  </div>
-                  
-                  <div v-if="reciteResult.missing.length > 0" class="problem-item">
-                    <span class="problem-label">漏字：</span>
-                    <span class="problem-detail">
-                      <span v-for="(error, index) in reciteResult.missing" :key="index" class="missing-tag">
-                        "{{ error.char }}"
-                      </span>
-                    </span>
-                  </div>
-                  
-                  <div v-if="reciteResult.extra.length > 0" class="problem-item">
-                    <span class="problem-label">多字：</span>
-                    <span class="problem-detail">
-                      <span v-for="(error, index) in reciteResult.extra" :key="index" class="extra-tag">
-                        "{{ error.char }}"
-                      </span>
-                    </span>
-                  </div>
-                  
-                  <div v-if="reciteResult.wrongChars.length === 0 && reciteResult.missing.length === 0 && reciteResult.extra.length === 0" class="problem-item no-error">
-                    <span class="no-error-text">✅ 完全正确，没有错误！</span>
-                  </div>
-                </div>
-              </div>
-              
-              <!-- 建议板块 -->
-              <div class="result-section advice-section">
-                <h3 class="result-title">💡 学习建议</h3>
-                <div class="advice-content">
-                  <p class="advice-text">{{ reciteResult.aiAdvice }}</p>
-                </div>
-              </div>
-
-              <!-- 一键添加进错题本按钮 -->
-              <div v-if="reciteResult.score !== 100" class="add-to-wrongbook-row">
-                <button
-                  class="btn add-wrongbook-btn"
-                  @click="addReciteToWrongBook"
-                  :disabled="addingToWrongBook"
-                >
-                  <span v-if="addingToWrongBook" class="loading-spinner small-spinner"></span>
-                  {{ addingToWrongBook ? '添加中...' : '📝 一键添加进错题本' }}
-                </button>
-                <span v-if="wrongBookAdded" class="wrongbook-added-tip">已添加 ✓</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 诗词创作背景卡片 -->
-        <div class="poem-background-card">
-          <h2 class="section-title">📜 诗词创作背景</h2>
-          <div v-if="poemBackgroundLoading" class="card-loading">
-            <div class="mini-spinner"></div>
-            <span>加载中...</span>
-          </div>
-          <div v-else-if="poemBackground" class="poem-background-content">
-            <div class="background-item">
-              <div class="item-icon">🏛️</div>
-              <div class="item-text" v-html="renderMarkdown(poemBackground)"></div>
-            </div>
-            <div v-if="poemBackgroundTips" class="background-tips">
-              <div class="tips-label">💡 学习提示</div>
-              <p>{{ poemBackgroundTips }}</p>
-            </div>
-          </div>
-          <button
-            v-else
-            class="ai-btn blue"
-            @click="fetchPoemBackground"
-            :disabled="poemBackgroundLoading"
-          >
-            <span v-if="poemBackgroundLoading" class="loading-spinner"></span>
-            {{ poemBackgroundLoading ? '生成中...' : '📖 了解创作背景' }}
-          </button>
-        </div>
-
-        <!-- 诗词趣味故事卡片 -->
-        <div class="poem-story-card">
-          <h2 class="section-title">🎭 诗词趣味故事</h2>
-          <div v-if="poemStoryLoading" class="card-loading">
-            <div class="mini-spinner"></div>
-            <span>加载中...</span>
-          </div>
-          <div v-else-if="poemStory" class="poem-story-content">
-            <div class="story-text" v-html="renderMarkdown(poemStory)"></div>
-          </div>
-          <button
-            v-else
-            class="ai-btn purple"
-            @click="fetchPoemStory"
-            :disabled="poemStoryLoading"
-          >
-            <span v-if="poemStoryLoading" class="loading-spinner"></span>
-            {{ poemStoryLoading ? '讲述中...' : '🎧 听诗人的故事' }}
-          </button>
-        </div>
-
-        <!-- 诵读技巧指南卡片 -->
-        <div class="recitation-guide-card">
-          <h2 class="section-title">🎤 诵读技巧指南</h2>
-          <div v-if="recitationGuideLoading" class="card-loading">
-            <div class="mini-spinner"></div>
-            <span>加载中...</span>
-          </div>
-          <div v-else-if="recitationGuideMarkdown" class="recitation-guide-content markdown-content">
-            <div v-html="renderMarkdown(recitationGuideMarkdown)"></div>
-          </div>
-          <div v-else-if="recitationGuide" class="recitation-guide-content">
-            <div v-if="recitationGuide.rhythm" class="guide-section">
-              <div class="guide-title">🎵 节奏韵律</div>
-              <p>{{ recitationGuide.rhythm }}</p>
-            </div>
-            <div v-if="recitationGuide.emotion" class="guide-section">
-              <div class="guide-title">💭 情感把控</div>
-              <p>{{ recitationGuide.emotion }}</p>
-            </div>
-            <div v-if="recitationGuide.tips" class="guide-section">
-              <div class="guide-title">🌟 诵读妙招</div>
-              <ul class="guide-tips-list">
-                <li v-for="(tip, i) in Array.isArray(recitationGuide.tips) ? recitationGuide.tips : recitationGuide.tips.split('\n').filter(t => t.trim())" :key="i">{{ tip }}</li>
-              </ul>
-            </div>
-          </div>
-          <button
-            v-else
-            class="ai-btn orange"
-            @click="fetchRecitationGuide"
-            :disabled="recitationGuideLoading"
-          >
-            <span v-if="recitationGuideLoading" class="loading-spinner"></span>
-            {{ recitationGuideLoading ? '生成中...' : '🎤 获取诵读技巧' }}
-          </button>
-        </div>
-      </div>
-
-      <!-- 右侧栏 -->
-      <div class="right-column">
-        <!-- AI助教聊天窗口 -->
-        <div class="tutor-chat-container">
-          <h2 class="section-title">💬 AI语文助教</h2>
-          <div class="tutor-chat-body">
-            <div class="chat-messages" ref="chatMessagesContainer">
-              <div 
-                v-for="(message, index) in tutorMessages" 
-                :key="index"
-                :class="['chat-message', message.role]"
-              >
-                <div class="message-content">
-                  <div v-html="renderMarkdown(message.content)"></div>
-                </div>
-              </div>
-              <div v-if="tutorLoading" class="chat-message bot loading">
-                <div class="loading-spinner"></div>
-              </div>
-            </div>
-            <div class="chat-input-area">
-              <input 
-                type="text" 
-                v-model="tutorQuestion"
-                placeholder="围绕这首诗提问..."
-                class="tutor-input"
-                @keyup.enter="sendTutorMessage"
-              />
-              <button 
-                class="send-btn"
-                @click="sendTutorMessage"
-                :disabled="!tutorQuestion.trim() || tutorLoading"
-              >
-                发送
-              </button>
-            </div>
-          </div>
-        </div>
-        
-        <!-- AI赏析古诗文卡片 -->
-        <div class="ai-explanation">
-          <h2 class="section-title">🎨 AI赏析古诗文</h2>
-          <button 
-            class="ai-btn green"
-            @click="getAIExplanation"
-            :disabled="allAiLoading || !poem"
-          >
-            <span v-if="allAiLoading" class="loading-spinner"></span>
-            {{ allAiLoading ? '分析中...' : '📖 生成赏析' }}
-          </button>
-          
-          <!-- 错误信息显示 -->
-          <div v-if="Object.values(aiError).some(error => error)" class="error-message">
-            <p>{{ Object.values(aiError).find(error => error) }}</p>
-          </div>
-          
-          <!-- 日常生活场景化解读 -->
-          <div v-if="aiExplanations.daily_life_explanation" class="explanation-content">
-            <div class="explanation-section">
-              <h3>🏠 日常生活场景化解读</h3>
-              <div v-html="renderMarkdown(aiExplanations.daily_life_explanation)"></div>
-            </div>
-          </div>
-          
-          <!-- 关键字词分析 -->
-          <div v-if="aiExplanations.keyword_analysis" class="explanation-content">
-            <div class="explanation-section">
-              <h3>🔍 关键字词分析</h3>
-              <div v-html="renderMarkdown(aiExplanations.keyword_analysis)"></div>
-            </div>
-          </div>
-          
-          <!-- 艺术意境解析 -->
-          <div v-if="aiExplanations.artistic_conception" class="explanation-content">
-            <div class="explanation-section">
-              <h3>✨ 艺术意境解析</h3>
-              <div v-html="renderMarkdown(aiExplanations.artistic_conception)"></div>
-            </div>
-          </div>
-          
-          <div v-if="aiExplanations.markdown" class="explanation-content markdown-content">
-            <div class="explanation-section">
-              <h3>🖋️ 流式赏析</h3>
-              <div v-html="renderMarkdown(aiExplanations.markdown)"></div>
-            </div>
-          </div>
-
-          <!-- 引导性思考题 -->
-          <div v-if="aiExplanations.thinking_questions" class="explanation-content">
-            <div class="explanation-section">
-              <h3>🤔 引导性思考题</h3>
-              <ul class="questions-list">
-                <li 
-                  v-for="(question, index) in Array.isArray(aiExplanations.thinking_questions) ? aiExplanations.thinking_questions : aiExplanations.thinking_questions.split('\n').filter(q => q.trim())" 
-                  :key="index"
-                  class="question-item"
-                >
-                  {{ question }}
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-        
-        <!-- 个性化教学卡片（RAG 驱动） -->
-        <div class="personalized-tutor-section">
-          <h2 class="section-title">🎓 个性化教学</h2>
-          <p class="tutor-subtitle">基于你的学习诊断，针对性讲解薄弱知识点</p>
-          <button 
-            class="ai-btn purple"
-            @click="loadPersonalizedTutor"
-            :disabled="personalizedTutorLoading || !poem"
-          >
-            <span v-if="personalizedTutorLoading" class="loading-spinner"></span>
-            {{ personalizedTutorLoading ? '诊断教学中...' : '🧠 获取个性化教学' }}
-          </button>
-
-          <div v-if="tutorError" class="error-message">
-            <p>{{ tutorError }}</p>
-          </div>
-
-          <div v-if="tutorData" class="tutor-content">
-            <div class="tutor-depth-badge" :class="tutorData.depth">
-              {{ { FOUNDATION: '基础阶段', DEVELOPING: '发展阶段', ADVANCED: '进阶阶段' }[tutorData.depth] || tutorData.depth }}
-            </div>
-
-            <div v-if="tutorData.weakPoints && tutorData.weakPoints.length > 0" class="tutor-weak-points">
-              <h4>📋 薄弱知识点</h4>
-              <div class="weak-point-tags">
-                <span 
-                  v-for="wp in tutorData.weakPoints" 
-                  :key="wp.code"
-                  class="weak-point-tag"
-                >
-                  {{ wp.name }}（{{ wp.mastery }}%）
-                </span>
-              </div>
-            </div>
-
-            <div v-if="tutorData.teaching && tutorData.teaching.explanation" class="tutor-explanation">
-              <h4>📖 个性化讲解</h4>
-              <div class="teaching-text markdown-content" v-html="renderMarkdown(tutorData.teaching.explanation)"></div>
-            </div>
-
-            <div v-if="tutorData.teaching && tutorData.teaching.keyPoints && tutorData.teaching.keyPoints.length > 0" class="tutor-key-points">
-              <h4>🔑 核心知识点</h4>
-              <ul class="key-points-list">
-                <li v-for="(kp, idx) in tutorData.teaching.keyPoints" :key="idx" class="key-point-item">
-                  <strong>{{ kp.point }}</strong>：{{ kp.detail }}
-                </li>
-              </ul>
-            </div>
-
-            <div v-if="tutorData.teaching && tutorData.teaching.practiceAdvice" class="tutor-advice">
-              <h4>✍️ 练习建议</h4>
-              <div v-html="renderMarkdown(tutorData.teaching.practiceAdvice)"></div>
-            </div>
-
-            <div v-if="tutorData.practiceQuestions && tutorData.practiceQuestions.length > 0" class="tutor-practice">
-              <h4>📝 推荐练习</h4>
-              <div 
-                v-for="q in tutorData.practiceQuestions" 
-                :key="q.questionId"
-                class="practice-item"
-              >
-                <p class="practice-question">{{ q.questionText }}</p>
-                <p v-if="q.poem" class="practice-source">来源：《{{ q.poem.title }}》{{ q.poem.author }}</p>
-              </div>
-            </div>
-
-            <div v-if="tutorData.relatedPoems && tutorData.relatedPoems.length > 0" class="tutor-related">
-              <h4>📚 相关诗词</h4>
-              <div class="related-poems-list">
-                <span 
-                  v-for="rp in tutorData.relatedPoems" 
-                  :key="rp.id"
-                  class="related-poem-tag"
-                  @click="navigateToPoem(rp.id)"
-                >
-                  《{{ rp.title }}》{{ rp.author }}
-                </span>
-              </div>
-            </div>
-
-            <div v-if="tutorData.sources && tutorData.sources.length > 0" class="tutor-sources">
-              <h4>📎 数据来源</h4>
-              <ul class="sources-list">
-                <li v-for="(src, idx) in tutorData.sources" :key="idx" class="source-item">
-                  <span class="source-type">{{ { target_poem: '目标诗词', related_poem: '相关诗词', practice_question: '练习题' }[src.type] || src.type }}</span>
-                  <span v-if="src.title">《{{ src.title }}》{{ src.author || '' }}</span>
-                </li>
-              </ul>
-            </div>
-
-            <div v-if="tutorData.degraded" class="tutor-degraded-notice">
-              ⚠️ AI 讲解服务暂时不可用，以上为数据库基础信息
-            </div>
-          </div>
-        </div>
-        
-        <!-- 诗人简介卡片 -->
-        <div class="author-profile">
-          <h2 class="section-title">👤 诗人简介</h2>
-          <div class="author-content">
-            <div class="author-avatar">
-              <img 
-                v-if="authorAvatar" 
-                :src="authorAvatar" 
-                :alt="poem.author" 
-                class="avatar-image"
-                @error="handleAvatarError"
-              >
-              <div v-else class="avatar-loading">加载中...</div>
-            </div>
-            <div class="author-info">
-              <h3>{{ poem.author }}</h3>
-              <p class="author-dynasty">{{ poem.dynasty }}</p>
-              <p class="author-bio">{{ getAuthorBio(poem.author) }}</p>
-            </div>
-          </div>
-        </div>
-        
-        <!-- 相似风格诗词卡片 -->
-        <div class="similar-poems">
-          <h2 class="section-title">📜 相似风格诗词</h2>
-          <div class="similar-list">
-            <div 
-              v-for="(similarPoem, index) in similarPoems" 
-              :key="index"
-              class="similar-item"
-              @click="navigateToPoem(similarPoem.id)"
-            >
-              <h4>{{ similarPoem.title }}</h4>
-              <p class="similar-author">{{ similarPoem.author }} · {{ similarPoem.dynasty }}</p>
-              <p class="similar-content">{{ similarPoem.content.substring(0, 50) }}...</p>
-            </div>
-            <div v-if="similarPoems.length === 0" class="empty">
-              <p>暂无相似风格的诗词</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-
   </div>
 </template>
 
-<style scoped>
-/* 沉浸式学习模式样式 */
-.immersive-mode {
-  position: relative;
-  min-height: 100vh;
-  overflow: hidden;
-}
-
-/* 初始状态样式 */
-.initial-state {
-  position: relative;
-  min-height: calc(100vh - 100px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;
-  animation: page-fade-in 0.5s ease-out both;
-  overflow: hidden;
-  padding: 20px;
-}
-
-@keyframes page-fade-in {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.start-learning-btn {
-  padding: 20px 40px;
-  background: linear-gradient(135deg, #8b4513, #cd853f);
-  color: white;
-  border: none;
-  border-radius: 50px;
-  font-size: 18px;
-  font-weight: bold;
-  cursor: pointer;
-  box-shadow: 0 4px 15px rgba(139, 69, 19, 0.3);
-  z-index: 1000;
-  transition: all 0.3s ease;
-  margin-bottom: 20px;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-  letter-spacing: 2px;
-}
-
-.start-learning-btn:hover {
-  background: linear-gradient(135deg, #cd853f, #8b4513);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(139, 69, 19, 0.4);
-}
-
-.loading-indicator {
-  text-align: center;
-  color: #333;
-}
-
-.loading-indicator .loading-spinner {
-  margin: 0 auto 10px;
-}
-
-.loading-indicator p {
-  font-size: 14px;
-  margin: 0;
-}
-
-.immersive-background {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-}
-
-.background-container {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.background-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  animation: slowZoom 25s ease-in-out infinite;
-  opacity: 0;
-  transition: opacity 1.2s ease-in-out;
-}
-
-.background-image.fade-in {
-  opacity: 1;
-}
-
-@keyframes slowZoom {
-  0% {
-    transform: scale(1.0);
-  }
-  50% {
-    transform: scale(1.2);
-  }
-  100% {
-    transform: scale(1.0);
-  }
-}
-
-.loading-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.loading-content {
-  text-align: center;
-  color: #333;
-}
-
-.loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #4CAF50;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 20px;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.default-background {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-}
-
-.ancient-style-bg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: 
-    radial-gradient(circle at 20% 80%, rgba(255, 248, 220, 0.8) 0%, transparent 50%),
-    radial-gradient(circle at 80% 20%, rgba(222, 184, 135, 0.6) 0%, transparent 50%),
-    linear-gradient(135deg, #f5f5dc 0%, #e8e4c9 100%);
-  background-size: 100% 100%;
-  background-position: center;
-  background-repeat: no-repeat;
-  opacity: 0.9;
-}
-
-.exit-immersive-btn {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  padding: 10px 20px;
-  background-color: rgba(255, 255, 255, 0.8);
-  color: #333;
-  border: none;
-  border-radius: 25px;
-  font-size: 14px;
-  cursor: pointer;
-  z-index: 1001;
-  transition: all 0.3s ease;
-}
-
-.exit-immersive-btn:hover {
-  background-color: rgba(255, 255, 255, 1);
-  transform: translateY(-2px);
-}
-
-
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .start-learning-btn {
-    bottom: 20px;
-    right: 20px;
-    padding: 12px 24px;
-    font-size: 14px;
-  }
-}
-</style>
 
 <script>
 import io from 'socket.io-client'
 import { generateAttemptId } from '../utils/attemptId'
-import api, { getToken, request, streamAI, TIMEOUTS } from '../services/api'
-import { renderMarkdown } from '../utils/markdown'
-import { canRenderPoemContent } from '../utils/poemDetailState'
-import liBaiPortrait from '../assets/poets/li-bai.png'
-import duFuPortrait from '../assets/poets/du-fu.png'
-import suShiPortrait from '../assets/poets/su-shi.png'
-import wangWeiPortrait from '../assets/poets/wang-wei.png'
-import baiJuyiPortrait from '../assets/poets/bai-juyi.png'
-import unknownScholarPortrait from '../assets/poets/unknown-scholar.png'
+import { getToken, request, streamAI, TIMEOUTS } from '../services/api'
+import { AUTHOR_PORTRAITS, DEFAULT_AUTHOR_PORTRAIT } from '../assets/poets/authorPortraits'
 import PoetryHero from '../components/poem-detail/PoetryHero.vue'
 import PoemContent from '../components/poem-detail/PoemContent.vue'
 import DigitalHumanPanel from '../components/poem-detail/DigitalHumanPanel.vue'
 import LearningOverview from '../components/poem-detail/LearningOverview.vue'
 import KnowledgeSummary from '../components/poem-detail/KnowledgeSummary.vue'
+import SafeMarkdown from '../components/SafeMarkdown.vue'
 import { digitalHumanService } from '../services/digitalHumanService'
 import { poemBackgroundService } from '../services/poemBackgroundService'
 import { notify } from '../services/appFeedback'
 import { PhArrowClockwise as ArrowClockwise, PhArrowRight as ArrowRight, PhBookOpenText as BookOpenText, PhCaretRight as ChevronRight, PhEye as Eye, PhFlowerLotus as FlowerLotus, PhGraduationCap as GraduationCap, PhMaskHappy as MaskHappy, PhMicrophoneStage as MicrophoneStage, PhPaperPlaneTilt as PaperPlaneTilt, PhRobot as Robot, PhSparkle as Sparkle, PhUserCircle as UserCircle } from '@phosphor-icons/vue'
 
-const BUILTIN_AUTHOR_AVATARS = {
-  李白: liBaiPortrait,
-  杜甫: duFuPortrait,
-  苏轼: suShiPortrait,
-  王维: wangWeiPortrait,
-  白居易: baiJuyiPortrait
-}
+const BUILTIN_AUTHOR_AVATARS = AUTHOR_PORTRAITS
 
 export default {
   name: 'PoemDetail',
-  components: { ArrowClockwise, ArrowRight, BookOpenText, ChevronRight, DigitalHumanPanel, Eye, FlowerLotus, GraduationCap, KnowledgeSummary, LearningOverview, MaskHappy, MicrophoneStage, PaperPlaneTilt, PoemContent, PoetryHero, Robot, Sparkle, UserCircle },
+  components: { ArrowClockwise, ArrowRight, BookOpenText, ChevronRight, DigitalHumanPanel, Eye, FlowerLotus, GraduationCap, KnowledgeSummary, LearningOverview, MaskHappy, MicrophoneStage, PaperPlaneTilt, PoemContent, PoetryHero, Robot, SafeMarkdown, Sparkle, UserCircle },
   data() {
     return {
       poem: null,
       loading: true,
       error: '',
-      // 语音朗读相关状态
-      isReading: false,
-      audio: null,
       // AI讲解相关状态
       aiExplanations: {
-        markdown: null,
-        daily_life_explanation: null,
-        keyword_analysis: null,
-        artistic_conception: null,
-        thinking_questions: null
-      },
-      aiLoading: {
-        daily_life_explanation: false,
-        keyword_analysis: false,
-        artistic_conception: false,
-        thinking_questions: false
-      },
-      aiError: {
-        daily_life_explanation: '',
-        keyword_analysis: '',
-        artistic_conception: '',
-        thinking_questions: ''
+        markdown: null
       },
       allAiLoading: false,
       // API请求控制器，用于取消请求
@@ -1025,11 +286,9 @@ export default {
       // 遮挡背诵功能相关
       recitationMode: false,
       hiddenLineIndices: [],
-      userInput: [],
-      showResult: [],
-      isCorrect: [],
-      // 元素飞舞效果相关
-      floatingElements: [],
+      clozeAnswers: {},
+      clozeResult: null,
+      clozeSubmitted: false,
       // 背诵检测功能相关
       reciteInput: '',
       reciteAttemptId: null,
@@ -1053,7 +312,6 @@ export default {
       recitationGuideLoading: false,
       recitationGuideError: '',
       // AI助教聊天相关
-      showTutorChat: false,
       tutorMessages: [],
       tutorQuestion: '',
       tutorLoading: false,
@@ -1069,13 +327,9 @@ export default {
       // 图像生成相关
       imageStatus: 'idle', // idle, pending, success, fail
       backgroundImage: null,
-      imageStatusTimer: null,
       bgImageFadingIn: false,   // 控制 AI 意境图淡入
       bgImageLoading: false,    // 标记图片正在加载中
-      contentEntering: false,   // 内容区进入动画标记
-      // 详情页默认直接进入意境学习场景，原有退出/进入方法仍保留以兼容旧交互。
-      isImmersiveMode: true,
-      isImageLoading: false,
+      bgImageRetrying: false,    // 旧缓存失效时仅自动重取一次
       // Socket.io相关
       socket: null,
       // 划词选择弹窗
@@ -1140,9 +394,6 @@ export default {
     
     // 重置加载状态，确保下次进入或缓存恢复时状态正常
     this.allAiLoading = false
-    Object.keys(this.aiLoading).forEach(key => {
-      this.aiLoading[key] = false
-    })
     
     // 重置AI助教聊天记录
     this.tutorMessages = []
@@ -1157,10 +408,9 @@ export default {
     // 当诗词变化时，重置背诵相关数据和检查收藏状态
     poem: {
       handler() {
-        this.resetRecitationData()
+        this.refreshRecitation()
         this.checkCollectionStatus()
-      },
-      deep: true
+      }
     },
     // 监听路由参数变化，当id变化时重新获取诗词数据
     '$route.params.id'(id, previousId) {
@@ -1171,33 +421,19 @@ export default {
   },
   computed: {
     canRenderPoem() {
-      return canRenderPoemContent(this)
+      return !this.loading && Boolean(this.poem)
     },
     poemLines() {
       if (!this.poem || !this.poem.content) return []
       return this.poem.content.split('\n').filter(line => line.trim())
     },
-    latestTutorAnswer() {
-      return [...this.tutorMessages].reverse().find((message) => message.role === 'bot' && message.content)?.content || ''
-    },
-    sceneImageTitle() {
-      const t = this.selectionPopup.selectedText || ''
-      const n = this.selectionPopup.lineNumber
-      const total = this.selectionPopup.totalLines
-      const title = this.poem?.title || '古诗'
-      if (n != null && total != null && total > 0) {
-        return `《${title}》第${n}句 · 「${t}」 意境图`
-      }
-      return `「${t}」 意境图`
-    }
   },
   mounted() {
     // 开始学习计时
     this.studyStartTime = Date.now()
     console.log('开始学习计时:', this.studyStartTime)
     
-    // 先建立 Socket，再请求详情，避免后端在图片生成失败时发出的状态事件被错过。
-    this.initSocket()
+    // KeepAlive 的 activated 生命周期统一负责 Socket，避免初次挂载时重复连接。
     this.fetchPoemDetail()
 
     try {
@@ -1227,18 +463,21 @@ export default {
       this.digitalHumanState = state
     })
   },
+  activated() {
+    this.studyStartTime = Date.now()
+    document.addEventListener('mouseup', this.handleTextSelection)
+    this.initSocket()
+  },
+  deactivated() {
+    document.removeEventListener('mouseup', this.handleTextSelection)
+    this.socket?.disconnect()
+    poemBackgroundService.cancel()
+    this.stopDigitalHuman()
+  },
   beforeUnmount() {
     // 清理Socket连接
     if (this.socket) {
       this.socket.disconnect()
-    }
-    if (this.imageStatusTimer) {
-      clearTimeout(this.imageStatusTimer)
-      this.imageStatusTimer = null
-    }
-    // 清理轮播定时器
-    if (this.carouselInterval) {
-      clearInterval(this.carouselInterval)
     }
     // 移除文本选择监听
     document.removeEventListener('mouseup', this.handleTextSelection);
@@ -1247,18 +486,30 @@ export default {
     poemBackgroundService.dispose()
   },
   methods: {
-    renderMarkdown,
-    async loadPoemBackground() {
-      const result = await poemBackgroundService.load(this.poem)
+    async loadPoemBackground(options = {}) {
+      this.bgImageLoading = true
+      const result = await poemBackgroundService.load(this.poem, options)
       if (result?.url) {
-        this.bgImageFadingIn = false
-        this.backgroundImage = result.url
-        this.imageStatus = 'success'
+        this.applyBackgroundImage(result.url)
       } else if (result?.pending) {
         this.imageStatus = 'pending'
       } else {
         this.imageStatus = 'fail'
+        this.bgImageLoading = false
       }
+    },
+    applyBackgroundImage(url, { remember = false } = {}) {
+      if (!url) return
+      this.imageStatus = 'success'
+      if (remember) poemBackgroundService.remember(this.poem, url)
+      if (this.backgroundImage === url) {
+        this.bgImageFadingIn = true
+        this.bgImageLoading = false
+        return
+      }
+      this.bgImageFadingIn = false
+      this.bgImageLoading = true
+      this.backgroundImage = url
     },
     async speakWithDigitalHuman(text, mode = 'speaking') {
       const plainText = String(text || '').replace(/[#*_>`~-]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -1317,10 +568,30 @@ export default {
       this.bgImageFadingIn = true
       this.bgImageLoading = false
     },
+    onBgImageError() {
+      poemBackgroundService.forget(this.poem)
+      this.backgroundImage = null
+      this.bgImageFadingIn = false
+      this.bgImageLoading = false
+      this.imageStatus = 'fail'
+      // localStorage 可能保留了旧的临时地址；清除后重取一次，避免一次
+      // 过期缓存让当前诗词永久停留在 fallback 背景。
+      if (!this.bgImageRetrying && this.poem) {
+        this.bgImageRetrying = true
+        void this.loadPoemBackground({ ignoreLocalCache: true }).finally(() => {
+          this.bgImageRetrying = false
+        })
+        return
+      }
+      notify.warning('意境图加载失败，已切换为默认古风背景')
+    },
     // 初始化Socket.io连接
     async initSocket() {
       try {
-        const { io } = await import('socket.io-client');
+        if (this.socket) {
+          if (!this.socket.connected) this.socket.connect()
+          return
+        }
         let socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
         if (window.electronAPI) {
           const port = await window.electronAPI.getBackendPort();
@@ -1351,25 +622,14 @@ export default {
         this.socket.on('image-generate-success', (data) => {
       if (this.poem && String(data?.poemId) !== String(this.poem.id)) return
       console.log('图像生成成功:', data)
-      this.imageStatus = 'success'
-      if (this.imageStatusTimer) {
-        clearTimeout(this.imageStatusTimer)
-        this.imageStatusTimer = null
-      }
-      // 触发 AI 意境图淡入（先清空再设新图片，由 @load 触发 fade-in）
-      this.bgImageFadingIn = false
-      this.backgroundImage = data.url
-      poemBackgroundService.remember(this.poem, data.url)
+      this.applyBackgroundImage(data.url, { remember: true })
     })
         
         this.socket.on('image-generate-fail', (data) => {
           if (this.poem && String(data?.poemId) !== String(this.poem.id)) return
           console.log('图像生成失败:', data)
           this.imageStatus = 'fail'
-          if (this.imageStatusTimer) {
-            clearTimeout(this.imageStatusTimer)
-            this.imageStatusTimer = null
-          }
+          this.bgImageLoading = false
           // 显示错误提示
           this.$message?.error(data.error || '背景图生成失败，将使用默认背景')
         })
@@ -1377,88 +637,10 @@ export default {
         console.error('Socket初始化失败:', error)
       }
     },
-    // 预生成背景图
-    async pregenerateBackground() {
-      if (!this.poem) return
-      
-      console.log('开始预生成背景图')
-      this.imageStatus = 'pending'
-      if (this.imageStatusTimer) clearTimeout(this.imageStatusTimer)
-      // 预生成是独立的增强能力，不能让失效密钥把详情页留在“生成中”。
-      this.imageStatusTimer = setTimeout(() => {
-        if (this.imageStatus === 'pending') {
-          this.imageStatus = 'fail'
-          this.bgImageLoading = false
-        }
-        this.imageStatusTimer = null
-      }, 15000)
-      
-      try {
-        const data = await request('/ai/image/pregenerate', {
-          method: 'POST',
-          body: JSON.stringify({
-            poemId: this.poem.id,
-            title: this.poem.title,
-            author: this.poem.author,
-            content: this.poem.content
-          }),
-          timeout: TIMEOUTS.LONG
-        })
-        console.log('预生成请求已发送:', data)
-        if (data && data.success === false) {
-          this.imageStatus = 'fail'
-        }
-      } catch (error) {
-        console.error('预生成失败:', error)
-        this.imageStatus = 'fail'
-        if (this.imageStatusTimer) {
-          clearTimeout(this.imageStatusTimer)
-          this.imageStatusTimer = null
-        }
-      }
-    },
-    // 预加载图片
-    preloadImage(url) {
-      const img = new Image()
-      img.src = url
-      img.onload = () => {
-        console.log('图片预加载完成:', url)
-      }
-      img.onerror = () => {
-        console.error('图片加载失败:', url)
-        this.imageStatus = 'fail'
-      }
-    },
-    // 进入沉浸式学习模式
-    enterImmersiveMode() {
-      this.contentEntering = false
-      this.$nextTick(() => {
-        this.isImmersiveMode = true
-        this.$nextTick(() => {
-          // DOM 更新后触发渐入动画
-          requestAnimationFrame(() => {
-            this.contentEntering = true
-          })
-        })
-      })
-    },
-    // 退出沉浸式学习模式
-    exitImmersiveMode() {
-      this.isImmersiveMode = false
-      if (this.carouselInterval) {
-        clearInterval(this.carouselInterval)
-        this.carouselInterval = null
-      }
-    },
-
     async fetchPoemDetail() {
       // 如果有之前的请求，先取消
       if (this.poemAbortController) {
         this.poemAbortController.abort()
-      }
-      if (this.imageStatusTimer) {
-        clearTimeout(this.imageStatusTimer)
-        this.imageStatusTimer = null
       }
       this.poemAbortController = new AbortController()
 
@@ -1472,34 +654,16 @@ export default {
         
         // 重置所有状态
         this.poem = null
-        // 重置沉浸式学习模式
-        this.isImmersiveMode = true
         // 重置AI讲解相关状态
         this.aiExplanations = {
-          markdown: null,
-          daily_life_explanation: null,
-          keyword_analysis: null,
-          artistic_conception: null,
-          thinking_questions: null
-        }
-        this.aiLoading = {
-          daily_life_explanation: false,
-          keyword_analysis: false,
-          artistic_conception: false,
-          thinking_questions: false
-        }
-        this.aiError = {
-          daily_life_explanation: '',
-          keyword_analysis: '',
-          artistic_conception: '',
-          thinking_questions: ''
+          markdown: null
         }
         this.allAiLoading = false
         // 重置背诵相关状态
         this.recitationMode = false
-        this.userInput = []
-        this.showResult = []
-        this.isCorrect = []
+        this.clozeAnswers = {}
+        this.clozeResult = null
+        this.clozeSubmitted = false
         // 重置诗词创作背景状态
         this.poemBackground = null
         this.poemBackgroundTips = null
@@ -1598,12 +762,7 @@ export default {
         // 创建新的AbortController
         this.abortController = new AbortController()
         
-        // 设置所有加载状态为true
         this.allAiLoading = true
-        Object.keys(this.aiLoading).forEach(key => {
-          this.aiLoading[key] = true
-          this.aiError[key] = ''
-        })
         
         this.aiExplanations.markdown = ''
         await streamAI({
@@ -1621,17 +780,10 @@ export default {
           console.log('AI讲解请求已取消')
         } else {
           console.error('获取AI讲解失败:', err)
-          // 设置所有错误状态
-          Object.keys(this.aiError).forEach(key => {
-            this.aiError[key] = '获取AI讲解失败'
-          })
+          notify('获取AI讲解失败，请稍后重试', 'error')
         }
       } finally {
-        // 设置所有加载状态为false
         this.allAiLoading = false
-        Object.keys(this.aiLoading).forEach(key => {
-          this.aiLoading[key] = false
-        })
       }
     },
     goBack() {
@@ -1688,158 +840,103 @@ export default {
         this.reciteLoading = false
       }
     },
-    // 归一化文本，只保留中文字符
-    normalizeText(text) {
-      if (!text) return ''
-      let result = ''
-      for (let i = 0; i < text.length; i++) {
-        const char = text[i]
-        // 检查是否是中文字符
-        if (char >= '\u4e00' && char <= '\u9fff') {
-          result += char
-        }
-      }
-      return result
-    },
-    
-    // 检查背诵结果
-    async checkRecitation() {
-      // 检查是否登录
-      const token = localStorage.getItem('token')
-      if (!token) {
-        // 未登录，存储当前路径并跳转到登录页
-        localStorage.setItem('redirectPath', this.$route.fullPath)
-        this.$router.push('/login')
-        return
-      }
-      
-      try {
-        this.showResult = this.hiddenLineIndices.map(() => true)
-        
-        // 准备原始诗句和用户输入
-        const sentences = this.splitSentences(this.poem.content)
-        const original = sentences.join('，')
-        const userInputText = sentences.map((sentence, index) => {
-          const inputIndex = this.hiddenLineIndices.indexOf(index)
-          return inputIndex !== -1 ? this.userInput[inputIndex] : sentence
-        }).join('，')
-        
-        // 调用AI背诵检测API
-        if (!this.reciteAttemptId) this.reciteAttemptId = generateAttemptId()
-        const data = await request('/ai/recite-check', {
-          method: 'POST',
-          body: JSON.stringify({
-            original: original,
-            input: userInputText,
-            poem_id: this.poem.id,
-            poem_title: this.poem.title,
-            poem_author: this.poem.author,
-            attemptId: this.reciteAttemptId
-          }),
-          timeout: TIMEOUTS.MEDIUM
-        })
-        
-        // 处理AI检测结果
-        this.reciteResult = data
-        
-        // 标记用户输入是否正确
-        this.isCorrect = this.hiddenLineIndices.map((index, i) => {
-          const sentence = sentences[index]
-          const userInput = this.userInput[i]
-          const normalizedUserInput = this.normalizeText(userInput)
-          const normalizedSentence = this.normalizeText(sentence)
-          return normalizedUserInput === normalizedSentence
-        })
-        
-        // 触发元素飞舞效果
-        this.triggerFloatingElements()
-      } catch (error) {
-        console.error('背诵检测失败:', error)
-        // 失败时使用本地检测
-        this.showResult = this.hiddenLineIndices.map(() => true)
-        this.isCorrect = this.hiddenLineIndices.map((index, i) => {
-          const sentences = this.splitSentences(this.poem.content)
-          const normalizedUserInput = this.normalizeText(this.userInput[i])
-          const normalizedSentence = this.normalizeText(sentences[index])
-          return normalizedUserInput === normalizedSentence
-        })
-        this.triggerFloatingElements()
-      }
-    },
-    
-    // 重置背诵相关数据
-    resetRecitationData() {
-      this.refreshRecitation()
-      this.reciteResult = null
-      this.reciteInput = ''
-      this.reciteAttemptId = null
-      this.wrongBookAdded = false
-    },
-    
     // 按标点符号分割句子
     splitSentences(content) {
       // 按标点符号分割句子
       return content.split(/[，。！？；]/).filter(sentence => sentence.trim())
     },
     
-    // 刷新背诵题目
+    // 刷新背诵题目：随机挖空一半诗句
     refreshRecitation() {
       if (!this.poem || !this.poem.content) {
         this.hiddenLineIndices = []
-        this.userInput = []
-        this.showResult = []
-        this.isCorrect = []
+        this.clozeAnswers = {}
+        this.clozeResult = null
+        this.clozeSubmitted = false
         return
       }
-      
-      // 按标点符号分割句子
+
       const sentences = this.splitSentences(this.poem.content)
       if (sentences.length === 0) {
         this.hiddenLineIndices = []
-        this.userInput = []
-        this.showResult = []
-        this.isCorrect = []
+        this.clozeAnswers = {}
+        this.clozeResult = null
+        this.clozeSubmitted = false
         return
       }
-      
-      // 随机选择1-2个句子进行挖空
-      const hiddenCount = Math.min(2, sentences.length)
+
+      // 随机挖空一半诗句（至少 1 句）
+      const hiddenCount = Math.max(1, Math.floor(sentences.length / 2))
       const allIndices = Array.from({ length: sentences.length }, (_, i) => i)
-      
-      // 随机打乱索引并选择前hiddenCount个
       const shuffledIndices = allIndices.sort(() => Math.random() - 0.5)
       this.hiddenLineIndices = shuffledIndices.slice(0, hiddenCount)
-      
-      // 初始化用户输入和结果数组
-      this.userInput = new Array(hiddenCount).fill('')
-      this.showResult = new Array(hiddenCount).fill(false)
-      this.isCorrect = new Array(hiddenCount).fill(false)
+      // 初始化答案对象
+      this.clozeAnswers = {}
+      this.hiddenLineIndices.forEach(i => { this.clozeAnswers[i] = '' })
+      this.clozeResult = null
+      this.clozeSubmitted = false
     },
-    
-    // 触发元素飞舞效果
-    triggerFloatingElements() {
-      // 清空现有元素
-      this.floatingElements = []
-      
-      // 生成新的飞舞元素
-      const elements = ['春', '夏', '秋', '冬', '风', '花', '雪', '月', '山', '水', '云', '霞', '诗', '词', '歌', '赋']
-      
-      for (let i = 0; i < 12; i++) {
-        this.floatingElements.push({
-          text: elements[Math.floor(Math.random() * elements.length)],
-          x: Math.random() * 100,
-          y: Math.random() * 100,
-          size: 12 + Math.random() * 16,
-          duration: 10 + Math.random() * 20,
-          delay: Math.random() * 5,
-          opacity: 0.3 + Math.random() * 0.7
-        })
+    // 生成横线占位符
+    clozePlaceholder(len) {
+      return '＿'.repeat(Math.max(2, len))
+    },
+    // 根据验证结果给输入框加样式
+    clozeResultClass(index) {
+      if (!this.clozeResult || !this.clozeResult.detail) return ''
+      const d = this.clozeResult.detail[index]
+      if (!d) return ''
+      return d.correct ? 'correct' : 'wrong'
+    },
+    // 是否所有横线都已填写
+    clozeAllFilled() {
+      return this.hiddenLineIndices.every(i => (this.clozeAnswers[i] || '').trim().length > 0)
+    },
+    // 提交验证：本地逐字比对并打分
+    submitCloze() {
+      if (!this.clozeAllFilled()) {
+        notify('请先补充所有横线处', 'warning')
+        return
       }
-      
-      // 10秒后清除元素
-      setTimeout(() => {
-        this.floatingElements = []
-      }, 10000)
+      const sentences = this.splitSentences(this.poem.content)
+      let totalChars = 0
+      let correctChars = 0
+      const wrongChars = []
+      const detail = {}
+
+      this.hiddenLineIndices.forEach(i => {
+        const original = sentences[i]
+        const input = (this.clozeAnswers[i] || '').trim()
+        // 逐字比对，统计正确字数
+        const maxLen = Math.max(original.length, input.length)
+        let sentenceCorrect = 0
+        for (let k = 0; k < maxLen; k++) {
+          const o = original[k] || ''
+          const u = input[k] || ''
+          if (o && u && o === u) {
+            sentenceCorrect++
+          }
+        }
+        totalChars += original.length
+        correctChars += sentenceCorrect
+        const isCorrect = (input === original)
+        detail[i] = { correct: isCorrect, input, original }
+        if (!isCorrect) {
+          wrongChars.push({ index: i, input, original })
+        }
+      })
+
+      const score = totalChars > 0 ? Math.round((correctChars / totalChars) * 100) : 0
+      this.clozeResult = { score, totalChars, correctChars, wrongChars, detail }
+      this.clozeSubmitted = true
+
+      // 记入学习行为
+      this.recordLearning('recite', score).catch(() => {})
+    },
+    // 重做：清空答案但保留当前挖空位置
+    resetClozeAnswer() {
+      this.hiddenLineIndices.forEach(i => { this.clozeAnswers[i] = '' })
+      this.clozeResult = null
+      this.clozeSubmitted = false
     },
     // 切换收藏状态
     toggleCollect() {
@@ -2192,29 +1289,6 @@ export default {
         this.addingToWrongBook = false;
       }
     },
-    // 切换朗读状态
-    toggleRead() {
-      if (this.isReading) {
-        // 停止朗读
-        this.stopReading();
-      } else {
-        // 开始朗读
-        this.startReading();
-      }
-    },
-    // 开始朗读诗词
-    async startReading() {
-      if (!this.poem || !this.poem.content) return;
-      this.isReading = true;
-      try { await digitalHumanService.playPoem(this.poem) }
-      finally { this.isReading = false }
-    },
-    // 停止朗读
-    stopReading() {
-      digitalHumanService.stopSpeaking()
-      this.isReading = false;
-    },
-
     // 滚动聊天窗口到底部
     scrollToBottom() {
       if (this.$refs.chatMessagesContainer) {
@@ -2295,39 +1369,9 @@ export default {
       localStorage.removeItem(cacheKey);
     },
     
-    // 获取诗人头像（使用阿里云百炼文生图API生成）
+    // 获取诗人头像：全部使用项目内静态资源，未知诗人使用统一兜底画像。
     async getAuthorAvatar(author) {
-      try {
-        // 常见诗人优先使用随应用打包的稳定资源，离线环境也能正常显示。
-        if (BUILTIN_AUTHOR_AVATARS[author]) return BUILTIN_AUTHOR_AVATARS[author]
-
-        const CACHE_VERSION = 'v2';
-        const cacheKey = `author_avatar_${CACHE_VERSION}_${author}`;
-        
-        const cachedAvatar = localStorage.getItem(cacheKey);
-        if (cachedAvatar) {
-          return cachedAvatar;
-        }
-        
-        this.clearOldAuthorAvatarCacheOnce(CACHE_VERSION);
-        
-        const data = await request('/ai/author-avatar', {
-          method: 'POST',
-          body: JSON.stringify({ author }),
-          timeout: TIMEOUTS.LONG
-        });
-        
-        if (data.success && data.url) {
-          localStorage.setItem(cacheKey, data.url);
-          return data.url;
-        }
-        
-        console.warn('诗人头像生成失败:', data.message);
-        return this.getDefaultAvatar(author);
-      } catch (error) {
-        console.error('获取诗人头像失败:', error);
-        return this.getDefaultAvatar(author);
-      }
+      return BUILTIN_AUTHOR_AVATARS[author] || this.getDefaultAvatar(author)
     },
     
     // 只清理一次旧版本的诗人头像缓存
@@ -2355,9 +1399,9 @@ export default {
       }
     },
     
-    // 获取默认头像（当AI生成失败时使用）
+    // 获取默认头像
     getDefaultAvatar(author) {
-      return unknownScholarPortrait;
+      return DEFAULT_AUTHOR_PORTRAIT;
     },
     
     // 获取诗人简介
@@ -2601,8 +1645,7 @@ export default {
         });
 
         if (data.success && data.url) {
-          this.bgImageFadingIn = false;
-          this.backgroundImage = data.url;
+          this.applyBackgroundImage(data.url);
           this.sceneImageToast = { show: true, message: '意境渐染，画面已更新', type: 'success' };
         } else {
           this.sceneImageToast = {
@@ -2671,2506 +1714,9 @@ export default {
 }
 </script>
 
-<style scoped>
-.poem-detail {
-  padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
-  background: transparent;
-}
-
-/* 双栏布局 */
-.poem-layout {
-  display: flex;
-  gap: 40px;
-  margin-top: 20px;
-  align-items: flex-start;
-  position: relative;
-  z-index: 10;
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 20px;
-  box-shadow: var(--glass-shadow);
-  /* 进入动画初始状态（隐藏） */
-  opacity: 0;
-  filter: blur(6px) scale(0.96);
-  transition: opacity 0.7s ease, filter 0.7s ease, transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
-              backdrop-filter 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
-}
-
-.poem-layout.content-entering {
-  opacity: 1;
-  filter: blur(0) scale(1);
-}
-
-/* 正常显示时的悬停效果（动画完成后生效） */
-.poem-layout.content-entering:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.left-column {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-}
-
-.right-column {
-  flex: 0 0 40%;
-  min-width: 350px;
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-}
-
-/* 响应式设计 */
-@media (max-width: 1024px) {
-  .poem-layout {
-    flex-direction: column;
-  }
-  
-  .right-column {
-    flex: 1;
-    min-width: 100%;
-  }
-}
-
-@media (max-width: 768px) {
-  .poem-detail {
-    padding: 15px;
-  }
-
-  .poem-layout {
-    gap: 20px;
-    padding: 15px;
-  }
-
-  .left-column,
-  .right-column {
-    gap: 20px;
-  }
-
-  .poem-background-card,
-  .poem-story-card,
-  .recitation-guide-card {
-    padding: 18px;
-  }
-
-  .poem-background-card .section-title,
-  .poem-story-card .section-title,
-  .recitation-guide-card .section-title {
-    font-size: 18px;
-  }
-
-  .ai-btn {
-    padding: 8px 16px;
-    font-size: 13px;
-  }
-}
-
-.back-btn {
-  padding: 8px 16px;
-  font-size: 14px;
-  background: rgba(33, 150, 243, 0.2);
-  color: var(--secondary-color);
-  border: 1px solid rgba(33, 150, 243, 0.3);
-  border-radius: 8px;
-  cursor: pointer;
-  margin-bottom: 20px;
-  transition: var(--transition);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(33, 150, 243, 0.15);
-}
-
-.back-btn:hover {
-  background: rgba(33, 150, 243, 0.3);
-  border-color: rgba(33, 150, 243, 0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(33, 150, 243, 0.25);
-}
-
-.poem-header {
-  margin-bottom: 30px;
-}
-
-.title-container {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.collect-btn {
-  padding: 10px 20px;
-  font-size: 14px;
-  background: rgba(244, 67, 54, 0.2);
-  color: var(--danger-color);
-  border: 1px solid rgba(244, 67, 54, 0.3);
-  border-radius: 25px;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(244, 67, 54, 0.15);
-  white-space: nowrap;
-  position: relative;
-  overflow: hidden;
-}
-
-.collect-btn:hover {
-  background: rgba(244, 67, 54, 0.3);
-  border-color: rgba(244, 67, 54, 0.5);
-  transform: translateY(-3px) scale(1.05);
-  box-shadow: 0 8px 24px rgba(244, 67, 54, 0.25);
-}
-
-.collect-btn:active {
-  transform: translateY(-1px) scale(0.98);
-}
-
-.collect-btn.collected {
-  background: rgba(244, 67, 54, 0.8);
-  color: white;
-  border-color: rgba(244, 67, 54, 0.8);
-  box-shadow: 0 8px 24px rgba(244, 67, 54, 0.4);
-  animation: pulse 0.6s ease-in-out;
-}
-
-.collect-btn.collected:hover {
-  background: rgba(244, 67, 54, 0.9);
-  border-color: rgba(244, 67, 54, 0.9);
-  box-shadow: 0 10px 28px rgba(244, 67, 54, 0.5);
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-@keyframes pulse {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.15);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-.collect-btn::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  transition: width 0.6s, height 0.6s;
-}
-
-.collect-btn:hover::before {
-  width: 300px;
-  height: 300px;
-}
-
-.collect-btn:active::before {
-  width: 400px;
-  height: 400px;
-  transition: width 0.2s, height 0.2s;
-}
-
-.poem-title {
-  font-size: 28px;
-  color: #333;
-  margin-bottom: 12px;
-  font-weight: bold;
-}
-
-.poem-author {
-  font-size: 16px;
-  color: #666;
-}
-
-.poem-text {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 40px;
-  margin-bottom: 30px;
-  font-family: 'SimSun', 'STSong', serif;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-  position: relative;
-}
-
-/* 朗读按钮样式 */
-.read-btn {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
-  padding: 10px 20px;
-  font-size: 14px;
-  background: rgba(205, 133, 63, 0.2);
-  color: #8b4513;
-  border: 1px solid rgba(205, 133, 63, 0.3);
-  border-radius: 20px;
-  cursor: pointer;
-  transition: var(--transition);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(139, 69, 19, 0.15);
-  white-space: nowrap;
-  z-index: 10;
-}
-
-.read-btn:hover {
-  background: rgba(205, 133, 63, 0.3);
-  border-color: rgba(205, 133, 63, 0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(139, 69, 19, 0.25);
-}
-
-.poem-text::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
-  transform: scaleX(0);
-  transition: transform 0.3s ease;
-}
-
-.poem-text:hover::before {
-  transform: scaleX(1);
-}
-
-.poem-text:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.poem-text.blurred {
-  filter: blur(5px);
-  animation: blurIn 0.5s ease-in-out;
-}
-
-@keyframes blurIn {
-  from {
-    filter: blur(0px);
-  }
-  to {
-    filter: blur(5px);
-  }
-}
-
-.poem-line {
-  font-size: 20px;
-  color: #333;
-  line-height: 2.5;
-  text-align: center;
-  margin: 10px 0;
-  letter-spacing: 1px;
-}
-
-.poem-char {
-  padding: 0 2px;
-}
-
-.poem-punctuation {
-  margin: 0 2px;
-}
-
-/* AI助教聊天容器样式 */
-.tutor-chat-container {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  box-shadow: var(--glass-shadow);
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  transition: var(--transition);
-}
-
-.tutor-chat-container:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.tutor-chat-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-height: 700px;
-}
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 550px;
-  padding: 16px;
-  background: rgba(255, 252, 240, 0.2);
-  border-radius: var(--border-radius);
-  border: 1px solid var(--glass-border);
-}
-
-.chat-message {
-  max-width: 80%;
-  padding: 10px 14px;
-  border-radius: 18px;
-  position: relative;
-}
-
-.chat-message.user {
-  align-self: flex-end;
-  background: rgba(139, 69, 19, 0.1);
-  border: 1px solid rgba(139, 69, 19, 0.2);
-  border-radius: 18px 18px 4px 18px;
-}
-
-.chat-message.bot {
-  align-self: flex-start;
-  background: rgba(255, 252, 240, 0.8);
-  border: 1px solid var(--glass-border);
-  border-radius: 4px 18px 18px 18px;
-}
-
-.message-content {
-  font-size: 14px;
-  line-height: 1.4;
-  color: #333;
-}
-
-.chat-input-area {
-  display: flex;
-  gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid var(--glass-border);
-}
-
-.tutor-input {
-  flex: 1;
-  padding: 12px 16px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  background: rgba(255, 252, 240, 0.3);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  font-size: 14px;
-  transition: all 0.3s ease;
-}
-
-.tutor-input:focus {
-  outline: none;
-  border-color: rgba(76, 175, 80, 0.5);
-  box-shadow: 0 8px 16px rgba(76, 175, 80, 0.15);
-  transform: translateY(-2px);
-  background: rgba(255, 252, 240, 0.5);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.send-btn {
-  padding: 12px 20px;
-  background: rgba(76, 175, 80, 0.2);
-  color: var(--primary-color);
-  border: 1px solid rgba(76, 175, 80, 0.3);
-  border-radius: var(--border-radius);
-  cursor: pointer;
-  transition: var(--transition);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(76, 175, 80, 0.15);
-}
-
-.send-btn:hover:not(:disabled) {
-  background: rgba(76, 175, 80, 0.3);
-  border-color: rgba(76, 175, 80, 0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(76, 175, 80, 0.25);
-}
-
-.send-btn:disabled {
-  background: rgba(76, 175, 80, 0.1);
-  color: var(--primary-color);
-  border-color: rgba(76, 175, 80, 0.2);
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: 0 4px 16px rgba(76, 175, 80, 0.1);
-  opacity: 0.6;
-}
-
-/* 遮挡背诵功能样式 */
-.recitation-section {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  margin-bottom: 30px;
-  position: relative;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-}
-
-.recitation-section:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.recitation-controls {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-}
-
-.refresh-btn {
-  padding: 8px 16px;
-  font-size: 14px;
-  background: rgba(255, 152, 0, 0.2);
-  color: var(--accent-color);
-  border: 1px solid rgba(255, 152, 0, 0.3);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: var(--transition);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(255, 152, 0, 0.15);
-  margin-left: auto;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: rgba(255, 152, 0, 0.3);
-  border-color: rgba(255, 152, 0, 0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(255, 152, 0, 0.25);
-}
-
-.refresh-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: 0 4px 16px rgba(255, 152, 0, 0.15);
-}
-
-/* 开关样式 */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 50px;
-  height: 24px;
-}
-
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: .4s;
-  border-radius: 24px;
-}
-
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 16px;
-  width: 16px;
-  left: 4px;
-  bottom: 4px;
-  background-color: rgba(255, 255, 255, 0.9);
-  transition: .4s;
-  border-radius: 50%;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-
-input:checked + .slider {
-  background-color: #4CAF50;
-}
-
-input:checked + .slider:before {
-  transform: translateX(26px);
-}
-
-.recitation-content {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-}
-
-.recitation-content:hover {
-  transform: translateY(-2px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 2px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 2px));
-  box-shadow: 0 8px 16px rgba(31, 38, 135, 0.1);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.recitation-pair {
-  margin-bottom: 24px;
-  padding: 16px;
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  border-left: 4px solid #4CAF50;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-}
-
-.recitation-pair:hover {
-  transform: translateY(-2px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 2px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 2px));
-  box-shadow: 0 8px 16px rgba(31, 38, 135, 0.1);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.recitation-prompt {
-  margin-bottom: 12px;
-  padding: 12px;
-  background: rgba(76, 175, 80, 0.1);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(76, 175, 80, 0.2);
-  border-radius: 8px;
-  transition: var(--transition);
-}
-
-.recitation-prompt:hover {
-  background: rgba(76, 175, 80, 0.15);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-color: rgba(76, 175, 80, 0.3);
-}
-
-.prompt-label {
-  font-weight: bold;
-  color: #4CAF50;
-  margin-right: 8px;
-}
-
-.prompt-text {
-  font-size: 16px;
-  color: #333;
-  font-family: 'SimSun', 'STSong', serif;
-  line-height: 1.6;
-}
-
-.recitation-line {
-  margin-bottom: 15px;
-}
-
-.hidden-line {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.recitation-input {
-  padding: 12px 16px;
-  font-size: 16px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  outline: none;
-  transition: border-color 0.3s;
-  font-family: 'SimSun', 'STSong', serif;
-  width: 100%;
-}
-
-.recitation-input:focus {
-  border-color: #4CAF50;
-  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1);
-}
-
-.recitation-result {
-  font-size: 14px;
-  padding: 10px 16px;
-  border-radius: 6px;
-  margin-top: 4px;
-}
-
-.correct {
-  background-color: #d4edda;
-  color: #155724;
-  border: 1px solid #c3e6cb;
-}
-
-.incorrect {
-  background-color: #f8d7da;
-  color: #721c24;
-  border: 1px solid #f5c6cb;
-}
-
-.visible-content {
-  padding: 16px;
-}
-
-.visible-line {
-  font-size: 16px;
-  color: #333;
-  line-height: 1.8;
-  font-family: 'SimSun', 'STSong', serif;
-  margin-bottom: 12px;
-}
-
-.submit-btn {
-  padding: 12px 24px;
-  font-size: 16px;
-  background: rgba(76, 175, 80, 0.2);
-  color: var(--primary-color);
-  border: 1px solid rgba(76, 175, 80, 0.3);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: var(--transition);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(76, 175, 80, 0.15);
-  margin-top: 16px;
-  width: 100%;
-  max-width: 200px;
-  margin-left: auto;
-  font-family: 'SimSun', 'STSong', serif;
-  letter-spacing: 1px;
-}
-
-.submit-btn:hover {
-  background: rgba(76, 175, 80, 0.3);
-  border-color: rgba(76, 175, 80, 0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(76, 175, 80, 0.25);
-}
-
-/* 元素飞舞效果样式 */
-.floating-elements {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  pointer-events: none;
-  z-index: 10;
-  overflow: hidden;
-}
-
-.floating-element {
-  position: absolute;
-  color: #4CAF50;
-  font-family: 'SimSun', 'STSong', serif;
-  font-weight: bold;
-  animation-timing-function: ease-in-out;
-}
-
-@keyframes float {
-  0% {
-    transform: translate(0, 0) rotate(0deg);
-    opacity: 0;
-  }
-  10% {
-    opacity: 1;
-  }
-  90% {
-    opacity: 1;
-  }
-  100% {
-    transform: translate(calc(-50vw + 50%), calc(-50vh + 50%)) rotate(360deg);
-    opacity: 0;
-  }
-}
-
-/* 诗词标题和作者样式优化 */
-.poem-title {
-  font-size: 32px;
-  color: #2c3e50;
-  margin-bottom: 16px;
-  font-weight: bold;
-  text-align: center;
-  letter-spacing: 2px;
-}
-
-.poem-author {
-  font-size: 18px;
-  color: #7f8c8d;
-  text-align: center;
-  margin-bottom: 30px;
-  letter-spacing: 1px;
-}
-
-.ai-explanation {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-}
-
-.ai-explanation:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.section-title {
-  font-size: 20px;
-  color: #333;
-  margin-bottom: 20px;
-  font-weight: bold;
-}
-
-.explanation-content {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 20px;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-  position: relative;
-  overflow: hidden;
-}
-
-.explanation-content:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.explanation-content::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
-  transform: scaleX(0);
-  transition: transform 0.3s ease;
-}
-
-.explanation-content:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.2);
-  border-color: rgba(255, 255, 255, 0.5);
-}
-
-.explanation-content:hover::before {
-  transform: scaleX(1);
-}
-
-.explanation-section {
-  margin-bottom: 20px;
-}
-
-.explanation-section h3 {
-  font-size: 16px;
-  color: #4CAF50;
-  margin-bottom: 8px;
-  font-weight: bold;
-}
-
-.explanation-section p {
-  font-size: 14px;
-  color: #555;
-  line-height: 1.6;
-}
-
-/* 引导性思考题样式 */
-.questions-list {
-  list-style-type: none;
-  padding: 0;
-  margin: 0;
-}
-
-.question-item {
-  font-size: 14px;
-  color: #555;
-  line-height: 1.6;
-  margin-bottom: 10px;
-  padding-left: 20px;
-  position: relative;
-}
-
-.question-item:before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 8px;
-  width: 8px;
-  height: 8px;
-  background-color: #4CAF50;
-  border-radius: 50%;
-}
-
-.ai-btn {
-  padding: 12px 24px;
-  font-size: 16px;
-  background: rgba(76, 175, 80, 0.2);
-  color: var(--primary-color);
-  border: 1px solid rgba(76, 175, 80, 0.3);
-}
-
-/* 诗人简介样式 */
-.author-profile {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-}
-
-.author-profile:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.author-content {
-  display: flex;
-  align-items: flex-start;
-  gap: 20px;
-}
-
-.author-avatar {
-  flex: 0 0 100px;
-  height: 100px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 3px solid rgba(139, 69, 19, 0.3);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.avatar-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.avatar-loading {
-  color: #666;
-  font-size: 12px;
-  text-align: center;
-  padding: 20px;
-  box-sizing: border-box;
-}
-
-.author-info {
-  flex: 1;
-}
-
-.author-info h3 {
-  font-size: 20px;
-  color: #333;
-  margin-bottom: 8px;
-  font-weight: bold;
-}
-
-.author-dynasty {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 12px;
-}
-
-.author-bio {
-  font-size: 14px;
-  color: #555;
-  line-height: 1.6;
-}
-
-/* 相似风格诗词样式 */
-.similar-poems {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-}
-
-.similar-poems:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.similar-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.similar-item {
-  background: rgba(255, 252, 240, 0.2);
-  border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  padding: 16px;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.similar-item:hover {
-  transform: translateY(-2px);
-  background: rgba(255, 252, 240, 0.3);
-  box-shadow: 0 8px 16px rgba(31, 38, 135, 0.1);
-}
-
-.similar-item h4 {
-  font-size: 16px;
-  color: #8b4513;
-  margin-bottom: 8px;
-  font-weight: bold;
-}
-
-.similar-author {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 12px;
-}
-
-.similar-content {
-  font-size: 14px;
-  color: #555;
-  line-height: 1.4;
-  font-family: 'SimSun', 'STSong', serif;
-}
-
-.empty {
-  text-align: center;
-  padding: 40px;
-  color: #999;
-  font-style: italic;
-}
-
-.ai-btn:hover {
-  background: rgba(76, 175, 80, 0.3);
-  border-color: rgba(76, 175, 80, 0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(76, 175, 80, 0.25);
-}
-
-.ai-btn.green {
-  background: rgba(76, 175, 80, 0.2);
-  color: var(--primary-color);
-  border: 1px solid rgba(76, 175, 80, 0.3);
-  box-shadow: 0 4px 16px rgba(76, 175, 80, 0.15);
-  margin-bottom: 20px;
-}
-
-.ai-btn.green:hover {
-  background: rgba(76, 175, 80, 0.3);
-  border-color: rgba(76, 175, 80, 0.5);
-  box-shadow: 0 8px 24px rgba(76, 175, 80, 0.25);
-}
-
-.error-message {
-  color: #f44336;
-  padding: 10px;
-  margin: 10px 0;
-  border-radius: var(--border-radius);
-  background: rgba(244, 67, 54, 0.1);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(244, 67, 54, 0.2);
-  border-left: 4px solid #f44336;
-  box-shadow: 0 4px 16px rgba(244, 67, 54, 0.1);
-  transition: var(--transition);
-}
-
-.error-message:hover {
-  background: rgba(244, 67, 54, 0.15);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 8px 24px rgba(244, 67, 54, 0.15);
-  border-color: rgba(244, 67, 54, 0.3);
-}
-
-/* 加载动画 */
-.loading-spinner {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  border-top-color: white;
-  animation: spin 1s ease-in-out infinite;
-  margin-right: 8px;
-  vertical-align: middle;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.loading, .error, .empty {
-  text-align: center;
-  padding: 40px;
-  color: #666;
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  box-shadow: var(--glass-shadow);
-  margin: 20px 0;
-}
-
-.error {
-  color: #f44336;
-  background: rgba(244, 67, 54, 0.1);
-  border-color: rgba(244, 67, 54, 0.2);
-}
-
-/* 背诵检测功能样式 */
-.recite-check-card {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  margin-bottom: 30px;
-  box-shadow: var(--glass-shadow);
-  position: relative;
-  overflow: hidden;
-  transition: var(--transition);
-}
-
-.recite-check-card:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.recite-check-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: linear-gradient(90deg, #e74c3c, #f39c12);
-  transform: scaleX(0);
-  transition: transform 0.3s ease;
-}
-
-.recite-check-card:hover::before {
-  transform: scaleX(1);
-}
-
-/* 检测结果板块样式 */
-.result-section {
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-}
-
-.result-title {
-  font-size: 16px;
-  font-weight: bold;
-  color: #333;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 2px solid rgba(74, 144, 226, 0.2);
-}
-
-/* 正确率板块 */
-.accuracy-section {
-  background: linear-gradient(135deg, rgba(74, 144, 226, 0.1), rgba(80, 227, 194, 0.1));
-}
-
-.accuracy-display {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.accuracy-circle {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #4a90e2, #50e3c2);
-  color: white;
-  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
-}
-
-.accuracy-circle.score-low {
-  background: linear-gradient(135deg, #e74c3c, #f39c12);
-}
-
-.accuracy-circle.score-medium {
-  background: linear-gradient(135deg, #f39c12, #f1c40f);
-}
-
-.accuracy-circle.score-high {
-  background: linear-gradient(135deg, #27ae60, #2ecc71);
-}
-
-.accuracy-number {
-  font-size: 28px;
-  font-weight: bold;
-  line-height: 1;
-}
-
-.accuracy-unit {
-  font-size: 12px;
-  opacity: 0.9;
-}
-
-.accuracy-message {
-  font-size: 14px;
-  color: #555;
-  font-weight: 500;
-}
-
-/* 问题板块 */
-.problem-section {
-  background: linear-gradient(135deg, rgba(231, 76, 60, 0.05), rgba(243, 156, 18, 0.05));
-}
-
-.problem-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.problem-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 14px;
-}
-
-.problem-label {
-  font-weight: bold;
-  color: #e74c3c;
-  min-width: 50px;
-}
-
-.problem-detail {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.error-tag {
-  background: rgba(231, 76, 60, 0.15);
-  color: #c0392b;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  border: 1px solid rgba(231, 76, 60, 0.3);
-}
-
-.missing-tag {
-  background: rgba(52, 152, 219, 0.15);
-  color: #2980b9;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  border: 1px solid rgba(52, 152, 219, 0.3);
-}
-
-.extra-tag {
-  background: rgba(241, 196, 15, 0.15);
-  color: #d68910;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  border: 1px solid rgba(241, 196, 15, 0.3);
-}
-
-.no-error-text {
-  color: #27ae60;
-  font-weight: 500;
-}
-
-/* 建议板块 */
-.advice-section {
-  background: linear-gradient(135deg, rgba(39, 174, 96, 0.05), rgba(46, 204, 113, 0.05));
-}
-
-.advice-content {
-  background: rgba(39, 174, 96, 0.08);
-  border-radius: 8px;
-  padding: 12px 16px;
-  border-left: 3px solid #27ae60;
-}
-
-.advice-text {
-  font-size: 14px;
-  color: #555;
-  line-height: 1.7;
-  margin: 0;
-}
-
-/* ===== 新增卡片通用样式 ===== */
-.poem-background-card,
-.poem-story-card,
-.recitation-guide-card {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 24px;
-  box-shadow: var(--glass-shadow);
-  position: relative;
-  overflow: hidden;
-  transition: var(--transition);
-}
-
-.poem-background-card:hover,
-.poem-story-card:hover,
-.recitation-guide-card:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.poem-background-card::before,
-.poem-story-card::before,
-.recitation-guide-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 4px;
-  transform: scaleX(0);
-  transition: transform 0.3s ease;
-}
-
-.poem-background-card::before {
-  background: linear-gradient(90deg, #4a90e2, #50e3c2);
-}
-
-.poem-story-card::before {
-  background: linear-gradient(90deg, #9b59b6, #e91e63);
-}
-
-.recitation-guide-card::before {
-  background: linear-gradient(90deg, #f5a623, #f8e71c);
-}
-
-.poem-background-card:hover::before,
-.poem-story-card:hover::before,
-.recitation-guide-card:hover::before {
-  transform: scaleX(1);
-}
-
-/* 卡片加载状态 */
-.card-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 20px;
-  color: #666;
-  font-size: 14px;
-}
-
-.mini-spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(100, 149, 237, 0.15);
-  border-top-color: #6495ed;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-/* ===== 创作背景卡片 ===== */
-.poem-background-content {
-  animation: fadeInUp 0.4s ease-out;
-}
-
-.background-item {
-  display: flex;
-  gap: 14px;
-  margin-bottom: 16px;
-}
-
-.item-icon {
-  font-size: 24px;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.item-text {
-  font-size: 14px;
-  color: #555;
-  line-height: 1.8;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-}
-
-.background-tips {
-  background: rgba(74, 144, 226, 0.08);
-  border: 1px solid rgba(74, 144, 226, 0.2);
-  border-radius: 12px;
-  padding: 12px 16px;
-}
-
-.tips-label {
-  font-size: 13px;
-  font-weight: bold;
-  color: #4a90e2;
-  margin-bottom: 6px;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-}
-
-.background-tips p {
-  font-size: 13px;
-  color: #666;
-  line-height: 1.7;
-  margin: 0;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-}
-
-/* ===== 趣味故事卡片 ===== */
-.poem-story-content {
-  animation: fadeInUp 0.4s ease-out;
-}
-
-.story-text {
-  font-size: 14px;
-  color: #555;
-  line-height: 1.9;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-  text-indent: 2em;
-}
-
-/* ===== 诵读指南卡片 ===== */
-.recitation-guide-content {
-  animation: fadeInUp 0.4s ease-out;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.guide-section {
-  background: rgba(245, 166, 35, 0.05);
-  border: 1px solid rgba(245, 166, 35, 0.15);
-  border-radius: 12px;
-  padding: 12px 16px;
-}
-
-.guide-title {
-  font-size: 13px;
-  font-weight: bold;
-  color: #d4881a;
-  margin-bottom: 6px;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-}
-
-.guide-section p {
-  font-size: 13px;
-  color: #666;
-  line-height: 1.7;
-  margin: 0;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-}
-
-.guide-tips-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.guide-tips-list li {
-  font-size: 13px;
-  color: #666;
-  line-height: 1.6;
-  padding-left: 16px;
-  position: relative;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-}
-
-.guide-tips-list li::before {
-  content: '·';
-  position: absolute;
-  left: 4px;
-  color: #f5a623;
-  font-weight: bold;
-}
-
-/* ===== AI按钮 ===== */
-.ai-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border-radius: 20px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  border: none;
-  font-family: 'Noto Serif SC', 'SimSun', serif;
-}
-
-.ai-btn.blue {
-  background: linear-gradient(135deg, #4a90e2, #50e3c2);
-  color: white;
-  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
-}
-
-.ai-btn.blue:hover:not(:disabled) {
-  background: linear-gradient(135deg, #3a7fcf, #40c9a8);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(74, 144, 226, 0.4);
-}
-
-.ai-btn.purple {
-  background: linear-gradient(135deg, #9b59b6, #e91e63);
-  color: white;
-  box-shadow: 0 4px 12px rgba(155, 89, 182, 0.3);
-}
-
-.ai-btn.purple:hover:not(:disabled) {
-  background: linear-gradient(135deg, #8244a8, #d01555);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(155, 89, 182, 0.4);
-}
-
-.ai-btn.orange {
-  background: linear-gradient(135deg, #f5a623, #f8e71c);
-  color: #7a5200;
-  box-shadow: 0 4px 12px rgba(245, 166, 35, 0.3);
-}
-
-.ai-btn.orange:hover:not(:disabled) {
-  background: linear-gradient(135deg, #e09515, #f0db10);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(245, 166, 35, 0.4);
-}
-
-.ai-btn.green {
-  background: linear-gradient(135deg, #4CAF50, #81C784);
-  color: white;
-  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
-}
-
-.ai-btn.green:hover:not(:disabled) {
-  background: linear-gradient(135deg, #3d8b40, #66bb6a);
-  transform: translateY(-2px);
-}
-
-.ai-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none !important;
-}
-
-.ai-btn .loading-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-/* ===== 个性化教学样式 ===== */
-.personalized-tutor-section {
-  background: linear-gradient(135deg, #f8f4ff 0%, #f0f7ff 100%);
-  border-radius: 16px;
-  padding: 24px;
-  margin: 20px 0;
-  border: 1px solid #e0d4f5;
-}
-.tutor-subtitle {
-  color: #666;
-  font-size: 14px;
-  margin: 4px 0 16px;
-}
-.tutor-content {
-  margin-top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.tutor-depth-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 600;
-  width: fit-content;
-}
-.tutor-depth-badge.FOUNDATION { background: #e3f2fd; color: #1565c0; }
-.tutor-depth-badge.DEVELOPING { background: #fff3e0; color: #e65100; }
-.tutor-depth-badge.ADVANCED { background: #fce4ec; color: #c62828; }
-.tutor-weak-points h4, .tutor-explanation h4, .tutor-key-points h4,
-.tutor-advice h4, .tutor-practice h4, .tutor-related h4, .tutor-sources h4 {
-  font-size: 15px;
-  color: #333;
-  margin-bottom: 8px;
-}
-.weak-point-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.weak-point-tag {
-  background: #fff;
-  border: 1px solid #d4c5f9;
-  border-radius: 12px;
-  padding: 4px 10px;
-  font-size: 13px;
-  color: #5e35b1;
-}
-.teaching-text {
-  line-height: 1.8;
-  color: #444;
-  white-space: pre-wrap;
-}
-.key-points-list, .sources-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.key-point-item {
-  padding: 6px 0;
-  border-bottom: 1px dashed #e0d4f5;
-  color: #444;
-  font-size: 14px;
-}
-.key-point-item:last-child { border-bottom: none; }
-.practice-item {
-  background: #fff;
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 8px;
-  border: 1px solid #e8e0f7;
-}
-.practice-question { font-weight: 500; color: #333; }
-.practice-source { font-size: 12px; color: #888; margin-top: 4px; }
-.related-poems-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.related-poem-tag {
-  background: #fff;
-  border: 1px solid #c5cae9;
-  border-radius: 12px;
-  padding: 4px 10px;
-  font-size: 13px;
-  color: #283593;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.related-poem-tag:hover { background: #e8eaf6; }
-.source-item {
-  font-size: 12px;
-  color: #666;
-  padding: 2px 0;
-}
-.source-type {
-  display: inline-block;
-  background: #f5f5f5;
-  border-radius: 4px;
-  padding: 1px 6px;
-  margin-right: 6px;
-  font-weight: 500;
-}
-.tutor-degraded-notice {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
-  color: #856404;
-}
-
-/* ===== 动画 ===== */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.recite-check-content {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  padding: 20px;
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-}
-
-.recite-check-content:hover {
-  transform: translateY(-4px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  box-shadow: 0 12px 24px rgba(31, 38, 135, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.form-group {
-  margin-bottom: 20px;
-}
-
-.form-label {
-  display: block;
-  font-size: 16px;
-  color: #333;
-  margin-bottom: 8px;
-  font-weight: bold;
-}
-
-.recite-input {
-  width: 100%;
-  padding: 12px;
-  font-size: 16px;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  resize: vertical;
-  font-family: 'SimSun', 'STSong', serif;
-  line-height: 1.5;
-  transition: all 0.3s ease;
-  background: rgba(255, 252, 240, 0.3);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
-.recite-input:focus {
-  border-color: rgba(76, 175, 80, 0.5);
-  outline: none;
-  box-shadow: 0 8px 16px rgba(76, 175, 80, 0.15);
-  transform: translateY(-2px);
-  background: rgba(255, 252, 240, 0.5);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.recite-check-btn {
-  width: 100%;
-  max-width: 300px;
-  margin: 0 auto;
-  display: block;
-  padding: 12px 24px;
-  font-size: 16px;
-  background: rgba(76, 175, 80, 0.2);
-  color: var(--primary-color);
-  border: 1px solid rgba(76, 175, 80, 0.3);
-  border-radius: 12px;
-  cursor: pointer;
-  transition: var(--transition);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 4px 16px rgba(76, 175, 80, 0.15);
-}
-
-.recite-check-btn:hover {
-  background: rgba(76, 175, 80, 0.3);
-  border-color: rgba(76, 175, 80, 0.5);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(76, 175, 80, 0.25);
-}
-
-.recite-check-btn:disabled {
-  background: rgba(76, 175, 80, 0.1);
-  color: var(--primary-color);
-  border-color: rgba(76, 175, 80, 0.2);
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: 0 4px 16px rgba(76, 175, 80, 0.1);
-  opacity: 0.6;
-}
-
-.recite-result-section {
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 1px solid #e0e0e0;
-}
-
-.recite-score {
-  text-align: center;
-  margin-bottom: 30px;
-}
-
-.recite-score h3 {
-  font-size: 18px;
-  color: #333;
-  margin-bottom: 16px;
-}
-
-.score-circle {
-  display: inline-block;
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s;
-}
-
-.score-circle:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-}
-
-.score-excellent {
-  background: linear-gradient(135deg, #4CAF50, #81C784);
-  color: white;
-}
-
-.score-good {
-  background: linear-gradient(135deg, #2196F3, #64B5F6);
-  color: white;
-}
-
-.score-average {
-  background: linear-gradient(135deg, #FFC107, #FFD54F);
-  color: #333;
-}
-
-.score-poor {
-  background: linear-gradient(135deg, #F44336, #E57373);
-  color: white;
-}
-
-.score-number {
-  font-size: 24px;
-  font-weight: bold;
-  margin-bottom: 4px;
-}
-
-.score-label {
-  font-size: 14px;
-  opacity: 0.9;
-}
-
-.score-message {
-  font-size: 12px;
-  margin-top: 8px;
-  font-weight: bold;
-}
-
-.recite-feedback {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.feedback-item {
-  padding: 16px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.feedback-item h4 {
-  font-size: 16px;
-  margin-bottom: 12px;
-  color: #333;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.feedback-item.error {
-  background-color: #FFF3F3;
-  border-left: 4px solid #F44336;
-}
-
-.feedback-item.advice {
-  background-color: #F3F8FF;
-  border-left: 4px solid #2196F3;
-}
-
-.error-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.error-item {
-  padding: 8px 0;
-  border-bottom: 1px solid #f0f0f0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-}
-
-.error-item:last-child {
-  border-bottom: none;
-}
-
-.error-position {
-  font-weight: bold;
-  color: #666;
-  min-width: 80px;
-}
-
-.error-input {
-  color: #F44336;
-  font-weight: bold;
-  text-decoration: line-through;
-}
-
-.error-arrow {
-  color: #999;
-}
-
-.error-correct {
-  color: #4CAF50;
-  font-weight: bold;
-}
-
-.error-missing,
-.error-extra {
-  color: #F44336;
-  font-weight: bold;
-}
-
-.ai-advice-container {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  padding: 16px;
-  border-radius: var(--border-radius);
-  box-shadow: var(--glass-shadow);
-  transition: var(--transition);
-}
-
-.ai-advice-container:hover {
-  transform: translateY(-2px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 2px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 2px));
-  box-shadow: 0 8px 16px rgba(31, 38, 135, 0.1);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.ai-advice {
-  font-size: 14px;
-  line-height: 1.6;
-  color: #555;
-  margin: 0;
-}
-
-/* 一键添加错题本 */
-.add-to-wrongbook-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px dashed #e0e0e0;
-}
-
-.add-wrongbook-btn {
-  background: linear-gradient(135deg, #FF9800, #FF5722);
-  color: #fff;
-  border: none;
-  padding: 10px 24px;
-  border-radius: 20px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
-  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
-}
-
-.add-wrongbook-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4);
-  background: linear-gradient(135deg, #FFA726, #FF7043);
-}
-
-.add-wrongbook-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.wrongbook-added-tip {
-  color: #4CAF50;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.small-spinner {
-  width: 14px;
-  height: 14px;
-  border-width: 2px;
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .poem-detail {
-    padding: 15px;
-  }
-  
-  .poem-title {
-    font-size: 24px;
-  }
-  
-  .poem-text {
-    padding: 20px;
-  }
-  
-  .poem-line {
-    font-size: 16px;
-  }
-  
-  .ai-explanation {
-    padding: 20px;
-  }
-  
-  .recite-check-section {
-    padding: 16px;
-  }
-  
-  .recite-check-content {
-    padding: 16px;
-  }
-  
-  .score-circle {
-    width: 100px;
-    height: 100px;
-  }
-  
-  .score-number {
-    font-size: 20px;
-  }
-}
-/* 古风风格增强 */
-.recite-check-btn {
-  font-family: 'SimSun', 'STSong', serif;
-  letter-spacing: 1px;
-}
-
-.score-circle {
-  border: 2px solid rgba(255, 255, 255, 0.3);
-}
-
-.feedback-item {
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
-  transition: all 0.3s;
-  box-shadow: var(--glass-shadow);
-}
-
-.feedback-item:hover {
-  box-shadow: 0 8px 16px rgba(31, 38, 135, 0.15);
-  transform: translateY(-2px);
-  backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px));
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-/* AI助教聊天窗口样式 */
-.tutor-chat-window {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  width: 380px;
-  max-height: 500px;
-  background: var(--glass-background);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
-  border-radius: var(--border-radius);
-  box-shadow: var(--glass-shadow);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-}
-
-.tutor-chat-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--glass-border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: rgba(255, 252, 240, 0.2);
-  border-radius: var(--border-radius) var(--border-radius) 0 0;
-}
-
-.tutor-chat-header h3 {
-  margin: 0;
-  font-size: 16px;
-  color: #8b4513;
-}
-
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: #8b4513;
-  padding: 0;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: var(--transition);
-}
-
-.close-btn:hover {
-  background: rgba(139, 69, 19, 0.1);
-}
-
-.tutor-chat-body {
-  padding: 20px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-height: 400px;
-}
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-height: 300px;
-}
-
-.chat-message {
-  max-width: 80%;
-  padding: 10px 14px;
-  border-radius: 18px;
-  position: relative;
-}
-
-.chat-message.user {
-  align-self: flex-end;
-  background: rgba(139, 69, 19, 0.1);
-  border: 1px solid rgba(139, 69, 19, 0.2);
-  border-radius: 18px 18px 4px 18px;
-}
-
-.chat-message.bot {
-  align-self: flex-start;
-  background: rgba(255, 252, 240, 0.8);
-  border: 1px solid var(--glass-border);
-  border-radius: 4px 18px 18px 18px;
-}
-
-.message-content {
-  font-size: 14px;
-  line-height: 1.4;
-  color: #333;
-}
-
-.chat-input-area {
-  display: flex;
-  gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid var(--glass-border);
-}
-
-.tutor-input {
-  flex: 1;
-  padding: 12px 16px;
-  border: 1px solid var(--glass-border);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  font-size: 14px;
-  outline: none;
-  transition: var(--transition);
-}
-
-.tutor-input:focus {
-  border-color: #8b4513;
-  box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.1);
-}
-
-.send-btn {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 20px;
-  background: #8b4513;
-  color: white;
-  font-size: 14px;
-  cursor: pointer;
-  transition: var(--transition);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.send-btn:hover:not(:disabled) {
-  background: #6b340f;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(139, 69, 19, 0.2);
-}
-
-.send-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.ai-buttons {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-}
-
-.ai-btn.blue {
-  background: rgba(33, 150, 243, 0.2);
-  color: var(--secondary-color);
-  border: 1px solid rgba(33, 150, 243, 0.3);
-  box-shadow: 0 4px 16px rgba(33, 150, 243, 0.15);
-}
-
-.ai-btn.blue:hover {
-  background: rgba(33, 150, 243, 0.3);
-  border-color: rgba(33, 150, 243, 0.5);
-  box-shadow: 0 8px 24px rgba(33, 150, 243, 0.25);
-}
-
-/* 响应式设计 */
-@media (max-width: 768px) {
-  .tutor-chat-window {
-    width: 90%;
-    right: 5%;
-    left: 5%;
-    bottom: 20px;
-  }
-  
-  .ai-buttons {
-    flex-direction: column;
-  }
-  
-  .ai-btn {
-    width: 100%;
-  }
-}
-
-/* 划词选择弹窗样式（position:fixed 须用视口坐标，勿加 scrollY） */
-.selection-popup {
-  position: fixed;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 14px;
-  background: rgba(255, 252, 240, 0.98);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(205, 133, 63, 0.35);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(139, 69, 19, 0.25);
-  min-width: 160px;
-}
-
-.selection-popup.placement-above {
-  transform: translateX(-50%) translateY(-100%);
-  animation: popup-appear-above 0.2s ease;
-}
-
-.selection-popup.placement-below {
-  transform: translateX(-50%);
-  animation: popup-appear-below 0.2s ease;
-}
-
-.selection-popup::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  margin-left: -8px;
-  width: 0;
-  height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-}
-
-.selection-popup.placement-above::after {
-  bottom: -8px;
-  border-top: 10px solid rgba(255, 252, 240, 0.98);
-}
-
-.selection-popup.placement-below::after {
-  top: -8px;
-  border-bottom: 10px solid rgba(255, 252, 240, 0.98);
-}
-
-@keyframes popup-appear-above {
-  from { opacity: 0; transform: translateX(-50%) translateY(calc(-100% + 6px)); }
-  to { opacity: 1; transform: translateX(-50%) translateY(-100%); }
-}
-
-@keyframes popup-appear-below {
-  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
-.selection-popup-placement {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(205, 133, 63, 0.2);
-}
-
-.placement-label {
-  font-size: 11px;
-  color: #a0522d;
-  margin-right: 2px;
-}
-
-.placement-chip {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 8px;
-  border: 1px solid rgba(205, 133, 63, 0.35);
-  background: rgba(255, 248, 220, 0.6);
-  color: #8b4513;
-  cursor: pointer;
-  font-family: 'SimSun', 'STSong', serif;
-}
-
-.placement-chip.active {
-  background: linear-gradient(135deg, rgba(205, 133, 63, 0.35), rgba(139, 69, 19, 0.25));
-  border-color: rgba(139, 69, 19, 0.45);
-  font-weight: bold;
-}
-
-.placement-chip:hover:not(.active) {
-  background: rgba(255, 248, 220, 0.95);
-}
-
-.popup-btn {
-  padding: 8px 16px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.popup-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.popup-btn.translate {
-  background: rgba(100, 149, 237, 0.15);
-  color: #4169e1;
-  border-color: rgba(100, 149, 237, 0.3);
-}
-
-.popup-btn.translate:hover:not(:disabled) {
-  background: rgba(100, 149, 237, 0.25);
-  border-color: rgba(100, 149, 237, 0.5);
-}
-
-.popup-btn.appreciate {
-  background: rgba(50, 205, 50, 0.15);
-  color: #228b22;
-  border-color: rgba(50, 205, 50, 0.3);
-}
-
-.popup-btn.appreciate:hover:not(:disabled) {
-  background: rgba(50, 205, 50, 0.25);
-  border-color: rgba(50, 205, 50, 0.5);
-}
-
-.popup-btn.picture {
-  background: rgba(205, 133, 63, 0.15);
-  color: #8b4513;
-  border-color: rgba(205, 133, 63, 0.3);
-}
-
-.popup-btn.picture:hover:not(:disabled) {
-  background: rgba(205, 133, 63, 0.25);
-  border-color: rgba(205, 133, 63, 0.5);
-}
-
-.popup-spinner {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgba(139, 69, 19, 0.3);
-  border-top-color: #8b4513;
-  border-radius: 50%;
-  animation: popup-spin 0.8s linear infinite;
-}
-
-@keyframes popup-spin {
-  to { transform: rotate(360deg); }
-}
-
-/* 意境图生成结果 toast 提示 */
-.scene-toast {
-  position: fixed;
-  top: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 12px 24px;
-  border-radius: 24px;
-  font-family: 'SimSun', 'STSong', serif;
-  font-size: 15px;
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-.scene-toast-success {
-  background: rgba(76, 175, 80, 0.92);
-  color: #fff;
-}
-
-.scene-toast-error {
-  background: rgba(220, 53, 69, 0.92);
-  color: #fff;
-}
-
-.scene-toast-info {
-  background: rgba(33, 150, 243, 0.92);
-  color: #fff;
-}
-
-.toast-icon {
-  font-size: 16px;
-}
-
-.toast-fade-enter-active,
-.toast-fade-leave-active {
-  transition: all 0.4s ease;
-}
-
-.toast-fade-enter-from,
-.toast-fade-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-20px);
-}
-</style>
 
 <style scoped>
-/* Poetry typography and streamed Markdown layer. Specific selectors protect it from legacy cascade overrides. */
+/* Poetry typography and streamed Markdown layer. */
 .poem-detail {
   --poetry-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif CN', 'Songti SC', 'STSong', 'SimSun', serif;
   --poetry-sans: 'Noto Sans SC', 'Source Han Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
@@ -5454,146 +2000,18 @@ input:checked + .slider:before {
 }
 </style>
 
-<style scoped>
-/* Poetry detail dashboard: final layout authority. */
-.poem-detail{
-  --pd-ink:#173331;
-  --pd-muted:#5f7470;
-  --pd-jade:#286e67;
-  --pd-jade-dark:#18544f;
-  --pd-gold:#b67b35;
-  --pd-glass:rgba(240,247,243,.54);
-  --pd-glass-strong:rgba(246,249,246,.66);
-  --pd-line:rgba(255,255,255,.72);
-  --pd-radius:20px;
-  --pd-gap:14px;
-  --pd-shadow:0 14px 36px rgba(25,66,60,.11);
-  width:100%!important;
-  max-width:none!important;
-  padding:102px 0 30px!important;
-  overflow-x:clip;
-}
-.poem-glass-shell{
-  width:min(1760px,calc(100vw - 64px));
-  gap:var(--pd-gap);
-}
-.first-screen-grid{
-  grid-template-columns:minmax(0,1.325fr) minmax(430px,1fr);
-  align-items:start;
-  gap:var(--pd-gap);
-}
-.main-study-column,.side-study-column,.learning-main-stack,.learning-side-stack{gap:var(--pd-gap)}
-.poem-detail .glass-card{
-  border:1px solid var(--pd-line)!important;
-  border-radius:var(--pd-radius)!important;
-  background:linear-gradient(135deg,rgba(248,251,248,.58),rgba(235,244,240,.44))!important;
-  box-shadow:var(--pd-shadow),inset 0 1px 0 rgba(255,255,255,.76)!important;
-  backdrop-filter:blur(16px) saturate(1.12)!important;
-  -webkit-backdrop-filter:blur(16px) saturate(1.12)!important;
-}
-.soft-button,.primary-pill,.gold-pill{min-height:34px;padding-inline:14px;border-radius:11px;font-size:12px}
-.primary-pill,.gold-pill{border-radius:999px}
-.section-kicker{margin-bottom:3px;font-size:9px;letter-spacing:.16em}
-.section-heading h2,.action-card h2,.story-card h2{font-size:18px}
-.tutor-glass{height:246px;padding:17px 20px;overflow:hidden}
-.tutor-body{display:grid;grid-template-columns:188px minmax(0,1fr);gap:14px;height:174px;margin-top:10px}
-.suggested-questions{display:grid;align-content:start;gap:6px;margin:0;padding-right:14px;border-right:1px solid rgba(42,88,83,.14)}
-.suggested-questions>span{margin-bottom:1px;color:var(--pd-muted);font-size:10px}
-.suggested-questions button{width:100%;padding:7px 9px;border-radius:9px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tutor-conversation{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0;min-height:0}
-.chat-scroll{align-content:start;max-height:none;min-height:0;overflow:auto;padding:0 3px 4px}
-.chat-bubble{max-width:94%;padding:9px 12px;font-size:11px;line-height:1.5}
-.chat-bubble.bot:first-child{max-height:96px;overflow:hidden}
-.chat-compose{margin-top:7px;gap:8px}.chat-compose input{height:36px;border-radius:11px}
-.action-card{height:139px;padding:17px 20px;gap:9px}.action-card p{margin-top:4px;font-size:11px;line-height:1.5}.action-card>*{max-width:68%}
-.illustrated-card::after{inset-left:42%;opacity:.9}
-.generated-copy,.personalized-result{max-height:74px;padding:9px;font-size:10px}
-.learning-grid{
-  display:grid;
-  grid-template-columns:minmax(0,1.32fr) minmax(390px,1fr);
-  align-items:start;
-  gap:var(--pd-gap);
-}
-.learning-main-stack,.learning-side-stack{display:contents}
-.recitation-glass{grid-column:1;grid-row:1;min-height:262px;padding:18px 20px}
-.poet-profile-glass{grid-column:2;grid-row:1;min-height:262px;padding:18px 20px}
-.recite-assessment{grid-column:1;grid-row:2;min-height:260px;padding:18px 20px}
-.similar-glass{grid-column:2;grid-row:2;min-height:260px;padding:18px 20px}
-.cloze-poem{margin-top:11px;padding:14px 18px;border-radius:14px}.cloze-poem p{margin:3px 0;font-size:clamp(17px,1.35vw,22px);line-height:1.58}
-.cloze-blank{min-width:150px;padding:3px 8px}.recitation-glass footer{margin-top:8px}
-.recite-assessment textarea{height:118px;margin-top:10px;padding:12px 14px;border-radius:13px;resize:none;line-height:1.65}
-.assessment-footer{margin-top:7px}.assessment-result{margin-top:9px;padding:10px;max-height:104px;overflow:auto}
-.poet-profile-body{grid-template-columns:104px 1fr;gap:17px;margin-top:10px}.poet-profile-body img{width:104px;height:104px}.poet-profile-body p{margin-top:7px;line-height:1.62}
-.similar-glass{gap:7px}.similar-row{grid-template-columns:120px 1fr 14px;min-height:55px;padding:9px 12px;border-radius:12px}.similar-row strong{font-size:14px}
-.story-card-grid{grid-template-columns:repeat(3,1fr);gap:var(--pd-gap)}
-.story-card{min-height:190px;padding:20px}.story-card>p{font-size:11px;line-height:1.55}.story-card .generated-copy{max-height:108px}
-.background-container::after{background:linear-gradient(180deg,rgba(229,240,236,.16),rgba(241,245,241,.08) 40%,rgba(32,78,70,.06))}
-@media(max-width:1280px){
-  .poem-glass-shell{width:min(1180px,calc(100vw - 32px))}
-  .first-screen-grid{grid-template-columns:minmax(0,1.25fr) minmax(380px,.9fr)}
-  .learning-grid{grid-template-columns:minmax(0,1.15fr) minmax(360px,.9fr)}
-}
-@media(max-width:980px){
-  .first-screen-grid,.learning-grid{grid-template-columns:1fr}
-  .side-study-column{grid-template-columns:1fr 1fr}
-  .side-study-column>:first-child{grid-column:1/-1}
-  .learning-main-stack,.learning-side-stack{display:grid;gap:var(--pd-gap)}
-  .recitation-glass,.poet-profile-glass,.recite-assessment,.similar-glass{grid-column:auto;grid-row:auto}
-  .story-card-grid{grid-template-columns:1fr}
-}
-@media(max-width:720px){
-  .poem-detail{padding-top:146px!important}.poem-glass-shell{width:calc(100vw - 20px)}
-  .side-study-column{grid-template-columns:1fr}.side-study-column>:first-child{grid-column:auto}
-  .tutor-glass{height:auto}.tutor-body{grid-template-columns:1fr;height:auto}.suggested-questions{grid-template-columns:1fr 1fr;padding:0 0 10px;border-right:0;border-bottom:1px solid rgba(42,88,83,.14)}.suggested-questions>span{grid-column:1/-1}
-  .chat-scroll{max-height:180px}.story-card{min-height:180px}
-}
-</style>
+
 
 <style scoped>
-.poem-detail{
-  --pd-ink:#173331;--pd-muted:#637773;--pd-jade:#286e67;--pd-jade-dark:#18544f;--pd-gold:#b67b35;
-  --pd-glass:rgba(241,247,244,.56);--pd-line:rgba(255,255,255,.72);--pd-shadow:0 18px 48px rgba(25,66,60,.13);
-  width:100%;max-width:none;min-height:100vh;padding:116px 0 72px!important;color:var(--pd-ink);overflow-x:clip;
-  font-family:'Noto Sans SC','Microsoft YaHei',sans-serif;
-}
-.poem-detail>.back-btn,.poem-detail>.exit-immersive-btn,.poem-layout{display:none!important}
-.poem-glass-shell{position:relative;z-index:4;width:min(1840px,calc(100vw - 48px));margin:0 auto;display:grid;gap:18px}
-.first-screen-grid{display:grid;grid-template-columns:minmax(0,1.48fr) minmax(420px,1fr);gap:18px}
-.main-study-column,.side-study-column,.learning-main-stack,.learning-side-stack{display:grid;align-content:start;gap:18px;min-width:0}
-.poem-detail .glass-card{border:1px solid var(--pd-line)!important;border-radius:26px;background:linear-gradient(135deg,rgba(247,250,246,.6),rgba(238,245,240,.46))!important;box-shadow:var(--pd-shadow),inset 0 1px 0 rgba(255,255,255,.7)!important;backdrop-filter:blur(22px) saturate(1.16)!important;-webkit-backdrop-filter:blur(22px) saturate(1.16)!important}
-.soft-button,.primary-pill,.gold-pill{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:39px;padding:0 17px;border:1px solid rgba(255,255,255,.72);border-radius:14px;background:rgba(248,251,249,.7);color:var(--pd-ink);box-shadow:0 7px 16px rgba(25,65,58,.08);font:500 13px/1 'Noto Sans SC',sans-serif;cursor:pointer;transition:transform .2s ease,background .2s ease,box-shadow .2s ease}
-.soft-button:hover,.primary-pill:hover,.gold-pill:hover{transform:translateY(-2px);box-shadow:0 10px 20px rgba(25,65,58,.14)}
-.soft-button:disabled,.primary-pill:disabled,.gold-pill:disabled{opacity:.55;cursor:not-allowed;transform:none}.soft-button.compact{min-height:33px;padding:0 12px;border-radius:999px;font-size:11px}
-.primary-pill{border-color:rgba(25,86,78,.34);border-radius:999px;background:linear-gradient(180deg,#347f75,#1f625b);color:#fff}.gold-pill{border-color:rgba(163,105,39,.32);border-radius:999px;background:linear-gradient(180deg,#ca9452,#ae7431);color:#fff}
-.section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.section-kicker{display:block;margin-bottom:5px;color:var(--pd-jade);font-size:10px;font-weight:700;letter-spacing:.2em;text-transform:uppercase}.section-heading h2,.action-card h2,.story-card h2{margin:0;color:var(--pd-ink);font:600 20px/1.35 'Noto Serif SC','Songti SC',serif;letter-spacing:.06em}
-.section-heading p,.action-card p,.story-card p{color:var(--pd-muted)}
-.tutor-glass{padding:22px 24px}.auto-switch{display:inline-flex;align-items:center;gap:8px;color:var(--pd-muted);font-size:11px;white-space:nowrap;cursor:pointer}.auto-switch input{position:absolute;opacity:0}.auto-switch span{position:relative;width:34px;height:19px;border-radius:999px;background:rgba(53,93,88,.18);transition:.2s}.auto-switch span::after{content:'';position:absolute;top:3px;left:3px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.16);transition:.2s}.auto-switch input:checked+span{background:var(--pd-jade)}.auto-switch input:checked+span::after{transform:translateX(15px)}
-.suggested-questions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.suggested-questions button,.speak-link{border:1px solid rgba(45,100,94,.14);border-radius:999px;background:rgba(248,251,249,.54);color:#3f6662;font-size:11px;cursor:pointer}.suggested-questions button{padding:7px 11px}.chat-scroll{display:grid;gap:9px;max-height:260px;overflow:auto;padding:4px 2px 8px}.chat-bubble{max-width:88%;padding:12px 15px;border:1px solid rgba(255,255,255,.64);border-radius:8px 16px 16px;background:rgba(255,255,255,.55);color:#405955;font-size:12px;line-height:1.65}.chat-bubble.user{justify-self:end;border-radius:16px 8px 16px;background:rgba(45,112,104,.82);color:#fff}.speak-link{display:block;margin-top:8px;padding:5px 9px}.chat-compose{display:grid;grid-template-columns:1fr auto;gap:10px;margin-top:12px}.chat-compose input{min-width:0;height:43px;padding:0 16px;border:1px solid rgba(255,255,255,.7);border-radius:15px;outline:0;background:rgba(250,252,251,.64);color:var(--pd-ink)}.chat-compose input:focus{border-color:rgba(40,110,103,.42);box-shadow:0 0 0 3px rgba(40,110,103,.08)}
-.action-card{position:relative;padding:22px;display:grid;gap:15px;overflow:hidden}.action-card>*{position:relative;z-index:2;max-width:62%}.action-card p{margin:7px 0 0;font-size:12px;line-height:1.65}.accent-jade{background:linear-gradient(115deg,rgba(229,242,237,.62),rgba(247,244,232,.52))}.accent-gold{background:linear-gradient(115deg,rgba(246,238,218,.62),rgba(242,247,243,.5))}.illustrated-card::after{content:'';position:absolute;z-index:1;inset:0 0 0 34%;pointer-events:none;background-position:right center;background-repeat:no-repeat;background-size:contain;filter:saturate(.82)}.analysis-card::after{background-image:url('../assets/poem-detail/analysis-scroll.png')}.learning-map-card::after{background-image:url('../assets/poem-detail/learning-map.png')}.generated-copy,.personalized-result{max-height:330px;overflow:auto;padding:14px;border-radius:16px;background:rgba(255,255,255,.48);color:#415854;font-size:12px;line-height:1.75}.personalized-result{display:grid;gap:10px;max-width:100%}.weak-tags,.error-tags{display:flex;flex-wrap:wrap;gap:7px}.weak-tags span,.error-tags span{padding:5px 9px;border:1px solid rgba(50,99,92,.14);border-radius:999px;background:rgba(255,255,255,.46);color:#46655f;font-size:10px}.inline-error{color:#985456!important}
-.learning-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(380px,.9fr);gap:18px}.recitation-glass,.recite-assessment,.poet-profile-glass,.similar-glass{padding:22px 24px}.cloze-actions{display:flex;align-items:center;gap:10px}.cloze-poem{margin-top:15px;padding:22px;border:1px solid rgba(255,255,255,.68);border-radius:18px;background:rgba(255,255,255,.36);text-align:center}.cloze-poem p{margin:7px 0;color:var(--pd-ink);font:500 clamp(18px,1.6vw,25px)/1.7 'Noto Serif SC','Songti SC',serif;letter-spacing:.13em}.cloze-blank{min-width:190px;padding:5px 10px;border:0;border-bottom:1px dashed rgba(43,98,91,.38);background:transparent;color:var(--pd-muted);font:inherit;letter-spacing:.14em;cursor:pointer}.cloze-blank.revealed{color:var(--pd-ink);background:rgba(255,255,255,.4);border-radius:8px}.recitation-glass footer{display:flex;justify-content:space-between;gap:16px;margin-top:12px;color:var(--pd-muted);font-size:10px}.recitation-glass footer strong{color:#45635f}.recite-assessment textarea{width:100%;margin-top:14px;padding:16px;border:1px solid rgba(255,255,255,.68);border-radius:18px;resize:vertical;outline:0;background:rgba(255,255,255,.42);color:var(--pd-ink);font:14px/1.8 'Noto Serif SC','Songti SC',serif}.assessment-footer{display:flex;align-items:center;justify-content:flex-end;gap:14px;margin-top:10px;color:var(--pd-muted);font-size:10px}.assessment-result{margin-top:15px;padding:16px;border-radius:17px;background:rgba(255,255,255,.42);color:#405854;font-size:12px}.assessment-result>strong{color:var(--pd-jade);font-size:18px}.assessment-result p{line-height:1.7}
-.poet-profile-body{display:grid;grid-template-columns:112px 1fr;gap:20px;align-items:center;margin-top:14px}.poet-profile-body img{width:112px;height:112px;object-fit:cover;border:1px solid rgba(255,255,255,.76);border-radius:50%;box-shadow:0 10px 24px rgba(29,70,64,.12)}.poet-profile-body h3{margin:0 0 8px;font:600 18px 'Noto Serif SC','Songti SC',serif}.poet-profile-body p{margin:10px 0 0;color:var(--pd-muted);font-size:12px;line-height:1.75}.similar-glass{display:grid;gap:9px}.similar-row{position:relative;isolation:isolate;display:grid;grid-template-columns:132px 1fr 16px;align-items:center;gap:12px;width:100%;min-height:65px;padding:13px 14px;border:1px solid rgba(255,255,255,.66);border-radius:15px;overflow:hidden;background:rgba(255,255,255,.38);color:var(--pd-ink);text-align:left;cursor:pointer}.similar-row::before{content:'';position:absolute;z-index:-2;inset:0;background-position:center;background-size:cover;opacity:.55;transition:opacity .25s,transform .35s}.similar-row::after{content:'';position:absolute;z-index:-1;inset:0;background:linear-gradient(90deg,rgba(248,250,246,.94) 0 34%,rgba(248,250,246,.68) 70%,rgba(248,250,246,.26))}.similar-art-0::before{background-image:url('../assets/poem-detail/similar-night.png')}.similar-art-1::before{background-image:url('../assets/poem-detail/similar-spring.png')}.similar-art-2::before{background-image:url('../assets/poem-detail/similar-waterfall.png')}.similar-row:hover::before{opacity:.72;transform:scale(1.02)}.similar-row span{display:grid;gap:3px}.similar-row strong{font:600 15px 'Noto Serif SC','Songti SC',serif}.similar-row small,.similar-row p{color:var(--pd-muted);font-size:10px}.similar-row p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.similar-row b{font-size:21px}.empty-copy{color:var(--pd-muted);font-size:12px}
-.story-card-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.story-card{position:relative;isolation:isolate;display:flex;flex-direction:column;align-items:flex-start;min-height:215px;padding:24px;overflow:hidden;background:linear-gradient(135deg,rgba(238,246,241,.62),rgba(240,239,224,.48))}.story-card>*{position:relative;z-index:2;max-width:63%}.story-card::after{content:'';position:absolute;z-index:0;inset:0;background-position:center;background-size:cover;opacity:.74}.story-card::before{content:'';position:absolute;z-index:1;inset:0;background:linear-gradient(90deg,rgba(244,248,243,.94) 0 40%,rgba(244,248,243,.5) 70%,rgba(244,248,243,.1))}.creation-art::after{background-image:url('../assets/poem-detail/creation-background.png')}.story-art::after{background-image:url('../assets/poem-detail/poetry-story.png')}.guide-art::after{background-image:url('../assets/poem-detail/recitation-guide.png');background-position:right center;background-size:contain;background-repeat:no-repeat;opacity:.9}.story-card.gold{background:linear-gradient(135deg,rgba(247,239,218,.66),rgba(244,247,240,.5))}.story-card>p{font-size:12px;line-height:1.7}.story-card>.primary-pill,.story-card>.gold-pill,.card-button-row{margin-top:auto}.card-button-row{display:flex;flex-wrap:wrap;gap:8px}.story-card .generated-copy{width:100%;margin:10px 0;max-height:180px}.immersive-background,.background-container{position:fixed!important;inset:0!important;z-index:0!important}.background-container::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(225,239,234,.3),rgba(238,243,237,.16) 38%,rgba(32,78,70,.08));pointer-events:none}.background-image{width:100%;height:100%;object-fit:cover}.loading-overlay{display:none!important}
-@media(max-width:1280px){.poem-glass-shell{width:min(1180px,calc(100vw - 32px))}.first-screen-grid{grid-template-columns:minmax(0,1.3fr) minmax(370px,.8fr)}.learning-grid{grid-template-columns:1fr}.story-card-grid{grid-template-columns:1fr 1fr}.story-card:last-child{grid-column:1/-1}}
-@media(max-width:980px){.first-screen-grid{grid-template-columns:1fr}.side-study-column{grid-template-columns:1fr 1fr}.side-study-column>:first-child{grid-column:1/-1}.story-card-grid{grid-template-columns:1fr}.story-card:last-child{grid-column:auto}}
-@media(max-width:720px){.poem-detail{padding-top:150px!important}.poem-glass-shell{width:calc(100vw - 20px)}.side-study-column{grid-template-columns:1fr}.side-study-column>:first-child{grid-column:auto}.poem-detail .glass-card{border-radius:20px!important}.learning-grid{grid-template-columns:1fr}.story-card-grid{grid-template-columns:1fr}.section-heading{align-items:flex-start;flex-direction:column}.cloze-actions{width:100%;justify-content:space-between}.recitation-glass footer{flex-direction:column}.poet-profile-body{grid-template-columns:82px 1fr}.poet-profile-body img{width:82px;height:82px}.similar-row{grid-template-columns:112px minmax(0,1fr) 14px}}
-</style>
-
-<style scoped>
-/* 诗境详情页：一套更安静、更有呼吸感的玻璃纸面 */
+/* 详情页场景层：仅保留当前页面实际使用的背景与浮层样式。 */
 .poem-detail {
   --ink: #173c3b;
-  --ink-soft: #55716d;
   --paper: rgba(250, 248, 239, .74);
-  --paper-strong: rgba(255, 253, 247, .84);
   --line: rgba(255, 255, 255, .64);
-  --jade: #2e8575;
-  --gold: #ba8b49;
   position: relative;
   z-index: 0;
-  max-width: 1240px;
   min-height: 100dvh;
   margin: 0 auto;
-  padding: 116px 24px 84px;
   color: var(--ink);
   font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   isolation: isolate;
@@ -5627,8 +2045,6 @@ input:checked + .slider:before {
   z-index: -1;
 }
 
-.immersive-mode { min-height: 100dvh; overflow: visible; }
-
 .immersive-background {
   position: fixed;
   inset: 0;
@@ -5654,20 +2070,29 @@ input:checked + .slider:before {
   content: '';
   z-index: 3;
   background:
-    linear-gradient(180deg, rgba(23, 59, 57, .34) 0%, rgba(245, 238, 218, .08) 42%, rgba(26, 61, 58, .3) 100%),
-    linear-gradient(90deg, rgba(21, 54, 54, .3), transparent 42%, rgba(233, 190, 121, .15));
+    linear-gradient(180deg, rgba(23, 59, 57, .2) 0%, rgba(245, 238, 218, .04) 42%, rgba(26, 61, 58, .18) 100%),
+    linear-gradient(90deg, rgba(21, 54, 54, .18), transparent 42%, rgba(233, 190, 121, .1));
 }
 
 .background-container::after {
   content: '';
   z-index: 4;
   opacity: .32;
-  background-image: radial-gradient(rgba(255,255,255,.28) .7px, transparent .7px);
+  background-image: radial-gradient(rgba(255, 255, 255, .28) .7px, transparent .7px);
   background-size: 4px 4px;
   mix-blend-mode: soft-light;
 }
 
-.default-background { z-index: 0; background: #b9c7bf; }
+/* 生成图就绪后直接展示原图，不再叠加全屏洗色和颗粒层。 */
+.immersive-background.has-generated-background .background-container::before,
+.immersive-background.has-generated-background .background-container::after {
+  display: none;
+}
+
+.default-background {
+  z-index: 0;
+  background: #b9c7bf;
+}
 
 .ancient-style-bg {
   opacity: 1;
@@ -5684,264 +2109,54 @@ input:checked + .slider:before {
   filter: saturate(.78) contrast(.93) brightness(.92);
   transform: scale(1.04);
   transition: opacity 1.2s ease, transform 8s ease;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
 }
 
-.background-image.fade-in { opacity: .86; transform: scale(1); }
-.loading-overlay { z-index: 2; background: transparent; }
-.exit-immersive-btn { display: none; }
-
-.back-btn {
-  position: absolute;
-  top: 116px;
-  left: 24px;
-  z-index: 12;
-  border: 1px solid rgba(255,255,255,.64) !important;
-  border-radius: 999px !important;
-  padding: 8px 14px !important;
-  color: var(--ink) !important;
-  background: rgba(255,255,255,.36) !important;
-  box-shadow: 0 8px 22px rgba(31, 68, 61, .1) !important;
-  backdrop-filter: blur(16px) saturate(130%);
-  -webkit-backdrop-filter: blur(16px) saturate(130%);
-}
-
-.poem-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(340px, .92fr);
-  align-items: start;
-  gap: 18px;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
+.background-image.fade-in {
   opacity: 1;
-  filter: none;
+  transform: scale(1);
 }
 
-.left-column,
-.right-column {
-  display: grid;
-  grid-auto-rows: max-content;
-  gap: 18px;
-  min-width: 0;
+.loading-overlay {
+  z-index: 2;
+  background: transparent;
 }
 
-.poem-header,
-.poem-text,
-.recitation-section,
-.recite-check-card,
-.poem-background-card,
-.poem-story-card,
-.recitation-guide-card,
-.tutor-chat-container,
-.ai-explanation,
-.personalized-tutor-section,
-.author-profile,
-.similar-poems {
-  position: relative;
+.selection-popup {
+  z-index: 100;
   overflow: hidden;
-  border: 1px solid var(--line) !important;
-  border-radius: 24px !important;
-  background: linear-gradient(135deg, rgba(255,255,255,.66), rgba(244, 247, 237, .43)) !important;
-  box-shadow: 0 16px 42px rgba(23, 62, 57, .12), inset 0 1px 0 rgba(255,255,255,.72) !important;
-  backdrop-filter: blur(24px) saturate(125%);
-  -webkit-backdrop-filter: blur(24px) saturate(125%);
-  transition: transform .35s ease, box-shadow .35s ease, border-color .35s ease, background-color .35s ease;
+  border: 1px solid rgba(255, 255, 255, .76) !important;
+  border-radius: 16px !important;
+  background: rgba(244, 249, 243, .9) !important;
+  box-shadow: 0 18px 38px rgba(22, 62, 56, .18) !important;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
 }
 
-.poem-header::before,
-.poem-text::before,
-.recitation-section::before,
-.recite-check-card::before,
-.poem-background-card::before,
-.poem-story-card::before,
-.recitation-guide-card::before,
-.tutor-chat-container::before,
-.ai-explanation::before,
-.personalized-tutor-section::before,
-.author-profile::before,
-.similar-poems::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 12%;
-  width: 40%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.95), transparent);
-}
-
-.poem-header:hover,
-.poem-text:hover,
-.recitation-section:hover,
-.recite-check-card:hover,
-.poem-background-card:hover,
-.poem-story-card:hover,
-.recitation-guide-card:hover,
-.tutor-chat-container:hover,
-.ai-explanation:hover,
-.personalized-tutor-section:hover,
-.author-profile:hover,
-.similar-poems:hover {
-  transform: translateY(-3px);
-  border-color: rgba(255,255,255,.9) !important;
-  box-shadow: 0 22px 52px rgba(23, 62, 57, .16), inset 0 1px 0 rgba(255,255,255,.85) !important;
-}
-
-.poem-header {
-  min-height: 214px;
-  padding: 30px 34px 28px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  background:
-    radial-gradient(circle at 86% 15%, rgba(248, 213, 152, .44), transparent 30%),
-    linear-gradient(130deg, rgba(226, 239, 226, .64), rgba(255, 248, 226, .38)) !important;
-}
-
-.title-container { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 6px; }
-.poem-title {
-  margin: 0 !important;
-  color: var(--ink) !important;
-  font-family: 'Noto Serif SC', 'Songti SC', serif !important;
-  font-size: clamp(38px, 5vw, 68px) !important;
-  font-weight: 600;
-  letter-spacing: .12em;
-  line-height: 1.2;
-  text-shadow: 0 4px 18px rgba(20, 67, 63, .1);
-}
-
-.poem-author { margin: 0 !important; color: var(--ink-soft) !important; font-size: 14px; letter-spacing: .18em; }
-.collect-btn { flex: 0 0 auto; border-radius: 999px !important; padding: 9px 15px !important; color: #9e5c50 !important; background: rgba(255, 245, 237, .58) !important; border: 1px solid rgba(222, 155, 135, .35) !important; box-shadow: none !important; }
-.collect-btn.collected { color: #fff !important; background: #bb7263 !important; }
-
-.poem-text {
-  min-height: 368px;
-  margin: 0;
-  padding: 44px 48px 70px;
-  background: rgba(255, 252, 243, .72) !important;
-}
-
-.poem-text::after {
-  content: '◌';
-  position: absolute;
-  right: 26px;
-  top: 20px;
-  color: rgba(46, 133, 117, .32);
-  font-size: 30px;
-}
-
-.poem-line { margin: 10px 0 !important; color: var(--ink) !important; font-family: 'Noto Serif SC', 'Songti SC', serif !important; font-size: clamp(22px, 2.3vw, 30px) !important; font-weight: 500; line-height: 1.85 !important; letter-spacing: .2em; text-align: center; }
-.poem-char { padding: 0 1px; }
-.poem-text.blurred { filter: blur(6px); }
-.read-btn { left: 50%; right: auto; bottom: 22px; transform: translateX(-50%); padding: 9px 18px !important; color: var(--jade) !important; background: rgba(231, 246, 239, .68) !important; border: 1px solid rgba(76, 147, 126, .28) !important; box-shadow: none !important; }
-.read-btn:hover { transform: translateX(-50%) translateY(-2px) !important; }
-
-.section-title { display: flex; align-items: center; gap: 9px; margin: 0 0 16px !important; color: var(--ink) !important; font-family: 'Noto Serif SC', 'Songti SC', serif !important; font-size: 20px !important; font-weight: 600; letter-spacing: .05em; }
-.section-title::first-letter { color: var(--gold); }
-.tutor-chat-container, .ai-explanation, .personalized-tutor-section, .author-profile, .similar-poems { padding: 24px; }
-.recitation-section, .recite-check-card, .poem-background-card, .poem-story-card, .recitation-guide-card { padding: 24px; }
-.tutor-subtitle, .author-dynasty, .similar-author { color: var(--ink-soft) !important; font-size: 13px; }
-
-.tutor-chat-container { min-height: 476px; background: rgba(231, 243, 237, .66) !important; }
-.chat-messages { min-height: 284px; max-height: 360px; padding: 12px !important; background: rgba(255,255,255,.28) !important; border: 1px solid rgba(255,255,255,.52) !important; border-radius: 16px !important; }
-.chat-message { font-size: 13px; border-radius: 16px !important; }
-.chat-message.bot { background: rgba(255,253,247,.72) !important; border-color: rgba(255,255,255,.62) !important; }
-.chat-message.user { background: rgba(61, 132, 116, .16) !important; border-color: rgba(61, 132, 116, .2) !important; }
-.message-content { color: var(--ink) !important; }
-.chat-input-area { border-top-color: rgba(41, 101, 89, .14) !important; }
-.tutor-input, .recitation-input, .recite-input { color: var(--ink) !important; background: rgba(255,255,255,.58) !important; border-color: rgba(69, 127, 112, .24) !important; }
-.send-btn, .ai-btn, .submit-btn, .recite-check-btn { border-radius: 999px !important; }
-.send-btn { color: #fff !important; background: var(--jade) !important; border-color: var(--jade) !important; box-shadow: 0 8px 18px rgba(46,133,117,.22) !important; }
-
-.recitation-controls { gap: 10px; margin-bottom: 16px; color: var(--ink-soft); font-size: 13px; }
-.refresh-btn { margin-left: auto; border-radius: 999px !important; color: #8d6a39 !important; background: rgba(250, 239, 206, .6) !important; border-color: rgba(188, 145, 75, .25) !important; box-shadow: none !important; }
-.recitation-content, .recite-check-content, .explanation-content, .tutor-content, .poem-background-content, .recitation-guide-content { background: rgba(255, 253, 247, .42) !important; border: 1px solid rgba(255,255,255,.54) !important; box-shadow: none !important; border-radius: 16px !important; }
-.recitation-content { padding: 18px !important; }
-.visible-line { color: var(--ink) !important; font-family: 'Noto Serif SC', 'Songti SC', serif; }
-.hidden-line { gap: 8px; }
-.slider { background: rgba(108, 131, 122, .35) !important; }
-input:checked + .slider { background: var(--jade) !important; }
-
-.ai-explanation { background: rgba(255, 247, 226, .63) !important; }
-.explanation-content { padding: 16px !important; margin-top: 12px; }
-.explanation-section h3, .result-title, .tutor-content h4, .guide-title { color: var(--ink) !important; font-family: 'Noto Serif SC', 'Songti SC', serif; font-size: 15px !important; }
-.explanation-section p, .explanation-section li, .story-text, .item-text, .guide-section p, .author-bio, .similar-content, .teaching-text { color: var(--ink-soft) !important; line-height: 1.85; }
-.questions-list { padding-left: 18px; }
-.question-item { margin: 7px 0; color: var(--ink-soft); }
-
-.poem-background-card { background: rgba(235, 242, 232, .65) !important; }
-.poem-story-card { background: rgba(239, 232, 241, .6) !important; }
-.recitation-guide-card { background: rgba(247, 238, 212, .64) !important; }
-.background-tips { border-radius: 14px !important; background: rgba(255, 247, 215, .58) !important; border-color: rgba(191, 151, 74, .2) !important; }
-
-.author-content { gap: 18px; align-items: center; }
-.author-avatar { flex: 0 0 82px; width: 82px; height: 82px; border: 1px solid rgba(190, 146, 73, .5) !important; background: rgba(252, 243, 217, .7) !important; box-shadow: none !important; }
-.author-info h3 { margin: 0 0 3px !important; color: var(--ink) !important; font-family: 'Noto Serif SC', 'Songti SC', serif; }
-.author-bio { font-size: 12px; }
-.similar-item { border-radius: 15px !important; border-color: rgba(255,255,255,.56) !important; background: rgba(255,253,247,.42) !important; }
-.similar-item:hover { background: rgba(255,255,255,.74) !important; border-color: rgba(46,133,117,.26) !important; }
-.similar-item h4 { margin-bottom: 5px !important; color: var(--ink) !important; font-family: 'Noto Serif SC', 'Songti SC', serif; }
-
-.selection-popup { z-index: 100; overflow: hidden; border: 1px solid rgba(255,255,255,.76) !important; border-radius: 16px !important; background: rgba(244, 249, 243, .9) !important; box-shadow: 0 18px 38px rgba(22,62,56,.18) !important; backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px); }
-.scene-toast { z-index: 120; border-radius: 999px !important; background: rgba(31, 82, 72, .88) !important; box-shadow: 0 12px 28px rgba(20,59,53,.2) !important; }
-
-@media (max-width: 980px) {
-  .poem-detail { padding-inline: 16px; }
-  .poem-layout { grid-template-columns: 1fr; }
-  .poem-title { font-size: clamp(36px, 8vw, 58px) !important; }
-  .right-column { grid-row: 1; }
-  .poem-header { min-height: 190px; }
+.scene-toast {
+  z-index: 120;
+  border-radius: 999px !important;
+  background: rgba(31, 82, 72, .88) !important;
+  box-shadow: 0 12px 28px rgba(20, 59, 53, .2) !important;
 }
 
 @media (max-width: 620px) {
-  .poem-detail { padding-top: 150px; padding-inline: 10px; }
-  .back-btn { top: 126px; left: 10px; }
-  .poem-header, .poem-text, .recitation-section, .recite-check-card, .poem-background-card, .poem-story-card, .recitation-guide-card, .tutor-chat-container, .ai-explanation, .personalized-tutor-section, .author-profile, .similar-poems { border-radius: 19px !important; padding: 20px; }
-  .title-container { align-items: flex-start; flex-direction: column; gap: 12px; }
-  .collect-btn { align-self: flex-start; }
-  .poem-text { min-height: 310px; padding: 34px 18px 66px; }
-  .poem-line { font-size: 21px !important; letter-spacing: .13em; }
-  .recitation-controls { align-items: flex-start; flex-wrap: wrap; }
-  .refresh-btn { width: 100%; margin-left: 0; }
-  .chat-messages { max-height: 300px; }
   .poem-detail::after { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .background-image { transition: opacity .2s ease; transform: none; animation: none !important; }
-  .poem-header, .poem-text, .recitation-section, .recite-check-card, .poem-background-card, .poem-story-card, .recitation-guide-card, .tutor-chat-container, .ai-explanation, .personalized-tutor-section, .author-profile, .similar-poems { transition: none; }
+  .background-image {
+    transition: opacity .2s ease;
+    transform: none;
+    animation: none !important;
+  }
 }
 </style>
 
-<style scoped>
-/* Final cascade guard for the compact dashboard above legacy compatibility CSS. */
-.poem-detail .analysis-card::after{background-image:url('../assets/poem-detail/analysis-scroll-v3.png');background-size:cover;mask-image:linear-gradient(90deg,transparent 0,#000 24%);-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 24%)}
-.poem-detail .ancient-style-bg{filter:saturate(.6) contrast(.86) brightness(1.19)}
-.poem-detail .action-card>.primary-pill,.poem-detail .action-card>.gold-pill{justify-self:start;width:auto;min-width:142px}
-.poem-detail .recitation-glass,.poem-detail .poet-profile-glass{min-height:300px;padding:20px 22px}
-.poem-detail .recite-assessment,.poem-detail .similar-glass{min-height:290px;padding:20px 22px}
-.poem-detail .story-card{min-height:220px;padding:22px}
-.poem-detail .knowledge-summary{min-height:120px}
-.poem-detail .poem-glass-shell{width:min(1760px,calc(100vw - 64px));gap:14px}
-.poem-detail .first-screen-grid{grid-template-columns:minmax(0,1.325fr) minmax(430px,1fr);align-items:start;gap:14px}
-.poem-detail .main-study-column,.poem-detail .side-study-column{gap:14px}
-.poem-detail .glass-card{border-radius:20px!important;background:linear-gradient(135deg,rgba(248,251,248,.58),rgba(235,244,240,.44))!important;box-shadow:0 14px 36px rgba(25,66,60,.11),inset 0 1px 0 rgba(255,255,255,.76)!important;backdrop-filter:blur(16px) saturate(1.12)!important;-webkit-backdrop-filter:blur(16px) saturate(1.12)!important}
-.poem-detail .soft-button,.poem-detail .primary-pill,.poem-detail .gold-pill{min-height:34px;padding-inline:14px;border-radius:11px;font-size:12px}.poem-detail .primary-pill,.poem-detail .gold-pill{border-radius:999px}
-.poem-detail .section-kicker{margin-bottom:3px;font-size:9px;letter-spacing:.16em}.poem-detail .section-heading h2,.poem-detail .action-card h2,.poem-detail .story-card h2{font-size:18px}
-.poem-detail .tutor-glass{height:246px;padding:17px 20px;overflow:hidden}.poem-detail .tutor-body{display:grid;grid-template-columns:188px minmax(0,1fr);gap:14px;height:174px;margin-top:10px}.poem-detail .suggested-questions{display:grid;align-content:start;gap:6px;margin:0;padding-right:14px;border-right:1px solid rgba(42,88,83,.14)}.poem-detail .suggested-questions>span{margin-bottom:1px;color:var(--pd-muted);font-size:10px}.poem-detail .suggested-questions button{width:100%;padding:7px 9px;border-radius:9px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.poem-detail .tutor-conversation{display:grid;grid-template-rows:minmax(0,1fr) auto;min-width:0;min-height:0}.poem-detail .chat-scroll{align-content:start;max-height:none;min-height:0;overflow:auto;padding:0 3px 4px}.poem-detail .chat-bubble{max-width:94%;padding:9px 12px;font-size:11px;line-height:1.5}.poem-detail .chat-bubble.bot:first-child{max-height:96px;overflow:hidden}.poem-detail .chat-compose{margin-top:7px;gap:8px}.poem-detail .chat-compose input{height:36px;border-radius:11px}
-.poem-detail .action-card{height:139px;padding:17px 20px;gap:9px}.poem-detail .action-card p{margin-top:4px;font-size:11px;line-height:1.5}.poem-detail .action-card>*{max-width:68%}.poem-detail .generated-copy,.poem-detail .personalized-result{max-height:74px;padding:9px;font-size:10px}
-.poem-detail .learning-grid{display:grid;grid-template-columns:minmax(0,1.32fr) minmax(390px,1fr);align-items:start;gap:14px}.poem-detail .learning-main-stack,.poem-detail .learning-side-stack{display:contents}.poem-detail .recitation-glass{grid-column:1;grid-row:1;min-height:262px;padding:18px 20px}.poem-detail .poet-profile-glass{grid-column:2;grid-row:1;min-height:262px;padding:18px 20px}.poem-detail .recite-assessment{grid-column:1;grid-row:2;min-height:260px;padding:18px 20px}.poem-detail .similar-glass{grid-column:2;grid-row:2;min-height:260px;padding:18px 20px}.poem-detail .cloze-poem{margin-top:11px;padding:14px 18px;border-radius:14px}.poem-detail .cloze-poem p{margin:3px 0;font-size:clamp(17px,1.35vw,22px);line-height:1.58}.poem-detail .cloze-blank{min-width:150px;padding:3px 8px}.poem-detail .recitation-glass footer{margin-top:8px}.poem-detail .recite-assessment textarea{height:118px;margin-top:10px;padding:12px 14px;border-radius:13px;resize:none;line-height:1.65}.poem-detail .assessment-footer{margin-top:7px}.poem-detail .assessment-result{margin-top:9px;padding:10px;max-height:104px;overflow:auto}.poem-detail .poet-profile-body{grid-template-columns:104px 1fr;gap:17px;margin-top:10px}.poem-detail .poet-profile-body img{width:104px;height:104px}.poem-detail .poet-profile-body p{margin-top:7px;line-height:1.62}.poem-detail .similar-glass{gap:7px}.poem-detail .similar-row{grid-template-columns:120px 1fr 14px;min-height:55px;padding:9px 12px;border-radius:12px}.poem-detail .similar-row strong{font-size:14px}
-.poem-detail .story-card-grid{grid-template-columns:repeat(3,1fr);gap:14px}.poem-detail .story-card{min-height:190px;padding:20px}.poem-detail .story-card>p{font-size:11px;line-height:1.55}.poem-detail .story-card .generated-copy{max-height:108px}
-.poem-detail .recitation-glass,.poem-detail .poet-profile-glass{min-height:300px;padding:20px 22px}.poem-detail .recite-assessment,.poem-detail .similar-glass{min-height:290px;padding:20px 22px}.poem-detail .story-card{min-height:220px;padding:22px}.poem-detail .knowledge-summary{min-height:120px}
-@media(max-width:1280px){.poem-detail .poem-glass-shell{width:min(1180px,calc(100vw - 32px))}.poem-detail .first-screen-grid{grid-template-columns:minmax(0,1.25fr) minmax(380px,.9fr)}.poem-detail .learning-grid{grid-template-columns:minmax(0,1.15fr) minmax(360px,.9fr)}}
-@media(max-width:980px){.poem-detail .first-screen-grid,.poem-detail .learning-grid{grid-template-columns:1fr}.poem-detail .side-study-column{grid-template-columns:1fr 1fr}.poem-detail .side-study-column>:first-child{grid-column:1/-1}.poem-detail .learning-main-stack,.poem-detail .learning-side-stack{display:grid;gap:14px}.poem-detail .recitation-glass,.poem-detail .poet-profile-glass,.poem-detail .recite-assessment,.poem-detail .similar-glass{grid-column:auto;grid-row:auto}.poem-detail .story-card-grid{grid-template-columns:1fr}}
-@media(max-width:720px){.poem-detail .poem-glass-shell{width:calc(100vw - 20px)}.poem-detail .side-study-column{grid-template-columns:1fr}.poem-detail .side-study-column>:first-child{grid-column:auto}.poem-detail .tutor-glass{height:auto}.poem-detail .tutor-body{grid-template-columns:1fr;height:auto}.poem-detail .suggested-questions{grid-template-columns:1fr 1fr;padding:0 0 10px;border-right:0;border-bottom:1px solid rgba(42,88,83,.14)}.poem-detail .suggested-questions>span{grid-column:1/-1}.poem-detail .chat-scroll{max-height:180px}.poem-detail .story-card{min-height:180px}}
-</style>
 
 <style scoped>
-/* Screenshot-faithful poetry detail system. This final layer intentionally replaces the legacy sizing cascade. */
+/* Current poetry detail layout system. */
 .poem-detail{
   --poetry-text-primary:#173432;
   --poetry-text-secondary:#49645f;
@@ -5990,6 +2205,7 @@ input:checked + .slider { background: var(--jade) !important; }
 
 .learning-overview{margin-top:0!important}
 .learning-grid,.story-card-grid,.knowledge-summary{width:100%!important;margin-right:auto!important;margin-left:auto!important}
+.learning-overview,.story-card-grid,.knowledge-summary{content-visibility:auto;contain-intrinsic-size:auto 420px}
 .learning-grid{display:grid!important;grid-template-columns:minmax(0,1.22fr) minmax(0,1fr)!important;gap:14px!important;align-items:start!important;margin-top:0!important}.learning-main-stack,.learning-side-stack{display:grid!important;gap:14px!important}.recitation-glass{min-height:300px!important;padding:22px 28px!important}.poet-profile-glass{min-height:246px!important;padding:22px 28px!important}.recite-assessment{min-height:314px!important;padding:22px 28px!important}.similar-glass{min-height:368px!important;padding:22px 24px!important}
 .recitation-glass,.poet-profile-glass,.recite-assessment,.similar-glass{grid-column:auto!important;grid-row:auto!important}
 .cloze-actions{display:flex;align-items:center;gap:18px}.auto-switch{display:inline-flex!important;align-items:center!important;gap:9px!important;color:var(--poetry-text-secondary)!important;font-size:13px!important}.auto-switch input{position:absolute!important;opacity:0!important;pointer-events:none!important}.auto-switch>span{position:relative!important;width:36px!important;height:21px!important;border-radius:999px!important;background:rgba(90,122,116,.28)!important;box-shadow:inset 0 1px 3px rgba(30,70,64,.15)!important}.auto-switch>span::after{content:'';position:absolute;top:3px;left:3px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(20,60,54,.2);transition:transform .2s ease}.auto-switch input:checked+span{background:var(--accent-primary)!important}.auto-switch input:checked+span::after{transform:translateX(15px)}
@@ -6000,6 +2216,10 @@ input:checked + .slider { background: var(--jade) !important; }
 
 .story-card-grid{display:grid!important;grid-template-columns:repeat(3,1fr)!important;gap:14px!important}.story-card{position:relative!important;isolation:isolate!important;display:flex!important;flex-direction:column!important;align-items:flex-start!important;min-height:210px!important;padding:24px 28px!important;overflow:hidden!important}.story-card>*{position:relative;z-index:2;max-width:66%!important}.story-card::before{content:''!important;position:absolute!important;z-index:1!important;inset:0!important;background:linear-gradient(90deg,rgba(244,249,247,.94) 0 40%,rgba(244,249,247,.54) 68%,transparent)!important}.story-card::after{content:''!important;position:absolute!important;z-index:0!important;inset:0!important;background-position:right center!important;background-size:cover!important;background-repeat:no-repeat!important;opacity:.88!important}.creation-art::after{background-image:url('../assets/poem-detail/creation-background.png')!important}.story-art::after{background-image:url('../assets/poem-detail/poetry-story.png')!important}.guide-art::after{background-image:url('../assets/poem-detail/recitation-guide.png')!important;background-size:contain!important}.story-card>p{margin:12px 0!important;color:var(--poetry-text-secondary)!important;font-size:13px!important;line-height:1.7!important}.story-card>.primary-pill,.story-card>.gold-pill,.card-button-row{margin-top:auto!important}.card-button-row{display:flex!important;flex-wrap:wrap!important;gap:8px!important}.story-card .generated-copy{max-height:94px!important;margin:8px 0!important;overflow:auto!important;font-size:12px!important}
 .knowledge-summary{height:142px!important;min-height:142px!important;margin-top:0!important}
+.poem-glass-shell>.learning-overview{content-visibility:auto;contain-intrinsic-block-size:103px}
+.second-screen-grid{content-visibility:auto;contain-intrinsic-block-size:620px}
+.story-card-grid{content-visibility:auto;contain-intrinsic-block-size:210px}
+.poem-glass-shell>.knowledge-summary{content-visibility:auto;contain-intrinsic-block-size:142px}
 .floating-companion{position:fixed!important;z-index:20!important;right:38px!important;bottom:24px!important;display:grid!important;grid-template-columns:150px 120px!important;align-items:end!important;width:286px!important;height:126px!important;padding:16px 8px 10px 18px!important;overflow:hidden!important}.floating-companion>div{position:relative;z-index:2;display:grid;gap:4px;align-self:center}.floating-companion span,.floating-companion strong{color:var(--poetry-text-primary);font-size:13px}.floating-companion strong{font:600 14px 'Noto Serif SC','Songti SC',serif}.floating-companion button{min-height:34px!important;margin-top:4px!important;padding-left:15px!important;font-size:12px!important}.floating-companion img{position:absolute;right:-4px;bottom:-34px;width:132px;height:152px;object-fit:contain;filter:drop-shadow(0 8px 16px rgba(23,62,56,.16))}
 
 @media(max-width:1450px){.poem-glass-shell{width:min(1360px,calc(100vw - 48px))!important}.learning-grid,.story-card-grid,.knowledge-summary{width:100%!important}.first-screen-grid{grid-template-columns:minmax(0,1.2fr) minmax(390px,.9fr)!important}.learning-overview{overflow-x:auto}.floating-companion{right:18px}}
@@ -6008,8 +2228,8 @@ input:checked + .slider { background: var(--jade) !important; }
 @media(prefers-reduced-motion:reduce){.soft-button,.primary-pill,.gold-pill,.similar-row,.digital-human nav button{transition:none!important}}
 
 /* 2026 detail-page composition: stable two-column learning workspace */
-.first-screen-grid>.main-study-column{grid-template-rows:300px 236px 145px!important}
-.first-screen-grid>.side-study-column{grid-template-rows:536px 232px!important}
+.first-screen-grid>.main-study-column{grid-template-rows:300px 236px auto!important}
+.first-screen-grid>.side-study-column{grid-template-rows:536px auto!important}
 .tutor-glass{display:flex!important;flex-direction:column!important;height:536px!important;padding:22px 26px 18px!important;overflow:hidden!important}
 .tutor-title-copy{display:flex!important;align-items:center!important;gap:10px!important}.tutor-title-copy>span{display:grid!important;gap:3px!important}.tutor-title-copy h2{margin:0!important}.tutor-title-copy small{color:var(--poetry-text-muted)!important;font-size:12px!important;font-weight:400!important;letter-spacing:.02em!important}
 .tutor-body{display:grid!important;grid-template-columns:190px minmax(0,1fr)!important;gap:18px!important;flex:1!important;height:auto!important;min-height:0!important;margin-top:15px!important}
@@ -6017,10 +2237,12 @@ input:checked + .slider { background: var(--jade) !important; }
 .chat-scroll{display:flex!important;flex-direction:column!important;gap:8px!important;height:100%!important;min-height:0!important;max-height:none!important;overflow-y:auto!important;overscroll-behavior:contain!important;padding:2px 8px 8px 2px!important;scrollbar-gutter:stable!important}
 .suggested-questions{display:grid!important;gap:8px!important;margin:0 0 3px!important;padding:0!important;border:0!important}.suggested-questions>span{margin:0 0 2px!important;padding:11px 14px!important;border:1px solid rgba(255,255,255,.72)!important;border-radius:15px!important;background:rgba(249,252,251,.56)!important;color:var(--poetry-text-secondary)!important;font-size:12px!important;line-height:1.55!important}.suggested-questions button{width:100%!important;min-height:35px!important;padding:7px 13px!important;border:1px solid rgba(42,91,84,.12)!important;border-radius:999px!important;background:rgba(250,252,251,.58)!important;color:var(--poetry-text-secondary)!important;font-size:12px!important;text-align:left!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;transition:background .18s ease,color .18s ease,transform .18s ease!important}.suggested-questions button:hover{background:rgba(225,241,236,.86)!important;color:var(--accent-primary)!important;transform:translateX(2px)!important}
 .chat-bubble{flex:0 0 auto!important;max-width:94%!important;max-height:none!important;overflow:visible!important}.chat-bubble.user{align-self:flex-end!important}.chat-bubble.bot:first-of-type{max-height:none!important;overflow:visible!important}.chat-compose{position:relative!important;z-index:2!important;margin-top:8px!important;padding-top:10px!important;border-top:1px solid rgba(39,91,84,.1)!important}.chat-compose input{height:44px!important}.chat-compose .primary-pill{min-width:92px!important}
-.learning-map-card{display:grid!important;grid-template-columns:minmax(0,1fr) auto!important;grid-template-rows:1fr auto!important;height:145px!important;min-height:145px!important;padding:20px 28px!important;overflow:hidden!important}.learning-map-card>div:first-child{align-self:start!important}.learning-map-card>.gold-pill{grid-row:2!important;align-self:end!important;margin:0!important}.learning-map-card>.personalized-result{position:absolute!important;z-index:3!important;right:26px!important;top:18px!important;bottom:18px!important;width:48%!important;max-width:48%!important;max-height:none!important;overflow:auto!important}.learning-map-card.has-generated-content::after{opacity:.18!important}
-.analysis-card{display:grid!important;grid-template-columns:minmax(230px,.7fr) minmax(0,1.3fr)!important;align-items:stretch!important;height:232px!important;min-height:232px!important;padding:20px 24px!important;gap:20px!important;overflow:hidden!important}.analysis-card>*{max-width:none!important}.analysis-card::after{opacity:.16!important;width:42%!important}.analysis-intro{display:flex!important;flex-direction:column!important;align-items:flex-start!important;min-width:0!important}.analysis-intro h2{display:flex!important;align-items:center!important;gap:9px!important;margin:0!important}.analysis-intro p{max-width:29ch!important;margin:9px 0 12px!important;font-size:13px!important;line-height:1.65!important}.analysis-intro .primary-pill{min-height:38px!important;margin-top:auto!important;padding:8px 18px!important;font-size:13px!important}.analysis-output{position:relative!important;z-index:2!important;min-width:0!important;min-height:0!important;overflow:hidden!important;border:1px solid rgba(47,98,91,.16)!important;border-radius:15px!important;background:rgba(250,252,251,.5)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.72)!important}.analysis-output .generated-copy{width:100%!important;height:100%!important;max-height:none!important;margin:0!important;padding:18px 20px!important;overflow-y:auto!important;border-radius:0!important;background:rgba(255,255,255,.26)!important;font-size:14px!important;line-height:1.86!important;letter-spacing:.02em!important;overscroll-behavior:contain!important;scrollbar-gutter:stable!important}.analysis-placeholder{display:grid!important;height:100%!important;place-content:center!important;gap:7px!important;padding:18px!important;text-align:center!important}.analysis-placeholder span{color:var(--poetry-text-secondary)!important;font:600 15px 'Noto Serif SC','Songti SC',serif!important}.analysis-placeholder small{max-width:32ch;color:var(--poetry-text-muted)!important;font-size:12px!important;line-height:1.65!important}
-.action-card.has-generated-content:not(.analysis-card){height:inherit!important;min-height:inherit!important}.action-card.has-generated-content:not(.analysis-card)>*{max-width:72%!important}.analysis-card.has-generated-content>*{max-width:none!important}
-@media(max-width:1450px){.first-screen-grid>.main-study-column{grid-template-rows:auto auto 145px!important}.first-screen-grid>.side-study-column{grid-template-rows:516px 232px!important}.tutor-glass{height:516px!important}.tutor-body{grid-template-columns:166px minmax(0,1fr)!important}.digital-human{width:166px!important;min-width:166px!important}.analysis-card{grid-template-columns:230px minmax(0,1fr)!important}}
-@media(max-width:1050px){.first-screen-grid>.main-study-column,.first-screen-grid>.side-study-column{grid-template-rows:auto!important}.tutor-glass{height:520px!important}.side-study-column{display:grid!important;grid-template-columns:1fr!important}.side-study-column>:first-child{grid-column:auto!important}.analysis-card{height:232px!important}.learning-map-card{height:145px!important}}
-@media(max-width:720px){.tutor-glass{height:560px!important;padding:18px!important}.tutor-body{grid-template-columns:142px minmax(0,1fr)!important;gap:10px!important}.auto-switch{font-size:0!important}.analysis-card{grid-template-columns:1fr!important;height:300px!important}.analysis-output{min-height:120px!important}.learning-map-card{grid-template-columns:1fr!important;height:auto!important;min-height:190px!important}.learning-map-card>.personalized-result{position:relative!important;inset:auto!important;width:100%!important;max-width:100%!important;max-height:130px!important}}
+.learning-map-card{display:grid!important;grid-template-columns:minmax(235px,.42fr) minmax(0,1.58fr)!important;grid-template-rows:auto auto!important;align-items:start!important;height:auto!important;min-height:145px!important;padding:20px 24px!important;gap:12px 22px!important;overflow:hidden!important}.learning-map-card>div:first-child{grid-column:1!important;grid-row:1!important;align-self:start!important;max-width:none!important}.learning-map-card>.gold-pill{grid-column:1!important;grid-row:2!important;align-self:end!important;justify-self:start!important;margin:0!important}.learning-map-card>.personalized-result{position:relative!important;z-index:3!important;grid-column:2!important;grid-row:1/3!important;inset:auto!important;width:100%!important;max-width:none!important;max-height:none!important;margin:0!important;padding:17px 20px!important;overflow:visible!important}.learning-map-card.has-generated-content{min-height:190px!important}.learning-map-card.has-generated-content::after{opacity:.12!important}.personalized-loading{display:flex!important;flex-direction:column!important;justify-content:center!important;min-height:112px!important;color:var(--poetry-text-secondary)!important}.personalized-loading strong{color:var(--poetry-text-primary)!important;font:600 14px/1.5 'Noto Serif SC','Songti SC',serif!important}.personalized-loading span{font-size:12px!important}
+.analysis-card{display:grid!important;grid-template-columns:minmax(190px,.42fr) minmax(0,1.58fr)!important;align-items:start!important;height:auto!important;min-height:232px!important;padding:20px 20px 20px 24px!important;gap:18px!important;overflow:hidden!important}.analysis-card>*{max-width:none!important}.analysis-card::after{opacity:.1!important;width:34%!important}.analysis-intro{display:flex!important;flex-direction:column!important;align-items:flex-start!important;min-width:0!important;min-height:190px!important}.analysis-intro h2{display:flex!important;align-items:center!important;gap:9px!important;margin:0!important}.analysis-intro p{max-width:27ch!important;margin:9px 0 12px!important;font-size:13px!important;line-height:1.65!important}.analysis-intro .primary-pill{min-height:38px!important;margin-top:auto!important;padding:8px 18px!important;font-size:13px!important}.analysis-output{position:relative!important;z-index:2!important;min-width:0!important;min-height:190px!important;overflow:visible!important;border:1px solid rgba(47,98,91,.16)!important;border-radius:15px!important;background:rgba(250,252,251,.5)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.72)!important}.analysis-output .generated-copy{width:100%!important;height:auto!important;min-height:190px!important;max-height:none!important;margin:0!important;padding:18px 20px!important;overflow:visible!important;border-radius:15px!important;background:rgba(255,255,255,.26)!important;font-size:14px!important;line-height:1.86!important;letter-spacing:.02em!important}.analysis-placeholder{display:grid!important;min-height:190px!important;place-content:center!important;gap:7px!important;padding:18px!important;text-align:center!important}.analysis-placeholder span{color:var(--poetry-text-secondary)!important;font:600 15px 'Noto Serif SC','Songti SC',serif!important}.analysis-placeholder small{max-width:32ch;color:var(--poetry-text-muted)!important;font-size:12px!important;line-height:1.65!important}
+.action-card.has-generated-content:not(.analysis-card){height:auto!important;min-height:190px!important}.action-card.has-generated-content:not(.analysis-card)>*{max-width:none!important}.analysis-card.has-generated-content{height:auto!important;min-height:232px!important}.analysis-card.has-generated-content>*{max-width:none!important}
+.poem-detail .action-card.learning-map-card.has-generated-content{height:auto!important;min-height:190px!important}.poem-detail .action-card.learning-map-card.has-generated-content>*{max-width:none!important}.poem-detail .action-card.learning-map-card.has-generated-content>.personalized-result{width:100%!important;max-width:none!important;max-height:none!important;overflow:visible!important}
+.poem-detail .action-card.analysis-card.has-generated-content{height:auto!important;min-height:270px!important}.poem-detail .action-card.analysis-card.has-generated-content>*{max-width:none!important}.poem-detail .action-card.analysis-card.has-generated-content .analysis-output .generated-copy{height:auto!important;max-height:none!important;overflow:visible!important}
+@media(max-width:1450px){.first-screen-grid>.main-study-column{grid-template-rows:auto auto auto!important}.first-screen-grid>.side-study-column{grid-template-rows:516px auto!important}.tutor-glass{height:516px!important}.tutor-body{grid-template-columns:166px minmax(0,1fr)!important}.digital-human{width:166px!important;min-width:166px!important}.analysis-card{grid-template-columns:minmax(180px,.38fr) minmax(0,1.62fr)!important}.learning-map-card{grid-template-columns:minmax(220px,.38fr) minmax(0,1.62fr)!important}}
+@media(max-width:1050px){.first-screen-grid>.main-study-column,.first-screen-grid>.side-study-column{grid-template-rows:auto!important}.tutor-glass{height:520px!important}.side-study-column{display:grid!important;grid-template-columns:1fr!important}.side-study-column>:first-child{grid-column:auto!important}.analysis-card,.learning-map-card{height:auto!important}}
+@media(max-width:720px){.tutor-glass{height:560px!important;padding:18px!important}.tutor-body{grid-template-columns:142px minmax(0,1fr)!important;gap:10px!important}.auto-switch{font-size:0!important}.analysis-card,.learning-map-card{grid-template-columns:1fr!important;height:auto!important;padding:18px!important}.analysis-intro{min-height:auto!important}.analysis-intro .primary-pill{margin-top:6px!important}.analysis-output{min-height:120px!important}.analysis-output .generated-copy,.analysis-placeholder{min-height:120px!important}.learning-map-card>div:first-child,.learning-map-card>.gold-pill,.learning-map-card>.personalized-result{grid-column:1!important;grid-row:auto!important}.learning-map-card>.personalized-result{position:relative!important;inset:auto!important;width:100%!important;max-width:100%!important;max-height:none!important}}
 </style>

@@ -31,7 +31,7 @@
       <div class="rules-section">
         <div class="glass-card rules-card">
           <h2 class="section-title">
-            <span class="title-icon">📜</span>
+            <PhScroll class="title-icon" :size="20" weight="duotone" />
             游戏规则
           </h2>
           <div class="rule-list">
@@ -88,7 +88,7 @@
         <div class="glass-card players-card">
           <div class="players-header">
             <h2 class="section-title">
-              <span class="title-icon">👥</span>
+            <PhUsersThree class="title-icon" :size="20" weight="duotone" />
               在线玩家
             </h2>
             <span class="player-count">{{ onlineUsers.length }} 人在线</span>
@@ -102,7 +102,7 @@
 
           <!-- 无在线玩家 -->
           <div v-else-if="onlineUsers.length === 0" class="empty-state">
-            <div class="empty-icon">😔</div>
+            <PhSmileySad class="empty-icon" :size="32" weight="duotone" />
             <p class="empty-text">当前没有在线玩家</p>
             <p class="empty-tip">邀请好友一起来玩吧！</p>
           </div>
@@ -148,28 +148,6 @@
       </div>
     </div>
 
-    <!-- 收到的邀请弹窗 -->
-    <div v-if="receivedInvitation" class="invitation-modal">
-      <div class="modal-backdrop" @click="rejectInvitation"></div>
-      <div class="modal-content glass-card">
-        <div class="modal-icon">🎮</div>
-        <h3 class="modal-title">收到对战邀请</h3>
-        <p class="modal-from">{{ receivedInvitation.from }} 邀请你进行诗词闯关对战</p>
-        <div class="modal-info">
-          <span class="info-label">挑战规则</span>
-          <span class="info-value">30题轮流答，30秒/题，答错超时判负</span>
-        </div>
-        <div class="modal-actions">
-          <button class="accept-btn glass-button" @click="acceptInvitation">
-            接受挑战
-          </button>
-          <button class="reject-btn glass-button" @click="rejectInvitation">
-            婉拒
-          </button>
-        </div>
-      </div>
-    </div>
-
     <!-- 等待对方接受的提示 -->
     <div v-if="waitingAccept" class="waiting-modal">
       <div class="modal-backdrop" @click="cancelInvitation"></div>
@@ -195,11 +173,12 @@
 <script>
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import io from 'socket.io-client';
-import { SOCKET_URL } from '../services/api';
+import feihualingSocket from '../services/feihualingSocket';
+import { PhScroll, PhSmileySad, PhUsersThree } from '@phosphor-icons/vue';
 
 export default {
   name: 'ChallengeBattleOnline',
+  components: { PhScroll, PhSmileySad, PhUsersThree },
   setup() {
     const router = useRouter();
     const socket = ref(null);
@@ -215,7 +194,7 @@ export default {
     const isRefreshing = ref(false);
     const invitingUserId = ref(null);
     const waitingAccept = ref(null);
-    const receivedInvitation = ref(null);
+    let socketChannel = null;
 
     // Toast
     const toast = ref({ show: false, message: '', type: 'info' });
@@ -245,12 +224,12 @@ export default {
         socket.value = null;
       }
 
-      socket.value = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+      feihualingSocket.connect(localStorage.getItem('token'));
+      socketChannel = feihualingSocket.channel();
+      socket.value = socketChannel;
 
       socket.value.on('connect', () => {
         console.log('[ChallengeBattleOnline] Socket已连接');
-        const token = localStorage.getItem('token');
-        if (token) socket.value.emit('authenticate', { token });
         loadOnlineUsers();
       });
 
@@ -268,13 +247,6 @@ export default {
         isRefreshing.value = false;
       });
 
-      // 收到对战邀请
-      socket.value.on('challenge-invitation', (data) => {
-        console.log('[ChallengeBattleOnline] 收到邀请:', data);
-        receivedInvitation.value = data;
-        showToast(`收到来自 ${data.from} 的对战邀请！`, 'info');
-      });
-
       // 邀请被拒绝
       socket.value.on('challenge-invitation-rejected', () => {
         waitingAccept.value = null;
@@ -284,32 +256,9 @@ export default {
 
       // 对方取消邀请
       socket.value.on('challenge-invitation-cancelled', () => {
-        receivedInvitation.value = null;
         waitingAccept.value = null;
         invitingUserId.value = null;
         showToast('对方取消了邀请', 'info');
-      });
-
-      // 邀请方/接受方收到的游戏开始事件
-      socket.value.on('challenge-dual-started', (data) => {
-        console.log('[ChallengeBattleOnline] 收到 challenge-dual-started:', data);
-        waitingAccept.value = null;
-        invitingUserId.value = null;
-        receivedInvitation.value = null;
-        showToast('对战开始！', 'success');
-
-        // 保存游戏数据到 localStorage
-        localStorage.setItem('pendingDualGame', JSON.stringify(data));
-
-        // 断开当前页面的 socket 连接
-        if (socket.value) {
-          socket.value.disconnect();
-          socket.value = null;
-        }
-
-        // 跳转到对战页面
-        console.log('[ChallengeBattleOnline] 跳转到 /challenge/battle');
-        router.push('/challenge/battle');
       });
 
       socket.value.on('error', (data) => {
@@ -322,12 +271,15 @@ export default {
       socket.value.on('disconnect', () => {
         console.log('[ChallengeBattleOnline] Socket断开连接');
       });
+
+      // 全局连接可能在进入本页之前就已认证，不能只依赖 connect 事件。
+      if (socket.value.connected) loadOnlineUsers();
     };
 
     const loadOnlineUsers = () => {
       if (!socket.value?.connected) return;
       onlineUsersLoading.value = true;
-      socket.value.emit('challenge-get-online-users');
+      feihualingSocket.challengeRefreshOnlineUsers();
     };
 
     const refreshOnlineUsers = () => {
@@ -336,7 +288,7 @@ export default {
         return;
       }
       isRefreshing.value = true;
-      socket.value.emit('challenge-get-online-users');
+      feihualingSocket.challengeRefreshOnlineUsers();
     };
 
     const sendInvitation = (user) => {
@@ -346,43 +298,16 @@ export default {
       }
       invitingUserId.value = user.userId;
       waitingAccept.value = { username: user.username, userId: user.userId };
-        socket.value.emit('challenge-send-invitation', {
-          targetUserId: user.userId,
-          targetUsername: user.username,
-          username: myUsername.value
-      });
+      feihualingSocket.challengeSendInvitation(user.userId, user.username, myUsername.value);
       showToast(`已向 ${user.username} 发送邀请`, 'info');
     };
 
     const cancelInvitation = () => {
       if (socket.value?.connected && waitingAccept.value) {
-        socket.value.emit('challenge-cancel-invitation', {
-          targetUserId: waitingAccept.value.userId
-        });
+        feihualingSocket.challengeCancelInvitation(waitingAccept.value.userId);
       }
       waitingAccept.value = null;
       invitingUserId.value = null;
-    };
-
-    const acceptInvitation = () => {
-      if (!receivedInvitation.value) return;
-      console.log('[ChallengeBattleOnline] 接受邀请:', receivedInvitation.value);
-      socket.value?.emit('challenge-accept-invitation', {
-        inviteId: receivedInvitation.value.inviteId,
-        inviterId: receivedInvitation.value.fromId,
-        username: myUsername.value
-      });
-      showToast('已接受邀请，对战即将开始...', 'success');
-    };
-
-    const rejectInvitation = () => {
-      if (!receivedInvitation.value) return;
-      socket.value?.emit('challenge-reject-invitation', {
-        inviteId: receivedInvitation.value.inviteId,
-        inviterId: receivedInvitation.value.fromId
-      });
-      receivedInvitation.value = null;
-      showToast('已拒绝邀请', 'info');
     };
 
     const checkLogin = () => {
@@ -405,10 +330,9 @@ export default {
     });
 
     onUnmounted(() => {
-      if (socket.value) {
-        socket.value.disconnect();
-        socket.value = null;
-      }
+      socketChannel?.dispose();
+      socketChannel = null;
+      socket.value = null;
     });
 
     return {
@@ -419,15 +343,12 @@ export default {
       isRefreshing,
       invitingUserId,
       waitingAccept,
-      receivedInvitation,
       toast,
       goLogin,
       goBack,
       refreshOnlineUsers,
       sendInvitation,
-      cancelInvitation,
-      acceptInvitation,
-      rejectInvitation
+      cancelInvitation
     };
   }
 };
@@ -435,632 +356,21 @@ export default {
 
 <style scoped>
 .challenge-battle-online {
-  min-height: 100vh;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  padding: 20px;
-}
-
-.glass-card {
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 24px;
-  padding: 32px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-}
-
-.glass-button {
-  padding: 12px 28px;
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.4), rgba(118, 75, 162, 0.4));
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(102, 126, 234, 0.5);
-  border-radius: 16px;
-  color: #fff;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
-}
-
-.glass-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.6), rgba(118, 75, 162, 0.6));
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
-}
-
-.glass-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* 导航栏 */
-.nav-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 16px;
-  margin-bottom: 24px;
-}
-
-.nav-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.back-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 12px;
-  color: #fff;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.back-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.back-icon {
-  font-size: 16px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 600;
-  color: #fff;
-  background: linear-gradient(90deg, #f5af19, #f12711);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.refresh-btn {
-  padding: 10px 20px;
-  background: rgba(102, 126, 234, 0.2);
-  border: 1px solid rgba(102, 126, 234, 0.4);
-  border-radius: 12px;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: rgba(102, 126, 234, 0.4);
-  border-color: rgba(102, 126, 234, 0.6);
-}
-
-.refresh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* 登录提示 */
-.login-prompt {
-  text-align: center;
-  padding: 80px 20px;
-}
-
-.login-prompt .glass-card h3 {
-  font-family: 'Noto Serif SC', serif;
-  color: #fff;
-  font-size: 28px;
-  margin-bottom: 16px;
-}
-
-.login-prompt .glass-card p {
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.7);
-  margin-bottom: 24px;
-}
-
-/* 主内容布局 */
-.main-content {
-  display: grid;
-  grid-template-columns: 400px 1fr;
-  gap: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-@media (max-width: 900px) {
-  .main-content {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* 左侧规则区域 */
-.rules-section {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-family: 'Noto Serif SC', serif;
-  color: #fff;
-  font-size: 20px;
-  margin: 0 0 24px 0;
-  font-weight: 600;
-}
-
-.title-icon {
-  font-size: 24px;
-}
-
-.rule-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.rule-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.rule-number {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: bold;
-  flex-shrink: 0;
-}
-
-.rule-content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.rule-title {
-  font-family: 'Noto Serif SC', serif;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.rule-desc {
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 13px;
-}
-
-/* 提示卡片 */
-.tips-card {
-  padding: 24px;
-}
-
-.tips-title {
-  font-family: 'Noto Serif SC', serif;
-  color: #fff;
-  font-size: 16px;
-  margin: 0 0 16px 0;
-}
-
-.tips-list {
-  margin: 0;
-  padding-left: 20px;
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 14px;
-  line-height: 2;
-}
-
-.tips-list li {
-  margin-bottom: 4px;
-}
-
-.return-btn {
-  margin-top: 8px;
-}
-
-/* 右侧玩家区域 */
-.players-section {
-  min-height: 400px;
-}
-
-.players-card {
-  height: 100%;
-}
-
-.players-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.player-count {
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 14px;
-}
-
-/* 加载状态 */
-.loading-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 60px;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid rgba(102, 126, 234, 0.3);
-  border-top-color: #667eea;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* 空状态 */
-.empty-state {
-  text-align: center;
-  padding: 60px 20px;
-}
-
-.empty-icon {
-  font-size: 64px;
-  margin-bottom: 16px;
-}
-
-.empty-text {
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 18px;
-  margin: 0 0 8px 0;
-}
-
-.empty-tip {
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 14px;
-  margin: 0;
-}
-
-/* 玩家列表 */
-.players-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.player-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 20px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.3s;
-}
-
-.player-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(102, 126, 234, 0.3);
-}
-
-.player-item.is-me {
-  border-color: rgba(118, 75, 162, 0.5);
-  background: rgba(118, 75, 162, 0.1);
-}
-
-.player-item.in-game {
-  opacity: 0.6;
-}
-
-.player-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  font-weight: 600;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.status-dot {
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid #1a1a2e;
-}
-
-.status-dot.online {
-  background: #4ade80;
-}
-
-.status-dot.in-game {
-  background: #fbbf24;
-}
-
-.player-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.player-name {
-  font-family: 'Noto Serif SC', serif;
-  color: #fff;
-  font-size: 16px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.me-tag {
-  padding: 2px 8px;
-  background: rgba(118, 75, 162, 0.5);
-  color: white;
-  font-size: 11px;
-  border-radius: 8px;
-}
-
-.player-status {
-  font-family: 'Noto Serif SC', serif;
-  font-size: 13px;
-  color: #4ade80;
-}
-
-.player-status.in-game {
-  color: #fbbf24;
-}
-
-.invite-btn {
-  padding: 10px 20px;
-  background: linear-gradient(135deg, rgba(245, 87, 108, 0.4), rgba(240, 147, 251, 0.4));
-  border: 1px solid rgba(245, 87, 108, 0.4);
-  border-radius: 12px;
-  color: #fff;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.invite-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(245, 87, 108, 0.6), rgba(240, 147, 251, 0.6));
-  transform: translateY(-2px);
-}
-
-.invite-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.self-tag,
-.gaming-tag {
-  padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-/* 邀请弹窗 */
-.invitation-modal,
-.waiting-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-backdrop {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-}
-
-.modal-content {
-  position: relative;
-  text-align: center;
-  max-width: 400px;
-  width: 90%;
-  padding: 40px;
-}
-
-.modal-icon {
-  font-size: 64px;
-  margin-bottom: 16px;
-}
-
-.modal-title {
-  font-family: 'Noto Serif SC', serif;
-  color: #fff;
-  font-size: 24px;
-  margin: 0 0 16px 0;
-}
-
-.modal-from {
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 16px;
-  margin: 0 0 20px 0;
-}
-
-.modal-info {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 24px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-}
-
-.info-label {
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 14px;
-}
-
-.info-value {
-  font-family: 'Noto Serif SC', serif;
-  color: #a5b4fc;
-  font-size: 14px;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 16px;
-  justify-content: center;
-}
-
-.accept-btn {
-  background: linear-gradient(135deg, rgba(74, 222, 128, 0.4), rgba(22, 163, 74, 0.4));
-  border-color: rgba(74, 222, 128, 0.5);
-  color: #86efac;
-}
-
-.accept-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(74, 222, 128, 0.6), rgba(22, 163, 74, 0.6));
-}
-
-.reject-btn {
-  background: rgba(239, 68, 68, 0.3);
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
-}
-
-.reject-btn:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.5);
-}
-
-/* 等待弹窗 */
-.waiting-spinner {
-  width: 48px;
-  height: 48px;
-  border: 3px solid rgba(102, 126, 234, 0.3);
-  border-top-color: #667eea;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin: 0 auto 20px;
-}
-
-.waiting-text {
-  font-family: 'Noto Serif SC', serif;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 15px;
-  margin: 0 0 24px 0;
-}
-
-.cancel-btn {
-  background: rgba(239, 68, 68, 0.3);
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
-}
-
-.cancel-btn:hover {
-  background: rgba(239, 68, 68, 0.5);
-}
-
-/* Toast */
-.toast {
-  position: fixed;
-  bottom: 40px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 14px 30px;
-  border-radius: 14px;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 15px;
-  z-index: 300;
-  animation: toast-in 0.3s ease;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-
-.toast.info {
-  background: rgba(102, 126, 234, 0.95);
-  color: white;
-}
-
-.toast.success {
-  background: rgba(74, 222, 128, 0.95);
-  color: white;
-}
-
-.toast.error {
-  background: rgba(248, 113, 113, 0.95);
-  color: white;
-}
-
-@keyframes toast-in {
-  0% {
-    opacity: 0;
-    transform: translateX(-50%) translateY(20px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-}
-
-.toast-fade-enter-active,
-.toast-fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.toast-fade-enter-from,
-.toast-fade-leave-to {
-  opacity: 0;
-}
+  --ink:#234f49; --muted:#789087; --jade:#238f7c; --jade-deep:#176f61; --gold:#b9853e;
+  min-height:calc(100dvh - 84px); padding:24px clamp(14px,4vw,64px) 54px; color:var(--ink);
+  font-family:'Noto Sans SC','Microsoft YaHei',sans-serif;
+  background:linear-gradient(135deg,rgba(239,247,242,.9),rgba(246,242,229,.88)),url('../assets/jade-paper-ambient.png') center/cover fixed;
+}
+.challenge-battle-online::before{content:'';position:fixed;inset:84px 0 0;z-index:-1;pointer-events:none;background:radial-gradient(circle at 78% 12%,rgba(255,255,255,.7),transparent 34%),linear-gradient(180deg,rgba(255,255,255,.16),transparent 58%)}
+.glass-card{position:relative;padding:24px;overflow:hidden;border:1px solid rgba(255,255,255,.72);border-radius:22px;background:rgba(250,253,249,.68);box-shadow:0 18px 48px rgba(42,84,73,.1),inset 0 1px 0 rgba(255,255,255,.88);backdrop-filter:blur(18px) saturate(118%)}
+.glass-card::after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(120deg,rgba(255,255,255,.2),transparent 46%)}
+.glass-button,.back-btn,.refresh-btn,.invite-btn,.return-btn,.cancel-btn{border:1px solid rgba(47,131,115,.22);border-radius:999px;color:#fff;background:linear-gradient(180deg,#2a8178,#216d65);box-shadow:0 8px 18px rgba(29,90,81,.16);cursor:pointer;transition:transform .2s ease,filter .2s ease}
+.glass-button{min-height:40px;padding:8px 20px;font:600 12px 'Noto Sans SC','Microsoft YaHei',sans-serif}.glass-button:hover:not(:disabled),.back-btn:hover,.refresh-btn:hover:not(:disabled),.invite-btn:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.05)}.glass-button:disabled,.refresh-btn:disabled,.invite-btn:disabled{opacity:.48;cursor:not-allowed}
+.nav-header{display:flex;align-items:center;justify-content:space-between;gap:16px;width:min(1260px,100%);margin:0 auto 20px;padding:12px 16px;border:1px solid rgba(255,255,255,.72);border-radius:18px;background:rgba(250,253,249,.62);box-shadow:0 12px 30px rgba(42,84,73,.07);backdrop-filter:blur(14px)}
+.nav-left{display:flex;align-items:center;gap:12px;min-width:0}.back-btn{padding:8px 14px;color:var(--ink);background:rgba(255,255,255,.7);box-shadow:none;font:600 12px 'Noto Sans SC','Microsoft YaHei',sans-serif}.back-icon{font-size:15px}.page-title{margin:0;color:var(--ink);font:600 clamp(18px,2.2vw,26px) 'Noto Serif SC',serif;letter-spacing:.06em}.refresh-btn{padding:8px 14px;color:var(--jade-deep);background:rgba(227,244,235,.8);box-shadow:none;font:600 11px 'Noto Sans SC','Microsoft YaHei',sans-serif}
+.login-prompt{display:grid;place-items:center;min-height:56vh}.login-prompt .glass-card{width:min(420px,100%);text-align:center}.login-prompt h3{position:relative;z-index:1;margin:0 0 8px;font:600 24px 'Noto Serif SC',serif}.login-prompt p{position:relative;z-index:1;margin:0 0 18px;color:var(--muted);font-size:13px}
+.main-content{display:grid;grid-template-columns:minmax(260px,360px) minmax(0,1fr);gap:20px;width:min(1260px,100%);margin:0 auto}.rules-section{display:grid;align-content:start;gap:16px}.rules-card,.tips-card,.players-card{padding:22px}.section-title{position:relative;z-index:1;display:flex;align-items:center;gap:9px;margin:0 0 16px;color:var(--ink);font:600 19px 'Noto Serif SC',serif}.title-icon{font-size:20px}.rule-list{position:relative;z-index:1;display:grid;gap:10px}.rule-item{display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid rgba(75,132,113,.12);border-radius:12px;background:rgba(255,255,255,.42)}.rule-number{display:grid;place-items:center;flex:0 0 26px;width:26px;height:26px;border-radius:50%;color:#fff;background:var(--jade);font-size:11px;font-weight:700}.rule-content{display:grid;gap:3px}.rule-title{color:var(--ink);font-size:12px;font-weight:600}.rule-desc{color:var(--muted);font-size:11px;line-height:1.5}.tips-title{position:relative;z-index:1;margin:0 0 10px;color:var(--ink);font:600 16px 'Noto Serif SC',serif}.tips-list{position:relative;z-index:1;margin:0;padding-left:18px;color:var(--muted);font-size:11px;line-height:1.9}.return-btn{width:100%;color:var(--ink);background:rgba(255,255,255,.72);box-shadow:none}
+.players-card{min-height:420px}.players-header{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:10px}.players-header .section-title{margin-bottom:0}.player-count{color:var(--muted);font-size:11px}.loading-state,.empty-state{position:relative;z-index:1;display:grid;place-items:center;gap:8px;min-height:280px;color:var(--muted);text-align:center;font-size:12px}.spinner,.waiting-spinner{width:42px;height:42px;border:3px solid rgba(47,131,115,.16);border-top-color:var(--jade);border-radius:50%;animation:spin .9s linear infinite}.empty-icon{font-size:30px;opacity:.75}.empty-text{margin:0;color:var(--ink)}.empty-tip{margin:0;color:#9aaba4;font-size:11px}.players-list{position:relative;z-index:1;display:grid;gap:9px;margin-top:18px}.player-item{display:flex;align-items:center;gap:11px;padding:12px 13px;border:1px solid rgba(75,132,113,.13);border-radius:14px;background:rgba(255,255,255,.48)}.player-item.in-game{opacity:.62}.player-avatar{position:relative;display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border:1px solid rgba(47,131,115,.2);border-radius:50%;color:var(--jade-deep);background:#e4f2ea;font:600 15px 'Noto Serif SC',serif}.status-dot{position:absolute;right:-1px;bottom:1px;width:9px;height:9px;border:2px solid #fff;border-radius:50%;background:#55a686}.status-dot.in-game{background:#ba8750}.player-info{display:grid;gap:3px;min-width:0;flex:1}.player-name{overflow:hidden;color:var(--ink);font-size:12px;text-overflow:ellipsis;white-space:nowrap}.me-tag{margin-left:5px;padding:2px 5px;border-radius:99px;color:#317967;background:#e2f2e8;font-size:9px}.player-status{color:var(--muted);font-size:10px}.player-status.in-game{color:#a4783f}.invite-btn{padding:7px 12px;color:#fff;font:600 11px 'Noto Sans SC','Microsoft YaHei',sans-serif}.self-tag,.gaming-tag{color:var(--muted);font-size:10px}.gaming-tag{color:#a4783f}
+.waiting-modal{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:20px}.modal-backdrop{position:absolute;inset:0;background:rgba(26,70,61,.3);backdrop-filter:blur(8px)}.modal-content{position:relative;z-index:1;width:min(500px,100%);padding:30px;text-align:center}.modal-title{position:relative;z-index:1;margin:8px 0;color:var(--ink);font:600 23px 'Noto Serif SC',serif}.cancel-btn{color:#9c604d;background:#fff2e9;border-color:#e8c0a6;box-shadow:none}.toast{position:fixed;left:50%;bottom:28px;z-index:300;padding:11px 18px;border-radius:99px;transform:translateX(-50%);color:#fff;background:#246f62;box-shadow:0 12px 30px rgba(25,76,66,.2);font-size:12px}.toast.success{background:#2e8d74}.toast.error{background:#ad6652}
+@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:820px){.main-content{grid-template-columns:1fr}.players-card{min-height:320px}}@media(max-width:560px){.challenge-battle-online{padding:14px 10px 34px}.nav-header{align-items:flex-start}.nav-left{flex-direction:column;align-items:flex-start}.page-title{font-size:20px}.main-content{gap:14px}.player-item{align-items:flex-start;flex-wrap:wrap}.invite-btn{margin-left:auto}}
 </style>

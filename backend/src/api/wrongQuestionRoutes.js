@@ -65,15 +65,19 @@ router.post('/answer', authenticateToken, asyncHandler(async (req, res) => {
 
 router.post('/master/:id', authenticateToken, asyncHandler(async (req, res) => {
   const userId = req.user.userId;
-  const questionId = req.params.id;
-  await wrongQuestionService.markAsMastered(userId, questionId);
+  validate({ id: req.params.id }, { id: 'required|int|positive' });
+  const questionId = Number(req.params.id);
+  const updated = await wrongQuestionService.markAsMastered(userId, questionId);
+  if (!updated) throw ApiError.notFound('错题不存在');
   res.json({ success: true });
 }));
 
 router.delete('/:id', authenticateToken, asyncHandler(async (req, res) => {
   const userId = req.user.userId;
-  const questionId = req.params.id;
-  await wrongQuestionService.deleteWrongQuestion(userId, questionId);
+  validate({ id: req.params.id }, { id: 'required|int|positive' });
+  const questionId = Number(req.params.id);
+  const removed = await wrongQuestionService.deleteWrongQuestion(userId, questionId);
+  if (!removed) throw ApiError.notFound('错题不存在');
   res.json({ success: true });
 }));
 

@@ -1,6 +1,7 @@
 <template>
   <div
     id="app"
+    ref="appShell"
     :class="{
     'home-shell': $route.path === '/',
       'challenge-shell': $route.path === '/challenge' || $route.path.startsWith('/challenge/level/'),
@@ -27,6 +28,9 @@
 
     <!-- 全局非阻塞消息与确认框，避免原生弹窗抢占浏览器焦点 -->
     <AppFeedback />
+
+    <!-- 全局实时邀请：不依赖当前所在页面，登录后始终保持连接 -->
+    <GlobalInvitationCenter />
 
     <!-- 动态元素容器 -->
     <div class="dynamic-elements" ref="dynamicElements"></div>
@@ -85,11 +89,17 @@
     </LiquidGlass>
 
     <!-- 主内容区 -->
-    <main class="container">
+    <main class="container route-stage">
       <router-view v-slot="{ Component }">
-        <transition :name="transitionName" mode="out-in">
+        <transition
+          :css="false"
+          @enter="enterRoute"
+          @leave="leaveRoute"
+          @enter-cancelled="cancelRouteTransition"
+          @leave-cancelled="cancelRouteTransition"
+        >
           <keep-alive :include="keepAliveIncludes">
-            <component :is="Component" />
+            <component :is="Component" class="route-view" />
           </keep-alive>
         </transition>
       </router-view>
@@ -108,8 +118,10 @@
 <script>
 import TitleBar from './components/TitleBar.vue'
 import AppFeedback from './components/AppFeedback.vue'
+import GlobalInvitationCenter from './components/GlobalInvitationCenter.vue'
 import DemoMode from './views/DemoMode.vue'
 import { prefetchRoute } from './router'
+import { gsap } from './utils/gsapMotion'
 import { PhBooks as Books, PhCirclesThreePlus as CirclesThreePlus, PhFlagBanner as FlagBanner, PhHouse as House, PhLeaf as Leaf, PhMagnifyingGlass as MagnifyingGlass, PhNotebook as Notebook, PhPenNib as PenNib, PhUserCircle as UserCircle } from '@phosphor-icons/vue'
 
 const POEM_WORDS = Object.freeze([
@@ -118,10 +130,16 @@ const POEM_WORDS = Object.freeze([
   '天', '地', '日', '月', '星', '辰'
 ])
 
+function getRouteTransitionOffset(transitionName, isEntering) {
+  if (transitionName === 'page-back') return isEntering ? -14 : 9
+  return isEntering ? 18 : -9
+}
+
 export default {
   name: 'App',
   components: {
     AppFeedback,
+    GlobalInvitationCenter,
     TitleBar,
     DemoMode,
     Books,
@@ -151,6 +169,8 @@ export default {
     // 这些集合不参与视图渲染，不放进响应式 data，避免装饰元素增删时触发
     // 无意义的组件更新。
     this.dynamicElementNodes = new Set()
+    this.dynamicElementAnimations = new Map()
+    this.activeRouteAnimations = new Map()
     this.prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       || window.matchMedia('(update: slow)').matches
     this.hoverPointerStates = new Map()
@@ -191,6 +211,7 @@ export default {
 
     // 设置导航栏鼠标跟踪效果
     this.setupNavbarHoverEffects();
+    this.setupAppMotion()
 
     // 确保页面一定能正常显示（防止后端无响应导致无限loading）
     setTimeout(() => {
@@ -218,8 +239,65 @@ export default {
 
     // 清理导航栏鼠标跟踪效果
     this.cleanupNavbarHoverEffects();
+    this.appMotion?.revert()
+    this.activeRouteAnimations?.forEach((animation) => animation.kill())
+    this.activeRouteAnimations?.clear()
   },
   methods: {
+    setupAppMotion() {
+      if (this.prefersReducedMotion || !this.$refs.appShell) return
+      this.appMotion = gsap.context(() => {
+        const nav = gsap.timeline({ defaults: { ease: 'power3.out' } })
+        nav
+          .from('.navbar-brand', { x: -18, autoAlpha: 0, duration: 0.58 })
+          .from('.navbar-item', { y: -10, autoAlpha: 0, duration: 0.34, stagger: 0.045 }, '-=0.32')
+      }, this.$refs.appShell)
+    },
+    enterRoute(element, done) {
+      if (this.prefersReducedMotion) return done()
+      this.cancelRouteTransition(element)
+      const animation = gsap.fromTo(element,
+        { autoAlpha: 0, y: getRouteTransitionOffset(this.transitionName, true), scale: 0.992 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          scale: 1,
+          duration: 0.28,
+          ease: 'power3.out',
+          clearProps: 'visibility',
+          overwrite: 'auto',
+          onComplete: () => {
+            this.activeRouteAnimations.delete(element)
+            done()
+          }
+        }
+      )
+      this.activeRouteAnimations.set(element, animation)
+    },
+    leaveRoute(element, done) {
+      if (this.prefersReducedMotion) return done()
+      this.cancelRouteTransition(element)
+      element.classList.add('route-view--leaving')
+      const animation = gsap.to(element, {
+        autoAlpha: 0,
+        y: getRouteTransitionOffset(this.transitionName, false),
+        scale: 0.996,
+        duration: 0.16,
+        ease: 'power2.in',
+        overwrite: 'auto',
+        onComplete: () => {
+          element.classList.remove('route-view--leaving')
+          this.activeRouteAnimations.delete(element)
+          done()
+        }
+      })
+      this.activeRouteAnimations.set(element, animation)
+    },
+    cancelRouteTransition(element) {
+      this.activeRouteAnimations?.get(element)?.kill()
+      this.activeRouteAnimations?.delete(element)
+      element.classList.remove('route-view--leaving')
+    },
     handlePageTransition(e) {
       this.transitionName = `page-${e.detail.direction}`
     },
@@ -247,7 +325,10 @@ export default {
 
       if (!state.frameId) {
         state.frameId = window.requestAnimationFrame(() => {
-          const rect = element.getBoundingClientRect()
+          // Geometry is stable for the duration of a hover. Reusing it avoids a
+          // synchronous layout read on every frame on high-refresh displays.
+          const rect = state.rect || element.getBoundingClientRect()
+          state.rect = rect
           element.style.setProperty(state.xVariable, `${((state.clientX - rect.left) / rect.width) * 100}%`)
           element.style.setProperty(state.yVariable, `${((state.clientY - rect.top) / rect.height) * 100}%`)
           state.frameId = null
@@ -256,24 +337,43 @@ export default {
 
       this.hoverPointerStates.set(element, state)
     },
+    cachePointerTargetRect(e) {
+      const state = this.hoverPointerStates.get(e.currentTarget) || {}
+      state.rect = e.currentTarget.getBoundingClientRect()
+      this.hoverPointerStates.set(e.currentTarget, state)
+    },
+    releasePointerTargetRect(e) {
+      const state = this.hoverPointerStates.get(e.currentTarget)
+      if (!state) return
+      if (state.frameId) window.cancelAnimationFrame(state.frameId)
+      this.hoverPointerStates.delete(e.currentTarget)
+    },
     setupNavbarHoverEffects() {
       const navbar = document.querySelector('.ios26-navbar');
       if (navbar) {
         navbar.addEventListener('mousemove', this.handleNavbarMouseMove);
+        navbar.addEventListener('mouseenter', this.cachePointerTargetRect);
+        navbar.addEventListener('mouseleave', this.releasePointerTargetRect);
       }
       const navButtons = document.querySelectorAll('.glass-nav-button');
       navButtons.forEach(btn => {
         btn.addEventListener('mousemove', this.handleBtnMouseMove);
+        btn.addEventListener('mouseenter', this.cachePointerTargetRect);
+        btn.addEventListener('mouseleave', this.releasePointerTargetRect);
       });
     },
     cleanupNavbarHoverEffects() {
       const navbar = document.querySelector('.ios26-navbar');
       if (navbar) {
         navbar.removeEventListener('mousemove', this.handleNavbarMouseMove);
+        navbar.removeEventListener('mouseenter', this.cachePointerTargetRect);
+        navbar.removeEventListener('mouseleave', this.releasePointerTargetRect);
       }
       const navButtons = document.querySelectorAll('.glass-nav-button');
       navButtons.forEach(btn => {
         btn.removeEventListener('mousemove', this.handleBtnMouseMove);
+        btn.removeEventListener('mouseenter', this.cachePointerTargetRect);
+        btn.removeEventListener('mouseleave', this.releasePointerTargetRect);
       });
       this.hoverPointerStates?.forEach((state) => {
         if (state.frameId) window.cancelAnimationFrame(state.frameId)
@@ -336,6 +436,8 @@ export default {
     },
     stopCreatingDynamicElements() {
       this.pauseCreatingDynamicElements()
+      this.dynamicElementAnimations?.forEach((animation) => animation.kill())
+      this.dynamicElementAnimations?.clear()
       // 清除所有动态元素
       this.dynamicElementNodes?.forEach(element => {
         if (element && element.parentNode) {
@@ -344,13 +446,14 @@ export default {
       })
       this.dynamicElementNodes?.clear()
     },
-    addDynamicElement(element, duration) {
+    addDynamicElement(element) {
       if (!this.$refs.dynamicElements) return
       this.$refs.dynamicElements.appendChild(element)
       this.dynamicElementNodes.add(element)
-      window.setTimeout(() => this.removeDynamicElement(element), duration)
     },
     removeDynamicElement(element) {
+      this.dynamicElementAnimations?.get(element)?.kill()
+      this.dynamicElementAnimations?.delete(element)
       if (element.parentNode) element.parentNode.removeChild(element)
       this.dynamicElementNodes?.delete(element)
     },
@@ -365,14 +468,16 @@ export default {
       const size = 15 + Math.random() * 10
       
       petal.style.left = `${left}%`
-      petal.style.animationDuration = `${duration}s`
-      petal.style.animationDelay = `${delay}s`
       petal.style.width = `${size}px`
       petal.style.height = `${size}px`
       
       // 添加到容器
       if (this.$refs.dynamicElements) {
-        this.addDynamicElement(petal, (duration + delay) * 1000)
+        this.addDynamicElement(petal)
+        const animation = gsap.timeline({ delay, onComplete: () => this.removeDynamicElement(petal) })
+          .fromTo(petal, { y: -80, x: 0, rotation: -20, autoAlpha: 0 }, { autoAlpha: 0.72, duration: duration * 0.1, ease: 'power1.out' })
+          .to(petal, { y: window.innerHeight + 110, x: () => (Math.random() - 0.5) * 180, rotation: 280 + Math.random() * 160, autoAlpha: 0, duration: duration * 0.9, ease: 'none' })
+        this.dynamicElementAnimations.set(petal, animation)
       }
     },
     createFloatingText() {
@@ -390,13 +495,15 @@ export default {
       const fontSize = 12 + Math.random() * 6
       
       text.style.left = `${left}%`
-      text.style.animationDuration = `${duration}s`
-      text.style.animationDelay = `${delay}s`
       text.style.fontSize = `${fontSize}px`
       
       // 添加到容器
       if (this.$refs.dynamicElements) {
-        this.addDynamicElement(text, (duration + delay) * 1000)
+        this.addDynamicElement(text)
+        const animation = gsap.timeline({ delay, onComplete: () => this.removeDynamicElement(text) })
+          .fromTo(text, { y: -70, x: 0, scale: 0.7, autoAlpha: 0 }, { autoAlpha: 0.5, duration: duration * 0.11, ease: 'power1.out' })
+          .to(text, { y: window.innerHeight + 90, x: () => (Math.random() - 0.5) * 90, scale: 1.12, autoAlpha: 0, duration: duration * 0.89, ease: 'none' })
+        this.dynamicElementAnimations.set(text, animation)
       }
     },
     createRipple(event) {
@@ -418,8 +525,12 @@ export default {
       
       // 添加到容器
       if (this.$refs.dynamicElements) {
-        const animationDuration = 0.6 // 涟漪动画持续时间
-        this.addDynamicElement(ripple, animationDuration * 1000)
+        this.addDynamicElement(ripple)
+        const animation = gsap.fromTo(ripple,
+          { xPercent: -50, yPercent: -50, scale: 0, autoAlpha: 0.72 },
+          { scale: 9, autoAlpha: 0, duration: 0.56, ease: 'power2.out', onComplete: () => this.removeDynamicElement(ripple) }
+        )
+        this.dynamicElementAnimations.set(ripple, animation)
       }
     },
     clearAuthData() {
@@ -453,6 +564,21 @@ export default {
   will-change: opacity, transform;
   transition: opacity var(--motion-base, 220ms) var(--motion-ease-out, cubic-bezier(0.22, 1, 0.36, 1)),
               transform var(--motion-base, 220ms) var(--motion-ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+/* Keep the incoming route in normal flow while the old screen fades above it.
+ * This removes the blank out-in gap without letting two page layouts stack. */
+.route-stage {
+  position: relative;
+  isolation: isolate;
+}
+
+.route-view--leaving {
+  position: absolute !important;
+  inset: 0;
+  width: 100%;
+  pointer-events: none;
+  will-change: transform, opacity;
 }
 .page-forward-enter-from {
   opacity: 0;
@@ -504,16 +630,6 @@ export default {
   }
 }
 
-/* 旧 fade 保持兼容 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
 /* 动态元素容器 */
 .dynamic-elements {
   position: fixed;
@@ -541,21 +657,9 @@ export default {
   background: var(--ripple-color);
   border-radius: 50%;
   transform: translate(-50%, -50%) scale(0);
-  animation: ripple-animation var(--ripple-duration) ease-out forwards;
+  will-change: transform, opacity;
   pointer-events: none;
   z-index: 9999;
-}
-
-/* 涟漪动画 */
-@keyframes ripple-animation {
-  0% {
-    transform: translate(-50%, -50%) scale(0);
-    opacity: 1;
-  }
-  100% {
-    transform: translate(-50%, -50%) scale(10);
-    opacity: 0;
-  }
 }
 
 /* 飘动的花瓣 */
@@ -565,8 +669,8 @@ export default {
   height: 20px;
   background: linear-gradient(135deg, #ffb3ba, #ffc0cb);
   border-radius: 10px 0 10px 0;
-  animation: petal-float linear forwards;
   opacity: 0.7;
+  will-change: transform, opacity;
 }
 
 .petal::before {
@@ -603,45 +707,9 @@ export default {
   font-size: 14px;
   font-family: 'SimSun', 'STSong', serif;
   color: var(--text-secondary);
-  animation: text-float linear forwards;
   opacity: 0.6;
   white-space: nowrap;
-}
-
-/* 花瓣飘动动画 */
-@keyframes petal-float {
-  0% {
-    transform: translateY(-100px) rotate(0deg);
-    opacity: 0;
-  }
-  10% {
-    opacity: 1;
-  }
-  90% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateY(100vh) rotate(360deg);
-    opacity: 0;
-  }
-}
-
-/* 文字飘动动画 */
-@keyframes text-float {
-  0% {
-    transform: translateY(-100px) scale(0.5);
-    opacity: 0;
-  }
-  10% {
-    opacity: 1;
-  }
-  90% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateY(100vh) scale(1.2);
-    opacity: 0;
-  }
+  will-change: transform, opacity;
 }
 
 /* 收藏数量徽章样式 */

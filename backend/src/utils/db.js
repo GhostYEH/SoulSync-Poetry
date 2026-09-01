@@ -79,8 +79,30 @@ function getSqlitePath() {
 // SQL 兼容层
 // ============================================================================
 
-function convertPlaceholders(text) {
-  return text.replace(/\$(\d+)/g, '?');
+function convertPlaceholders(text, params = []) {
+  // PostgreSQL allows a numbered placeholder to be reused (for example
+  // `$1` appearing twice). SQLite's anonymous `?` placeholders do not have
+  // that behavior, so expand the parameter list in SQL appearance order.
+  // A few legacy SQLite queries also contain anonymous `?` placeholders;
+  // assign those from parameters that are not referenced by a numbered one.
+  const numberedIndexes = new Set();
+  for (const match of text.matchAll(/\$(\d+)/g)) {
+    numberedIndexes.add(Number(match[1]));
+  }
+
+  const anonymousParams = params.filter((_, index) => !numberedIndexes.has(index + 1));
+  let anonymousIndex = 0;
+  const orderedParams = [];
+  const sql = text.replace(/\$(\d+)|\?/g, (placeholder, index) => {
+    if (placeholder.startsWith('$')) {
+      orderedParams.push(params[Number(index) - 1]);
+    } else {
+      orderedParams.push(anonymousParams[anonymousIndex++]);
+    }
+    return '?';
+  });
+
+  return { sql, params: orderedParams };
 }
 
 function isWriteSql(sql) {
@@ -105,13 +127,14 @@ function isConnectionError(err) {
 
 function sqliteQuery(text, params = []) {
   const sqlite = getSqliteDb();
-  const sql = convertPlaceholders(text);
+  const converted = convertPlaceholders(text, params);
+  const sql = converted.sql;
   const stmt = sqlite.prepare(sql);
   if (hasReturning(sql) || !isWriteSql(sql)) {
-    const rows = stmt.all(...params);
+    const rows = stmt.all(...converted.params);
     return { rows, rowCount: rows.length, command: '' };
   }
-  const result = stmt.run(...params);
+  const result = stmt.run(...converted.params);
   return { rows: [], rowCount: result.changes, command: '', lastInsertRowid: result.lastInsertRowid };
 }
 

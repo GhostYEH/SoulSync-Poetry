@@ -130,6 +130,7 @@ router.post('/error-book/add', authenticateToken, asyncHandler(async (req, res) 
   const { recordId, question, userAnswer, correctAnswer, explanation } = req.body;
 
   validate(req.body, {
+    recordId: 'required|int|positive',
     question: 'required|string|minLen:1',
     correctAnswer: 'required|string|minLen:1',
   });
@@ -151,10 +152,29 @@ router.get('/error-book', authenticateToken, asyncHandler(async (req, res) => {
   res.json(errors);
 }));
 
+router.post('/error-book/:id/review', authenticateToken, asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  const { userAnswer } = req.body;
+  validate({ id: req.params.id }, { id: 'required|int|positive' });
+  validate(req.body, { userAnswer: 'required|string|minLen:1' });
+  const result = await challengeService.reviewErrorBookQuestion(userId, Number(req.params.id), userAnswer);
+  res.json(result);
+}));
+
+router.post('/error-book/:id/master', authenticateToken, asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  validate({ id: req.params.id }, { id: 'required|int|positive' });
+  const updated = await challengeService.markErrorBookQuestionReviewed(userId, Number(req.params.id));
+  if (!updated) throw ApiError.notFound('错题不存在');
+  res.json({ success: updated });
+}));
+
 router.delete('/error-book/:id', authenticateToken, asyncHandler(async (req, res) => {
   const userId = req.user.userId;
-  const id = req.params.id;
-  await challengeService.removeFromErrorBook(userId, id);
+  validate({ id: req.params.id }, { id: 'required|int|positive' });
+  const id = Number(req.params.id);
+  const removed = await challengeService.removeFromErrorBook(userId, id);
+  if (!removed) throw ApiError.notFound('错题不存在');
   res.json({ success: true });
 }));
 

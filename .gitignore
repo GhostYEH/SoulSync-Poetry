@@ -65,6 +65,7 @@ pids/
 *.pid
 *.seed
 *.pid.lock
+/backend/generated-images/
 
 # Coverage directory used by tools like istanbul
 coverage/

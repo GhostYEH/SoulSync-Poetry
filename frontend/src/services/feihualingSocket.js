@@ -6,11 +6,20 @@ class FeihualingSocket {
     this.socket = null;
     this.connected = false;
     this.eventHandlers = {};
+    this.authToken = null;
   }
 
   connect(token) {
+    this.authToken = token || this.authToken;
     if (this.socket && this.connected) {
-      return this.socket;
+      return this.channel();
+    }
+
+    // Socket.IO 会自动重连。不要在每次页面切换时再创建一个连接，
+    // 否则服务端会把同一用户的 socketId 来回覆盖，邀请和房间事件会丢失。
+    if (this.socket) {
+      this.socket.connect();
+      return this.channel();
     }
 
     this.socket = io(SOCKET_URL, {
@@ -25,7 +34,8 @@ class FeihualingSocket {
       this.connected = true;
       
       // 发送认证
-      this.socket.emit('authenticate', { token });
+      if (this.authToken) this.socket.emit('authenticate', { token: this.authToken });
+      this.trigger('connect');
     });
 
     this.socket.on('disconnect', () => {
@@ -109,13 +119,81 @@ class FeihualingSocket {
       this.trigger('timer-resume', data);
     });
 
+    // 诗词闯关联机事件也走同一条全局连接
+    [
+      'challenge-invitation',
+      'challenge-invitation-sent',
+      'challenge-invitation-rejected',
+      'challenge-invitation-cancelled',
+      'challenge-dual-started',
+      'challenge-dual-next',
+      'challenge-dual-finished',
+      'challenge-dual-timer-tick',
+      'challenge-dual-answer-update',
+      'challenge-matchmaking-waiting',
+      'challenge-matchmaking-cancelled',
+      'challenge-matchmaking-count',
+      'opponent-reconnecting',
+      'opponent-reconnected',
+      'challenge-started',
+      'challenge-answer-result',
+      'challenge-next',
+      'challenge-timeouted',
+      'challenge-finished',
+      'challenge-history-result',
+      'pong'
+    ].forEach(event => {
+      this.socket.on(event, (data) => this.trigger(event, data));
+    });
+
     // 错误处理
     this.socket.on('error', (error) => {
       console.error('飞花令错误:', error);
       this.trigger('error', error);
     });
 
-    return this.socket;
+    return this.channel();
+  }
+
+  // 给页面一个带作用域的事件通道。通道销毁只移除当前页面的监听，
+  // 不会断开全局连接，因此用户停留在其他页面时仍能收到邀请。
+  channel() {
+    const handlers = [];
+    const service = this;
+    return {
+      get connected() { return service.connected; },
+      on(event, callback) {
+        service.on(event, callback);
+        handlers.push({ event, callback });
+        return this;
+      },
+      off(event, callback) {
+        service.off(event, callback);
+        const index = handlers.findIndex(item => item.event === event && item.callback === callback);
+        if (index >= 0) handlers.splice(index, 1);
+        return this;
+      },
+      once(event, callback) {
+        const onceHandler = (data) => {
+          service.off(event, onceHandler);
+          const index = handlers.findIndex(item => item.event === event && item.callback === onceHandler);
+          if (index >= 0) handlers.splice(index, 1);
+          callback(data);
+        };
+        service.on(event, onceHandler);
+        handlers.push({ event, callback: onceHandler });
+        return this;
+      },
+      emit(event, data) {
+        service.socket?.emit(event, data);
+        return this;
+      },
+      // 页面生命周期不再拥有连接；这里只释放该页面的事件。
+      disconnect() { this.dispose(); },
+      dispose() {
+        handlers.splice(0).forEach(({ event, callback }) => service.off(event, callback));
+      }
+    };
   }
 
   disconnect() {
@@ -203,6 +281,32 @@ class FeihualingSocket {
       loserId,
       reason
     });
+  }
+
+  refreshPendingInvitations() {
+    this.socket?.emit('feihualing:get-pending-invitation');
+    this.socket?.emit('challenge-get-pending-invitations');
+  }
+
+  // 闯关邀请共用同一条已认证连接
+  challengeSendInvitation(targetUserId, targetUsername, username) {
+    this.socket?.emit('challenge-send-invitation', { targetUserId, targetUsername, username });
+  }
+
+  challengeCancelInvitation(targetUserId) {
+    this.socket?.emit('challenge-cancel-invitation', { targetUserId });
+  }
+
+  challengeAcceptInvitation(inviteId, inviterId, username) {
+    this.socket?.emit('challenge-accept-invitation', { inviteId, inviterId, username });
+  }
+
+  challengeRejectInvitation(inviteId, inviterId) {
+    this.socket?.emit('challenge-reject-invitation', { inviteId, inviterId });
+  }
+
+  challengeRefreshOnlineUsers() {
+    this.socket?.emit('challenge-get-online-users');
   }
 
   // 事件监听

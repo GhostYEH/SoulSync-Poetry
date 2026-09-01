@@ -266,20 +266,7 @@ import {
   PhSquaresFour,
   PhX,
 } from '@phosphor-icons/vue';
-import liBaiPortrait from '@/assets/poets/li-bai.png';
-import duFuPortrait from '@/assets/poets/du-fu.png';
-import suShiPortrait from '@/assets/poets/su-shi.png';
-import wangWeiPortrait from '@/assets/poets/wang-wei.png';
-import baiJuyiPortrait from '@/assets/poets/bai-juyi.png';
-import unknownScholarPortrait from '@/assets/poets/unknown-scholar.png';
-
-const POET_PORTRAITS = {
-  李白: liBaiPortrait,
-  杜甫: duFuPortrait,
-  苏轼: suShiPortrait,
-  王维: wangWeiPortrait,
-  白居易: baiJuyiPortrait,
-};
+import { AUTHOR_PORTRAITS as POET_PORTRAITS, DEFAULT_AUTHOR_PORTRAIT as unknownScholarPortrait } from '@/assets/poets/authorPortraits';
 
 export default {
   name: 'Search',

@@ -158,7 +158,6 @@ class FeihualingService {
           }
         }
         this.onlineUsers.delete(userId);
-        this.pendingInvitations.delete(userId);
         break;
       }
     }
@@ -221,6 +220,21 @@ class FeihualingService {
     return this.onlineUsers.get(userId);
   }
 
+  getPendingInvitation(userId) {
+    const invitation = this.pendingInvitations.get(userId.toString());
+    if (!invitation) return null;
+    if (Date.now() - invitation.timestamp > 60000) {
+      this.pendingInvitations.delete(userId.toString());
+      return null;
+    }
+    return {
+      inviteId: invitation.id,
+      from: invitation.from,
+      keyword: invitation.keyword,
+      difficulty: invitation.difficulty
+    };
+  }
+
   getRoom(roomId) {
     return this.rooms.get(roomId);
   }
@@ -228,6 +242,10 @@ class FeihualingService {
   sendInvitation(fromUserId, toUserId, keyword, difficulty) {
     const fromUser = this.onlineUsers.get(fromUserId);
     const toUser = this.onlineUsers.get(toUserId);
+
+    if (String(fromUserId) === String(toUserId)) {
+      return { success: false, error: '不能邀请自己' };
+    }
 
     if (!fromUser || !toUser) {
       return { success: false, error: '用户不在线' };
@@ -288,6 +306,10 @@ class FeihualingService {
       return { success: false, error: '邀请已过期' };
     }
 
+    if (invitation.id !== inviteId || String(invitation.from.userId) !== String(inviterId)) {
+      return { success: false, error: '邀请信息已失效，请重新邀请' };
+    }
+
     const fromUser = this.onlineUsers.get(inviterId);
     const toUser = this.onlineUsers.get(userId);
 
@@ -299,8 +321,9 @@ class FeihualingService {
       return { success: false, error: '对方已在游戏中' };
     }
 
-    const finalKeyword = keyword || invitation.keyword || this.getRandomKeyword();
-    const finalDifficulty = difficulty || invitation.difficulty || 'medium';
+    // 以服务端保存的邀请为准，不能让客户端篡改令字或难度。
+    const finalKeyword = invitation.keyword || this.getRandomKeyword();
+    const finalDifficulty = invitation.difficulty || 'medium';
     const diffConfig = this.DIFFICULTY_CONFIG[finalDifficulty] || this.DIFFICULTY_CONFIG.medium;
 
     const roomId = uuidv4();
@@ -364,6 +387,10 @@ class FeihualingService {
     if (Date.now() - invitation.timestamp > 60000) {
       this.pendingInvitations.delete(userId);
       return { success: false, error: '邀请已过期' };
+    }
+
+    if (invitation.id !== inviteId || String(invitation.from.userId) !== String(inviterId)) {
+      return { success: false, error: '邀请信息已失效，请重新邀请' };
     }
 
     const fromUser = this.onlineUsers.get(inviterId);
@@ -588,7 +615,10 @@ class FeihualingService {
       return { success: false, error: '玩家不存在' };
     }
 
-    return this._endRoundWithResult(room, winner, loser, 'manual', reason || '主动结束');
+    return {
+      success: true,
+      ...this._endRoundWithResult(room, winner, loser, 'manual', reason || '主动结束')
+    };
   }
 
   async saveFightHistory(room) {

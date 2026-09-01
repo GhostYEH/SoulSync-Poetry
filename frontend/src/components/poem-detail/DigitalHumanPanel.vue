@@ -18,7 +18,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { digitalHumanService } from '../../services/digitalHumanService'
 
 const props = defineProps({ state: { type: String, default: 'idle' }, autoExplain: Boolean })
@@ -29,8 +29,25 @@ const loadMessage = ref('数字人场景加载中')
 const idleMotion = ref('')
 let unityInstance
 let cutoutFrame
+let resumeFrame
+let cutoutWorker
+let cutoutContext
+let cutoutWorkerReady = false
+let captureInFlight = false
+let componentActive = true
+let isInViewport = true
+let isDisposed = false
+let lastCutoutTime = 0
+let renderWidth = 1
+let renderHeight = 1
+let intersectionObserver
+let resizeObserver
+let fallbackVisited = new Uint32Array(1)
+let fallbackQueue = new Int32Array(1)
+let fallbackGeneration = 0
 let idleMotionTimer
 let lastIdleMotion = -1
+const CUTOUT_FRAME_INTERVAL = 1000 / 60
 const webglRoot = (import.meta.env.VITE_DIGITAL_HUMAN_WEBGL_URL || '/digital-human').replace(/\/index\.html$/, '').replace(/\/$/, '')
 const labels = { idle: '静候陪读', preparing: '准备语音', speaking: '正在讲解', paused: '讲解暂停', thinking: '正在思考', error: '载入失败' }
 const stateLabel = computed(() => labels[props.state] || '静候陪读')
@@ -96,6 +113,10 @@ const mountUnity = async () => {
     }, progress => { loadMessage.value = `数字人加载 ${Math.round(progress * 100)}%` })
     window.digitalHumanUnityInstance = unityInstance
     digitalHumanService.attachUnity(unityInstance)
+    if (isDisposed) {
+      await unityInstance.Quit?.()
+      return
+    }
     ready.value = true
     startCutoutRenderer()
   } catch (error) {
@@ -104,57 +125,157 @@ const mountUnity = async () => {
   }
 }
 
-const startCutoutRenderer = () => {
-  const source = canvas.value
-  const output = outputCanvas.value
-  const context = output?.getContext('2d', { willReadFrequently: true })
-  if (!source || !output || !context) return
+const shouldRender = () => componentActive && isInViewport && !document.hidden && !isDisposed
 
-  const render = () => {
-    const width = Math.max(1, Math.round(output.clientWidth * Math.min(window.devicePixelRatio || 1, 1.5)))
-    const height = Math.max(1, Math.round(output.clientHeight * Math.min(window.devicePixelRatio || 1, 1.5)))
-    if (output.width !== width || output.height !== height) {
-      output.width = width
-      output.height = height
-    }
-    context.clearRect(0, 0, width, height)
-    context.drawImage(source, 0, 0, width, height)
-    const frame = context.getImageData(0, 0, width, height)
-    const pixels = frame.data
-    const visited = new Uint8Array(width * height)
-    const queue = new Int32Array(width * height)
-    let head = 0
-    let tail = 0
-    const baseR = pixels[0]
-    const baseG = pixels[1]
-    const baseB = pixels[2]
-    const enqueue = index => {
-      if (index < 0 || index >= visited.length || visited[index]) return
-      const offset = index * 4
-      const distance = Math.abs(pixels[offset] - baseR) + Math.abs(pixels[offset + 1] - baseG) + Math.abs(pixels[offset + 2] - baseB)
-      if (distance > 72) return
-      visited[index] = 1
-      queue[tail++] = index
-    }
-    for (let x = 0; x < width; x += 1) { enqueue(x); enqueue((height - 1) * width + x) }
-    for (let y = 1; y < height - 1; y += 1) { enqueue(y * width); enqueue(y * width + width - 1) }
-    while (head < tail) {
-      const index = queue[head++]
-      const offset = index * 4
-      pixels[offset] = 0
-      pixels[offset + 1] = 0
-      pixels[offset + 2] = 0
-      pixels[offset + 3] = 0
-      const x = index % width
-      if (x > 0) enqueue(index - 1)
-      if (x + 1 < width) enqueue(index + 1)
-      if (index >= width) enqueue(index - width)
-      if (index + width < visited.length) enqueue(index + width)
-    }
-    context.putImageData(frame, 0, 0)
-    cutoutFrame = requestAnimationFrame(render)
+const updateOutputSize = (rect) => {
+  const output = outputCanvas.value
+  if (!output) return
+  const ratio = Math.min(window.devicePixelRatio || 1, 1.5)
+  renderWidth = Math.max(1, Math.round(rect.width * ratio))
+  renderHeight = Math.max(1, Math.round(rect.height * ratio))
+
+  if (cutoutWorker) {
+    cutoutWorker.postMessage({ type: 'resize', width: renderWidth, height: renderHeight })
+  } else if (output.width !== renderWidth || output.height !== renderHeight) {
+    output.width = renderWidth
+    output.height = renderHeight
+    fallbackVisited = new Uint32Array(renderWidth * renderHeight)
+    fallbackQueue = new Int32Array(renderWidth * renderHeight)
+    fallbackGeneration = 0
   }
-  cutoutFrame = requestAnimationFrame(render)
+}
+
+const renderFallbackFrame = (source) => {
+  const context = cutoutContext
+  if (!context) return
+
+  context.drawImage(source, 0, 0, renderWidth, renderHeight)
+  const frame = context.getImageData(0, 0, renderWidth, renderHeight)
+  const pixels = frame.data
+  fallbackGeneration += 1
+  if (fallbackGeneration === 0xffffffff) {
+    fallbackVisited.fill(0)
+    fallbackGeneration = 1
+  }
+  const currentGeneration = fallbackGeneration
+  let head = 0
+  let tail = 0
+  const baseR = pixels[0]
+  const baseG = pixels[1]
+  const baseB = pixels[2]
+  const enqueue = (index) => {
+    if (index < 0 || index >= fallbackVisited.length || fallbackVisited[index] === currentGeneration) return
+    const offset = index * 4
+    const distance = Math.abs(pixels[offset] - baseR)
+      + Math.abs(pixels[offset + 1] - baseG)
+      + Math.abs(pixels[offset + 2] - baseB)
+    if (distance > 72) return
+    fallbackVisited[index] = currentGeneration
+    fallbackQueue[tail++] = index
+  }
+  for (let x = 0; x < renderWidth; x += 1) {
+    enqueue(x)
+    enqueue((renderHeight - 1) * renderWidth + x)
+  }
+  for (let y = 1; y < renderHeight - 1; y += 1) {
+    enqueue(y * renderWidth)
+    enqueue(y * renderWidth + renderWidth - 1)
+  }
+  while (head < tail) {
+    const index = fallbackQueue[head++]
+    const offset = index * 4
+    pixels[offset] = 0
+    pixels[offset + 1] = 0
+    pixels[offset + 2] = 0
+    pixels[offset + 3] = 0
+    const x = index % renderWidth
+    if (x > 0) enqueue(index - 1)
+    if (x + 1 < renderWidth) enqueue(index + 1)
+    if (index >= renderWidth) enqueue(index - renderWidth)
+    if (index + renderWidth < fallbackVisited.length) enqueue(index + renderWidth)
+  }
+  context.putImageData(frame, 0, 0)
+}
+
+const queueCutoutFrame = () => {
+  if (!cutoutFrame && shouldRender()) cutoutFrame = requestAnimationFrame(renderCutoutFrame)
+}
+
+const renderCutoutFrame = (timestamp) => {
+  cutoutFrame = undefined
+  if (!shouldRender()) return
+  if (timestamp - lastCutoutTime < CUTOUT_FRAME_INTERVAL) {
+    queueCutoutFrame()
+    return
+  }
+  lastCutoutTime = timestamp
+
+  const source = canvas.value
+  if (!source) return
+
+  if (cutoutWorker) {
+    if (cutoutWorkerReady && !captureInFlight) {
+      captureInFlight = true
+      cutoutWorkerReady = false
+      createImageBitmap(source)
+        .then((bitmap) => cutoutWorker?.postMessage({ type: 'frame', bitmap }, [bitmap]))
+        .catch(() => { cutoutWorkerReady = true })
+        .finally(() => { captureInFlight = false })
+    }
+  } else {
+    renderFallbackFrame(source)
+  }
+  queueCutoutFrame()
+}
+
+const startCutoutRenderer = () => {
+  const output = outputCanvas.value
+  if (!canvas.value || !output) return
+
+  updateOutputSize(output.getBoundingClientRect())
+  if (!cutoutWorker && !cutoutContext && 'transferControlToOffscreen' in output && typeof Worker !== 'undefined') {
+    try {
+      const offscreen = output.transferControlToOffscreen()
+      cutoutWorker = new Worker(new URL('../../workers/digitalHumanCutout.worker.js', import.meta.url), { type: 'module' })
+      cutoutWorker.onmessage = ({ data }) => {
+        if (data.type === 'ready') cutoutWorkerReady = true
+      }
+      cutoutWorker.postMessage({ type: 'init', canvas: offscreen, width: renderWidth, height: renderHeight }, [offscreen])
+    } catch (error) {
+      console.warn('[DigitalHuman] Offscreen cutout unavailable, using main-thread fallback', error)
+      cutoutWorker?.terminate()
+      cutoutWorker = undefined
+    }
+  }
+  if (!cutoutWorker) cutoutContext = output.getContext('2d', { alpha: true, willReadFrequently: true })
+  queueCutoutFrame()
+}
+
+const handleVisibilityChange = () => {
+  if (shouldRender()) queueCutoutFrame()
+}
+
+const suspendUnitySurface = () => {
+  const source = canvas.value
+  if (!source) return
+  source.width = 1
+  source.height = 1
+}
+
+const resumeUnitySurface = () => {
+  if (resumeFrame) cancelAnimationFrame(resumeFrame)
+  resumeFrame = requestAnimationFrame(() => {
+    resumeFrame = undefined
+    const source = canvas.value
+    const output = outputCanvas.value
+    if (!source || !output || !componentActive) return
+    const rect = output.getBoundingClientRect()
+    const unityRatio = Math.max(2, Math.min(window.devicePixelRatio || 1, 2))
+    source.width = Math.max(1, Math.round(rect.width * unityRatio))
+    source.height = Math.max(1, Math.round(rect.height * unityRatio))
+    updateOutputSize(rect)
+    queueCutoutFrame()
+  })
 }
 
 watch(() => props.state, (state) => {
@@ -163,11 +284,44 @@ watch(() => props.state, (state) => {
 })
 
 onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(([entry]) => updateOutputSize(entry.contentRect))
+    resizeObserver.observe(outputCanvas.value)
+  }
+  if (typeof IntersectionObserver !== 'undefined') {
+    intersectionObserver = new IntersectionObserver(([entry]) => {
+      isInViewport = entry.isIntersecting
+      if (isInViewport) queueCutoutFrame()
+    }, { rootMargin: '160px 0px' })
+    intersectionObserver.observe(outputCanvas.value)
+  }
   mountUnity()
   scheduleIdleMotion(450)
 })
+onActivated(() => {
+  componentActive = true
+  resumeUnitySurface()
+  if (props.state === 'idle') scheduleIdleMotion(350)
+})
+onDeactivated(() => {
+  componentActive = false
+  if (resumeFrame) cancelAnimationFrame(resumeFrame)
+  resumeFrame = undefined
+  if (cutoutFrame) cancelAnimationFrame(cutoutFrame)
+  cutoutFrame = undefined
+  stopIdleMotion()
+  suspendUnitySurface()
+})
 onBeforeUnmount(async () => {
-  cancelAnimationFrame(cutoutFrame)
+  isDisposed = true
+  componentActive = false
+  if (cutoutFrame) cancelAnimationFrame(cutoutFrame)
+  if (resumeFrame) cancelAnimationFrame(resumeFrame)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  intersectionObserver?.disconnect()
+  resizeObserver?.disconnect()
+  cutoutWorker?.terminate()
   stopIdleMotion()
   digitalHumanService.detachUnity(unityInstance)
   if (window.digitalHumanUnityInstance === unityInstance) delete window.digitalHumanUnityInstance

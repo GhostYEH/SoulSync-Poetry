@@ -97,6 +97,23 @@ export const streamAI = async (payload, { onToken, onDone, timeout = TIMEOUTS.LO
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   let fullText = '';
+  let pendingToken = '';
+  let tokenFrame = null;
+
+  // SSE 可能一秒推送数十个碎片。合并到浏览器帧后再更新 Vue，
+  // 文本仍然逐步出现，但不会为每个字都触发整页响应式渲染。
+  const flushToken = () => {
+    if (tokenFrame !== null) cancelAnimationFrame(tokenFrame);
+    tokenFrame = null;
+    if (!pendingToken) return;
+    const token = pendingToken;
+    pendingToken = '';
+    onToken?.(token, fullText);
+  };
+  const scheduleToken = (content) => {
+    pendingToken += content;
+    if (tokenFrame === null) tokenFrame = requestAnimationFrame(flushToken);
+  };
 
   try {
     const response = await fetch(`${API_BASE_URL}/ai/stream`, {
@@ -121,10 +138,11 @@ export const streamAI = async (payload, { onToken, onDone, timeout = TIMEOUTS.LO
       const event = JSON.parse(raw);
       if (event.type === 'token' && event.content) {
         fullText += event.content;
-        onToken?.(event.content, fullText);
+        scheduleToken(event.content);
       } else if (event.type === 'error') {
         throw new Error(event.message || 'AI流式请求失败');
       } else if (event.type === 'done') {
+        flushToken();
         onDone?.(fullText);
       }
     };
@@ -138,11 +156,13 @@ export const streamAI = async (payload, { onToken, onDone, timeout = TIMEOUTS.LO
       if (done) break;
     }
     if (buffer.trim()) consume(buffer.trim());
+    flushToken();
     return fullText;
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('AI流式请求超时');
     throw error;
   } finally {
+    if (tokenFrame !== null) cancelAnimationFrame(tokenFrame);
     clearTimeout(timer);
   }
 };
@@ -283,6 +303,13 @@ export const api = {
       body: JSON.stringify(data)
     }),
     getErrorBook: () => request('/challenge/error-book'),
+    reviewErrorBook: (id, userAnswer) => request(`/challenge/error-book/${id}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ userAnswer })
+    }),
+    markErrorBookReviewed: (id) => request(`/challenge/error-book/${id}/master`, {
+      method: 'POST'
+    }),
     removeFromErrorBook: (id) => request(`/challenge/error-book/${id}`, {
       method: 'DELETE'
     }),
