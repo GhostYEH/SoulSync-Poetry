@@ -129,8 +129,7 @@ async function getChallengeRecords(userId) {
   return db.all(
     `SELECT * FROM user_challenge_records
      WHERE user_id = $1
-     ORDER BY answered_at DESC
-     LIMIT 50`,
+     ORDER BY answered_at DESC`,
     [userId]
   ).catch(() => []);
 }
@@ -140,8 +139,7 @@ async function getFeihuaRecords(userId) {
   return db.all(
     `SELECT * FROM feihua_high_records
      WHERE user_id = $1
-     ORDER BY updated_at DESC
-     LIMIT 50`,
+     ORDER BY updated_at DESC`,
     [userId]
   ).catch(() => []);
 }
@@ -159,11 +157,14 @@ async function getLearningRecords(userId) {
 async function generateAIAnalysisReport(userId, wrongQuestions = [], challengeRecords = [], feihuaRecords = [], learningRecords = []) {
   const recitedRecords = learningRecords.filter(row => Number(row.recite_attempts) > 0);
   const totalReciteAttempts = recitedRecords.reduce(
-    (sum, row) => sum + Number(row.recite_attempts || 0),
+    (sum, row) => sum + nonNegativeInteger(row.recite_attempts),
     0
   );
   const totalScore = recitedRecords.reduce(
-    (sum, row) => sum + Number(row.total_score || 0),
+    (sum, row) => {
+      const attempts = nonNegativeInteger(row.recite_attempts);
+      return sum + Math.min(nonNegativeNumber(row.total_score), attempts * 100);
+    },
     0
   );
   const averageScore = totalReciteAttempts > 0
@@ -180,16 +181,35 @@ async function generateAIAnalysisReport(userId, wrongQuestions = [], challengeRe
   );
   const challengeTotalCount = challengeRecords.length;
 
-  const dynastyRow = await db.get(
+  const totalStudyTime = learningRecords.reduce(
+    (sum, row) => sum + nonNegativeNumber(row.study_time),
+    0
+  );
+  const totalViews = learningRecords.reduce(
+    (sum, row) => sum + nonNegativeNumber(row.view_count),
+    0
+  );
+  const totalAIExplains = learningRecords.reduce(
+    (sum, row) => sum + nonNegativeNumber(row.ai_explain_count),
+    0
+  );
+
+  const feihuaStats = summariseFeihuaRecords(feihuaRecords);
+
+  const dynastyRows = await db.all(
     `SELECT p.dynasty, COUNT(*) AS count
      FROM learning_records lr
      JOIN poems p ON lr.poem_id = p.id
      WHERE lr.user_id = $1
      GROUP BY p.dynasty
-     ORDER BY count DESC
-     LIMIT 1`,
+     ORDER BY count DESC`,
     [userId]
-  ).catch(() => null);
+  ).catch(() => []);
+  const dynastyRow = dynastyRows[0];
+  const dynastyDistribution = dynastyRows.reduce((distribution, row) => {
+    if (row.dynasty) distribution[row.dynasty] = Number(row.count || 0);
+    return distribution;
+  }, {});
 
   const strength = [];
   const weakness = [];
@@ -231,8 +251,11 @@ async function generateAIAnalysisReport(userId, wrongQuestions = [], challengeRe
       mastery_rate: masteryRate,
       wrong_count: wrongQuestions.length,
       total_recite_attempts: totalReciteAttempts,
+      total_study_time: totalStudyTime,
+      total_views: totalViews,
+      total_ai_explains: totalAIExplains,
       top_dynasty: dynastyRow?.dynasty || '未知',
-      dynasty_distribution: {},
+      dynasty_distribution: dynastyDistribution,
       typical_wrong_questions: wrongQuestions.slice(0, 5),
       challenge_correct_count: challengeCorrectCount,
       challenge_total_count: challengeTotalCount,
@@ -247,7 +270,30 @@ function toDayKey(value) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function buildTrend(events = []) {
+function nonNegativeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
+function nonNegativeInteger(value) {
+  return Math.floor(nonNegativeNumber(value));
+}
+
+function summariseFeihuaRecords(records = []) {
+  return records.reduce((stats, row) => ({
+    battles: stats.battles + nonNegativeNumber(row.total_battles),
+    wins: stats.wins + nonNegativeNumber(row.wins),
+    losses: stats.losses + nonNegativeNumber(row.losses),
+  }), { battles: 0, wins: 0, losses: 0 });
+}
+
+function clampScore(value, fallback = 50) {
+  const score = Number(value);
+  if (!Number.isFinite(score)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function buildTrend(events = [], learningRecords = []) {
   const now = new Date();
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(now);
@@ -267,8 +313,22 @@ function buildTrend(events = []) {
     const day = byDate.get(toDayKey(event.created_at));
     if (!day) return;
     day.activity += 1;
-    if (Number(event.score) > 0) day.scores.push(Number(event.score));
+    if (Number(event.score) > 0) day.scores.push(clampScore(event.score, 0));
   });
+
+  // 兼容统一学习事件上线前的历史数据，避免老用户被误判为近 7 日没有学习。
+  const hasRecentEvents = events.some(event => byDate.has(toDayKey(event.created_at)));
+  if (!hasRecentEvents) {
+    learningRecords.forEach(record => {
+      const day = byDate.get(toDayKey(record.last_view_time));
+      if (!day) return;
+      day.activity += Math.max(1, nonNegativeInteger(record.view_count) + nonNegativeInteger(record.ai_explain_count) + nonNegativeInteger(record.recite_attempts));
+      if (Number(record.recite_attempts) > 0) {
+        const average = Math.min(100, nonNegativeNumber(record.total_score) / nonNegativeInteger(record.recite_attempts || 1));
+        if (Number.isFinite(average)) day.scores.push(clampScore(average, 0));
+      }
+    });
+  }
 
   return days.map(day => ({
     date: day.date,
@@ -350,32 +410,40 @@ function normaliseAdvice(result, fallback) {
  * 没有模型密钥或模型暂不可用时，保留同一数据口径的本地路线，不让页面降级为空白。
  */
 async function getAISuggestionDashboard(userId) {
+  const trendStart = new Date();
+  trendStart.setHours(0, 0, 0, 0);
+  trendStart.setDate(trendStart.getDate() - 6);
   const [learningRecords, wrongQuestions, challengeRecords, feihuaRecords, ability, events] = await Promise.all([
     getLearningStats(userId),
     getWrongQuestionRows(userId).catch(() => []),
     getChallengeRecords(userId),
     getFeihuaRecords(userId),
     getUserAbilityModel(userId),
-    learningEventService.getUserEvents(userId, { limit: 120 }).catch(() => []),
+    // 使用日期字符串兼容 SQLite 的 "YYYY-MM-DD HH:mm:ss" 和 PostgreSQL 时间戳格式。
+    learningEventService.getUserEvents(userId, { limit: null, startDate: toDayKey(trendStart) }).catch(() => []),
   ]);
   const recited = learningRecords.filter(row => Number(row.recite_attempts) > 0);
-  const totalAttempts = recited.reduce((sum, row) => sum + Number(row.recite_attempts || 0), 0);
+  const totalAttempts = recited.reduce((sum, row) => sum + nonNegativeInteger(row.recite_attempts), 0);
   const averageScore = totalAttempts
-    ? Math.round(recited.reduce((sum, row) => sum + Number(row.total_score || 0), 0) / totalAttempts)
+    ? clampScore(Math.round(recited.reduce((sum, row) => {
+      const attempts = nonNegativeInteger(row.recite_attempts);
+      return sum + Math.min(nonNegativeNumber(row.total_score), attempts * 100);
+    }, 0) / totalAttempts), 0)
     : 0;
-  const mastered = recited.filter(row => Number(row.best_score) >= 100).length;
-  const trend = buildTrend(events);
+  const mastered = recited.filter(row => clampScore(row.best_score, 0) >= 100).length;
+  const trend = buildTrend(events, learningRecords);
+  const feihuaStats = summariseFeihuaRecords(feihuaRecords);
   const dimensions = [
-    { key: 'memory', label: '记忆', score: Number(ability.memory_score || 50) },
-    { key: 'comprehension', label: '理解', score: Number(ability.comprehension_score || 50) },
-    { key: 'expression', label: '表达', score: Number(ability.expression_score || 50) },
-    { key: 'appreciation', label: '鉴赏', score: Number(ability.appreciation_score || 50) },
+    { key: 'memory', label: '记忆', score: clampScore(ability.memory_score) },
+    { key: 'comprehension', label: '理解', score: clampScore(ability.comprehension_score) },
+    { key: 'expression', label: '表达', score: clampScore(ability.expression_score) },
+    { key: 'appreciation', label: '鉴赏', score: clampScore(ability.appreciation_score) },
   ].sort((a, b) => a.score - b.score);
   const weakPoems = recited
-    .filter(row => Number(row.best_score) < 80)
-    .sort((a, b) => Number(a.best_score || 0) - Number(b.best_score || 0))
+    .filter(row => clampScore(row.best_score, 0) < 80)
+    .sort((a, b) => clampScore(a.best_score, 0) - clampScore(b.best_score, 0))
     .slice(0, 3)
-    .map(row => ({ poem_id: row.poem_id, title: row.poem_title || row.title, author: row.poem_author || row.author, best_score: Number(row.best_score || 0) }));
+    .map(row => ({ poem_id: row.poem_id, title: row.poem_title || row.title, author: row.poem_author || row.author, best_score: clampScore(row.best_score, 0) }));
   const profile = {
     totalLearned: learningRecords.length,
     averageScore,
@@ -389,6 +457,17 @@ async function getAISuggestionDashboard(userId) {
     weakPoems,
     challengeAccuracy: challengeRecords.length ? Math.round((challengeRecords.filter(row => Number(row.is_correct) === 1).length / challengeRecords.length) * 100) : 0,
     feihuaSessions: feihuaRecords.length,
+    feihuaBattles: feihuaStats.battles,
+    feihuaWins: feihuaStats.wins,
+    feihuaLosses: feihuaStats.losses,
+    dataCoverage: {
+      learningRecords: learningRecords.length,
+      recitationRecords: recited.length,
+      wrongQuestions: wrongQuestions.length,
+      challengeRecords: challengeRecords.length,
+      feihuaSessions: feihuaRecords.length,
+      trendSource: events.some(event => trend.some(day => day.date === toDayKey(event.created_at))) ? 'learning_events' : 'learning_records_fallback',
+    },
   };
   const fallback = makeFallbackAdvice(profile);
   let advice = fallback;

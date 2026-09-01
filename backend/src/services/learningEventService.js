@@ -254,7 +254,8 @@ async function recordEvent(event) {
  */
 async function getUserEvents(userId, options = {}) {
   const { eventType, limit = 50, offset = 0, startDate, endDate } = options;
-  const cappedLimit = Math.min(Math.max(1, parseInt(limit) || 50), 200);
+  const hasLimit = limit !== null;
+  const cappedLimit = hasLimit ? Math.min(Math.max(1, parseInt(limit) || 50), 200) : null;
   const cappedOffset = Math.max(0, parseInt(offset) || 0);
   let sql = `SELECT * FROM learning_events WHERE user_id = $1`;
   const params = [userId];
@@ -262,8 +263,11 @@ async function getUserEvents(userId, options = {}) {
   if (eventType) { sql += ` AND event_type = $${idx++}`; params.push(eventType); }
   if (startDate) { sql += ` AND created_at >= $${idx++}`; params.push(startDate); }
   if (endDate) { sql += ` AND created_at <= $${idx++}`; params.push(endDate); }
-  sql += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
-  params.push(cappedLimit, cappedOffset);
+  sql += ' ORDER BY created_at DESC';
+  if (hasLimit) {
+    sql += ` LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(cappedLimit, cappedOffset);
+  }
   return db.all(sql, params);
 }
 
