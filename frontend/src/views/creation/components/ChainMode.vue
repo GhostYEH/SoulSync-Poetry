@@ -131,9 +131,10 @@
         </div>
       </div>
 
-      <!-- 提示区域 -->
+      <!-- 本地写作提醒：不冒充 AI 生成内容 -->
       <div class="hints-section" v-if="currentHint">
         <span class="hint-icon">💡</span>
+        <span class="hint-label">写作提醒</span>
         <span class="hint-text">{{ currentHint }}</span>
       </div>
 
@@ -350,7 +351,7 @@ export default {
       } else if (chainLines.value.length === expectedLines.value - 1) {
         currentHint.value = '收句要余韵悠长，点明主旨升华意境';
       } else {
-        currentHint.value = hints[Math.floor(Math.random() * hints.length)];
+        currentHint.value = hints[chainLines.value.length % hints.length];
       }
     };
 

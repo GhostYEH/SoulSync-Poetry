@@ -11,8 +11,14 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const server = http.createServer(app);
 const configuredOrigins = process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN || '';
-const allowedOrigins = configuredOrigins
+const configuredOriginList = configuredOrigins
   ? configuredOrigins.split(',').map(origin => origin.trim()).filter(Boolean)
+  : [];
+const localDevelopmentOrigins = process.env.NODE_ENV === 'production'
+  ? []
+  : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const allowedOrigins = configuredOriginList.length > 0
+  ? Array.from(new Set([...configuredOriginList, ...localDevelopmentOrigins]))
   : (process.env.NODE_ENV === 'production' ? [] : ['*']);
 const corsOrigin = allowedOrigins.length === 0
   ? false
@@ -137,7 +143,6 @@ const routeModules = {
   '/api/daily':       require('./src/api/dailyRoutes'),
   '/api/review':      require('./src/api/reviewRoutes'),
   '/api/feihua-ranking': require('./src/api/feihuaRankingRoutes'),
-  '/api/poetry-challenge': require('./src/api/poetryChallengeRoutes'),
   '/api/home':        require('./src/api/homeRoutes').router,
   '/api/profile':     require('./src/api/profileRoutes').router,
   '/api/personalized': require('./src/routes/personalizedRoutes'),

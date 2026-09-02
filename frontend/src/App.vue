@@ -23,27 +23,27 @@
     <!-- 自定义标题栏 (Electron环境) -->
     <TitleBar v-if="isElectron" />
 
-    <!-- 演示模式组件 -->
-    <DemoMode ref="demoMode" />
-
     <!-- 全局非阻塞消息与确认框，避免原生弹窗抢占浏览器焦点 -->
     <AppFeedback />
 
     <!-- 全局实时邀请：不依赖当前所在页面，登录后始终保持连接 -->
-    <GlobalInvitationCenter />
+    <GlobalInvitationCenter v-if="showGlobalChrome" />
 
     <!-- 动态元素容器 -->
-    <div class="dynamic-elements" ref="dynamicElements"></div>
+    <div v-if="showGlobalChrome" class="dynamic-elements" ref="dynamicElements"></div>
 
     <!-- 导航栏 -->
     <LiquidGlass
+      v-if="showGlobalChrome"
       as="nav"
       class="navbar ios26-navbar"
-      :corner-radius="0"
+      aria-label="主导航"
+      corner-radius="clamp(24px, 3vw, 34px)"
       padding="0"
-      :displacement-scale="34"
-      :aberration-intensity="1.9"
-      :elasticity="0.04"
+      :displacement-scale="22"
+      :blur-amount="0.28"
+      :saturation="165"
+      :aberration-intensity="1.35"
       @pointerover="prefetchNavigation"
       @focusin="prefetchNavigation"
     >
@@ -106,7 +106,7 @@
     </main>
 
     <!-- 页脚 -->
-    <footer v-if="$route.path !== '/challenge' && !$route.path.startsWith('/challenge/level/')" class="footer">
+    <footer v-if="showGlobalChrome && $route.path !== '/challenge' && !$route.path.startsWith('/challenge/level/')" class="footer">
       <div class="container footer-container">
         <p class="footer-text">© 2026 《智韵·灵犀》——基于大模型认知引擎与多维行为分析的智能化古诗词学习系统</p>
         <p class="footer-text">基于 AI 技术的智能学习平台</p>
@@ -116,12 +116,11 @@
 </template>
 
 <script>
-import TitleBar from './components/TitleBar.vue'
+import { defineAsyncComponent } from 'vue'
 import AppFeedback from './components/AppFeedback.vue'
-import GlobalInvitationCenter from './components/GlobalInvitationCenter.vue'
-import DemoMode from './views/DemoMode.vue'
 import { prefetchRoute } from './router'
 import { gsap } from './utils/gsapMotion'
+import { clearRouteTransitionStyles } from './utils/routeTransition'
 import { PhBooks as Books, PhCirclesThreePlus as CirclesThreePlus, PhFlagBanner as FlagBanner, PhHouse as House, PhLeaf as Leaf, PhMagnifyingGlass as MagnifyingGlass, PhNotebook as Notebook, PhPenNib as PenNib, PhUserCircle as UserCircle } from '@phosphor-icons/vue'
 
 const POEM_WORDS = Object.freeze([
@@ -129,6 +128,10 @@ const POEM_WORDS = Object.freeze([
   '人', '生', '梦', '想', '情', '意', '心', '境', '远', '近', '高', '低', '东', '西', '南', '北',
   '天', '地', '日', '月', '星', '辰'
 ])
+
+const GlobalInvitationCenter = defineAsyncComponent(() => import('./components/GlobalInvitationCenter.vue'))
+const LiquidGlass = defineAsyncComponent(() => import('./components/LiquidGlass.vue'))
+const TitleBar = defineAsyncComponent(() => import('./components/TitleBar.vue'))
 
 function getRouteTransitionOffset(transitionName, isEntering) {
   if (transitionName === 'page-back') return isEntering ? -14 : 9
@@ -141,7 +144,6 @@ export default {
     AppFeedback,
     GlobalInvitationCenter,
     TitleBar,
-    DemoMode,
     Books,
     CirclesThreePlus,
     FlagBanner,
@@ -165,6 +167,12 @@ export default {
     }
   },
 
+  computed: {
+    showGlobalChrome() {
+      return !['/login', '/register'].includes(this.$route.path)
+    }
+  },
+
   mounted() {
     // 这些集合不参与视图渲染，不放进响应式 data，避免装饰元素增删时触发
     // 无意义的组件更新。
@@ -173,15 +181,8 @@ export default {
     this.activeRouteAnimations = new Map()
     this.prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       || window.matchMedia('(update: slow)').matches
-    this.hoverPointerStates = new Map()
     // 检测是否在Electron环境中
     this.isElectron = typeof window !== 'undefined' && window.electronAPI;
-
-    // 检测URL参数，启动演示模式
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('demo') === 'true' && this.$refs.demoMode) {
-      this.$refs.demoMode.startDemo()
-    }
 
     // 监听页面切换方向事件
     this.pageTransitionHandler = this.handlePageTransition.bind(this)
@@ -189,6 +190,8 @@ export default {
 
     this.visibilityHandler = this.handleVisibilityChange.bind(this)
     document.addEventListener('visibilitychange', this.visibilityHandler)
+    this.motionActivityHandler = (event) => this.handleMotionActivity(event.detail?.active !== false)
+    window.addEventListener('app-motion-activity', this.motionActivityHandler)
     this.handleVisibilityChange()
 
     // 初始化收藏数量
@@ -209,8 +212,6 @@ export default {
       });
     }
 
-    // 设置导航栏鼠标跟踪效果
-    this.setupNavbarHoverEffects();
     this.setupAppMotion()
 
     // 确保页面一定能正常显示（防止后端无响应导致无限loading）
@@ -220,6 +221,7 @@ export default {
   },
   beforeUnmount() {
     document.removeEventListener('visibilitychange', this.visibilityHandler)
+    window.removeEventListener('app-motion-activity', this.motionActivityHandler)
     this.stopCreatingDynamicElements()
 
     // 移除事件监听器
@@ -237,8 +239,6 @@ export default {
       window.electronAPI.removeNavigateListener();
     }
 
-    // 清理导航栏鼠标跟踪效果
-    this.cleanupNavbarHoverEffects();
     this.appMotion?.revert()
     this.activeRouteAnimations?.forEach((animation) => animation.kill())
     this.activeRouteAnimations?.clear()
@@ -267,6 +267,9 @@ export default {
           clearProps: 'visibility',
           overwrite: 'auto',
           onComplete: () => {
+            // A retained transform creates a containing block for fixed descendants.
+            // Clear the transition styles so full-screen wallpaper stays viewport-fixed.
+            clearRouteTransitionStyles(element)
             this.activeRouteAnimations.delete(element)
             done()
           }
@@ -308,78 +311,6 @@ export default {
       const path = link.hash?.replace(/^#/, '')
       if (path?.startsWith('/')) prefetchRoute(path).catch(() => {})
     },
-    // 导航栏鼠标跟踪效果：同一帧只读取一次布局，避免高刷新率鼠标造成连续回流。
-    handleNavbarMouseMove(e) {
-      this.queuePointerGradient(e.currentTarget, e.clientX, e.clientY, '--mouse-x', '--mouse-y')
-    },
-    // 导航按钮鼠标跟踪效果
-    handleBtnMouseMove(e) {
-      this.queuePointerGradient(e.currentTarget, e.clientX, e.clientY, '--btn-mouse-x', '--btn-mouse-y')
-    },
-    queuePointerGradient(element, clientX, clientY, xVariable, yVariable) {
-      const state = this.hoverPointerStates.get(element) || {}
-      state.clientX = clientX
-      state.clientY = clientY
-      state.xVariable = xVariable
-      state.yVariable = yVariable
-
-      if (!state.frameId) {
-        state.frameId = window.requestAnimationFrame(() => {
-          // Geometry is stable for the duration of a hover. Reusing it avoids a
-          // synchronous layout read on every frame on high-refresh displays.
-          const rect = state.rect || element.getBoundingClientRect()
-          state.rect = rect
-          element.style.setProperty(state.xVariable, `${((state.clientX - rect.left) / rect.width) * 100}%`)
-          element.style.setProperty(state.yVariable, `${((state.clientY - rect.top) / rect.height) * 100}%`)
-          state.frameId = null
-        })
-      }
-
-      this.hoverPointerStates.set(element, state)
-    },
-    cachePointerTargetRect(e) {
-      const state = this.hoverPointerStates.get(e.currentTarget) || {}
-      state.rect = e.currentTarget.getBoundingClientRect()
-      this.hoverPointerStates.set(e.currentTarget, state)
-    },
-    releasePointerTargetRect(e) {
-      const state = this.hoverPointerStates.get(e.currentTarget)
-      if (!state) return
-      if (state.frameId) window.cancelAnimationFrame(state.frameId)
-      this.hoverPointerStates.delete(e.currentTarget)
-    },
-    setupNavbarHoverEffects() {
-      const navbar = document.querySelector('.ios26-navbar');
-      if (navbar) {
-        navbar.addEventListener('mousemove', this.handleNavbarMouseMove);
-        navbar.addEventListener('mouseenter', this.cachePointerTargetRect);
-        navbar.addEventListener('mouseleave', this.releasePointerTargetRect);
-      }
-      const navButtons = document.querySelectorAll('.glass-nav-button');
-      navButtons.forEach(btn => {
-        btn.addEventListener('mousemove', this.handleBtnMouseMove);
-        btn.addEventListener('mouseenter', this.cachePointerTargetRect);
-        btn.addEventListener('mouseleave', this.releasePointerTargetRect);
-      });
-    },
-    cleanupNavbarHoverEffects() {
-      const navbar = document.querySelector('.ios26-navbar');
-      if (navbar) {
-        navbar.removeEventListener('mousemove', this.handleNavbarMouseMove);
-        navbar.removeEventListener('mouseenter', this.cachePointerTargetRect);
-        navbar.removeEventListener('mouseleave', this.releasePointerTargetRect);
-      }
-      const navButtons = document.querySelectorAll('.glass-nav-button');
-      navButtons.forEach(btn => {
-        btn.removeEventListener('mousemove', this.handleBtnMouseMove);
-        btn.removeEventListener('mouseenter', this.cachePointerTargetRect);
-        btn.removeEventListener('mouseleave', this.releasePointerTargetRect);
-      });
-      this.hoverPointerStates?.forEach((state) => {
-        if (state.frameId) window.cancelAnimationFrame(state.frameId)
-      })
-      this.hoverPointerStates?.clear()
-    },
     // 更新收藏数量
     updateCollectionCount() {
       try {
@@ -406,7 +337,7 @@ export default {
       }
     },
     startCreatingDynamicElements() {
-      if (document.hidden || this.prefersReducedMotion) return
+      if (document.hidden || this.prefersReducedMotion || !this.showGlobalChrome || document.documentElement.classList.contains('motion-idle')) return
       // 定时创建新的动态元素
       if (!this.petalInterval) {
         this.petalInterval = setInterval(() => {
@@ -427,10 +358,16 @@ export default {
       this.textInterval = null
     },
     handleVisibilityChange() {
-      if (document.hidden || this.prefersReducedMotion) {
+      this.handleMotionActivity(!document.hidden && !document.documentElement.classList.contains('motion-idle'))
+    },
+    handleMotionActivity(active) {
+      const shouldAnimate = active && !document.hidden && !this.prefersReducedMotion && this.showGlobalChrome
+      if (!shouldAnimate) {
         this.pauseCreatingDynamicElements()
+        this.dynamicElementAnimations?.forEach((animation) => animation.pause())
         return
       }
+      this.dynamicElementAnimations?.forEach((animation) => animation.resume())
       if (!this.dynamicElementNodes?.size) this.createDynamicElements()
       this.startCreatingDynamicElements()
     },
@@ -786,48 +723,301 @@ export default {
 </style>
 
 <style>
-/* 首页导航的视觉层级 */
-.home-shell .ios26-navbar {
-  --nav-glass-bg: rgba(255, 255, 255, .88);
-  --nav-glass-bg-hover: rgba(255, 255, 255, .94);
-  --nav-glass-border: #dce9e5;
-  --nav-glass-border-hover: #b9ddd4;
-  --nav-glass-shadow: 0 10px 28px rgba(28, 89, 81, .07);
-  --nav-glass-shadow-hover: 0 14px 34px rgba(28, 89, 81, .1);
-  border-width: 0 0 1px;
-  border-radius: 0;
-  box-shadow: var(--nav-glass-shadow);
+/*
+ * 山湖液态玻璃导航
+ * 使用现有 LiquidGlass 的单层折射，山岚与湖光只由静态渐变绘制，
+ * 避免持续动画和多个嵌套 backdrop-filter 带来的重复合成。
+ */
+#app .liquid-glass-vue.ios26-navbar {
+  --nav-radius: clamp(24px, 3vw, 34px);
+  --nav-line: rgba(255, 255, 255, .78);
+  --nav-ink: #315f57;
+  position: sticky;
+  top: max(10px, env(safe-area-inset-top));
+  z-index: 1001;
+  width: calc(100% - clamp(20px, 3vw, 48px));
+  max-width: 1560px;
+  min-height: 72px;
+  margin: 10px auto 0;
+  padding: 0;
+  overflow: hidden;
+  contain: paint;
+  border: 1px solid var(--nav-line) !important;
+  border-radius: var(--nav-radius) !important;
+  background: transparent !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .92),
+    inset 0 -1px 0 rgba(47, 119, 104, .18),
+    0 12px 34px rgba(34, 91, 80, .13),
+    0 2px 8px rgba(34, 91, 80, .08) !important;
+  animation: navbarEntrance .48s cubic-bezier(.22, 1, .36, 1) both;
+  transition: border-color .2s ease, box-shadow .2s ease;
 }
 
-.home-shell .nav-liquid-border,
-.home-shell .nav-liquid-shine,
-.home-shell .ios26-navbar::before,
-.home-shell .ios26-navbar::after { display: none; }
+#app .liquid-glass-vue.ios26-navbar:hover {
+  border-color: rgba(229, 255, 248, .96) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .98),
+    inset 0 -1px 0 rgba(47, 119, 104, .2),
+    0 15px 38px rgba(34, 91, 80, .16),
+    0 3px 10px rgba(34, 91, 80, .08) !important;
+  transform: none;
+}
 
-.home-shell .navbar-container { min-height: 68px; gap: 26px; }
-.home-shell .navbar-brand {
+#app .liquid-glass-vue.ios26-navbar::before,
+#app .liquid-glass-vue.ios26-navbar::after {
+  display: none;
+}
+
+#app .ios26-navbar > .liquid-glass-vue__warp {
+  background:
+    radial-gradient(68% 150% at 8% 116%, rgba(81, 151, 135, .24), transparent 48%),
+    radial-gradient(72% 165% at 37% 126%, rgba(130, 180, 160, .19), transparent 47%),
+    radial-gradient(64% 145% at 83% 121%, rgba(65, 137, 124, .2), transparent 49%),
+    linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(225, 243, 236, .14) 52%, rgba(184, 225, 216, .2)),
+    rgba(231, 247, 241, .24);
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturation)) contrast(1.06) brightness(1.025);
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturation)) contrast(1.06) brightness(1.025);
+}
+
+#app .ios26-navbar > .liquid-glass-vue__highlight {
+  background:
+    radial-gradient(190px circle at var(--lg-pointer-x) var(--lg-pointer-y), rgba(255, 255, 255, var(--lg-pointer-highlight-alpha)), transparent 72%),
+    linear-gradient(118deg, rgba(255, 255, 255, .34), transparent 28%, rgba(205, 239, 231, .12) 58%, transparent 78%);
+  opacity: .76;
+}
+
+#app .ios26-navbar > .liquid-glass-vue__edge {
+  border-color: rgba(255, 255, 255, .5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .78),
+    inset 0 -1px 0 rgba(47, 119, 104, .12);
+}
+
+#app .liquid-glass-vue.ios26-navbar > .liquid-glass-vue__content {
+  min-height: 70px;
+  padding: 0;
+}
+
+#app .nav-liquid-border {
+  inset: 1px;
+  padding: 1px;
+  background: linear-gradient(112deg, rgba(255, 255, 255, .88), rgba(255, 255, 255, .12) 42%, rgba(175, 226, 214, .34) 72%, rgba(255, 255, 255, .62));
+  opacity: .78;
+}
+
+#app .nav-liquid-shine {
+  inset: 0;
+  width: auto;
+  height: auto;
+  border-radius: inherit;
+  background:
+    radial-gradient(30% 80% at 12% 110%, rgba(52, 126, 112, .13), transparent 72%),
+    radial-gradient(34% 90% at 88% 116%, rgba(44, 118, 106, .12), transparent 70%),
+    linear-gradient(90deg, transparent 8%, rgba(255, 255, 255, .2) 30%, transparent 51%, rgba(224, 250, 242, .2) 72%, transparent 94%);
+  animation: none;
+  opacity: .8;
+}
+
+#app .ios26-navbar:hover .nav-liquid-shine {
+  animation: none;
+}
+
+#app .liquid-glass-vue.ios26-navbar .navbar-container {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 70px;
+  gap: clamp(12px, 2vw, 28px);
+  padding: 8px clamp(12px, 2vw, 24px);
+}
+
+#app .liquid-glass-vue.ios26-navbar .navbar-brand {
   flex: 0 0 auto;
-  padding: 7px 14px;
-  border: 1px solid #dce9e5 !important;
-  border-radius: 13px;
-  color: #218c7c !important;
-  background: #f4fbf8 !important;
-  box-shadow: none !important;
+  min-width: 0;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, .42) !important;
+  border-radius: 18px;
+  color: #236f63 !important;
+  background: rgba(241, 251, 247, .2) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   text-shadow: none !important;
   letter-spacing: 0;
+  transition: color .2s ease, background-color .2s ease, border-color .2s ease, transform .2s ease !important;
 }
-.home-shell .navbar-brand::before,
-.home-shell .navbar-brand::after { display: none; }
-.home-shell .navbar-brand:hover { border-color: #a9dacf !important; background: #ecf8f3 !important; box-shadow: none !important; transform: translateY(-1px) !important; }
-.home-shell .main-title { color: #218c7c !important; font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif; font-size: 17px; letter-spacing: .02em; }
-.home-shell .sub-title { max-width: 300px; overflow: hidden; color: #8ba39d !important; font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif; font-size: 9px; letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }
-.home-shell .navbar-menu { gap: 5px; }
-.home-shell .glass-nav-button { padding: 8px 11px; border: 1px solid transparent; border-radius: 9px; color: #718984; background: transparent; box-shadow: none; font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif; font-size: 12px; }
-.home-shell .glass-nav-button:hover { border-color: #dce9e5; color: #218c7c; background: #f3faf7; box-shadow: none; transform: translateY(-1px); }
-.home-shell .glass-nav-active { border-color: #c5e5dc !important; color: #218c7c !important; background: #eaf6f2 !important; box-shadow: none !important; transform: none !important; }
-@media (max-width: 1100px) {
-  .home-shell .navbar-menu { gap: 1px; }
-  .home-shell .glass-nav-button { padding-right: 8px; padding-left: 8px; }
-  .home-shell .sub-title { max-width: 220px; }
+
+#app .liquid-glass-vue.ios26-navbar .navbar-brand::before,
+#app .liquid-glass-vue.ios26-navbar .navbar-brand::after {
+  display: none;
+}
+
+#app .liquid-glass-vue.ios26-navbar .navbar-brand:hover {
+  border-color: rgba(189, 229, 219, .9) !important;
+  background: rgba(239, 250, 246, .46) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .68) !important;
+  transform: translateY(-1px) !important;
+}
+
+#app .liquid-glass-vue.ios26-navbar .brand-mark {
+  color: #2d8f80;
+  filter: drop-shadow(0 2px 5px rgba(39, 117, 103, .14));
+}
+
+#app .liquid-glass-vue.ios26-navbar .main-title {
+  color: #246f64 !important;
+  font-family: 'Noto Serif SC', 'SimSun', serif;
+  font-size: 17px;
+  line-height: 1.25;
+  letter-spacing: .04em;
+}
+
+#app .liquid-glass-vue.ios26-navbar .sub-title {
+  max-width: 300px;
+  overflow: hidden;
+  color: #6d8c85 !important;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 9px;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#app .liquid-glass-vue.ios26-navbar .navbar-menu {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+
+#app .liquid-glass-vue.ios26-navbar .glass-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 10px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: #55766f;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12px;
+  line-height: 1.2;
+  transition: color .18s ease, background-color .18s ease, border-color .18s ease, transform .18s ease;
+}
+
+#app .liquid-glass-vue.ios26-navbar .glass-nav-button::before,
+#app .liquid-glass-vue.ios26-navbar .glass-nav-button::after {
+  display: none;
+}
+
+#app .liquid-glass-vue.ios26-navbar .glass-nav-button:hover {
+  border-color: rgba(198, 229, 221, .72);
+  color: #197666;
+  background: rgba(243, 251, 248, .38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  transform: translateY(-1px);
+}
+
+#app .liquid-glass-vue.ios26-navbar .glass-nav-active {
+  border-color: rgba(178, 220, 210, .8) !important;
+  color: #176f61 !important;
+  background: linear-gradient(180deg, rgba(239, 251, 247, .7), rgba(220, 241, 234, .48)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .76),
+    0 3px 10px rgba(38, 106, 92, .08) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+}
+
+#app .liquid-glass-vue.ios26-navbar .glass-nav-button:focus-visible,
+#app .liquid-glass-vue.ios26-navbar .navbar-brand:focus-visible {
+  outline: 2px solid rgba(30, 126, 108, .65);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1220px) {
+  #app .liquid-glass-vue.ios26-navbar .sub-title { display: none; }
+  #app .liquid-glass-vue.ios26-navbar .glass-nav-button { padding-right: 8px; padding-left: 8px; }
+}
+
+@media (max-width: 900px) {
+  #app .liquid-glass-vue.ios26-navbar {
+    --nav-radius: 26px;
+    top: max(7px, env(safe-area-inset-top));
+    width: calc(100% - 16px);
+    min-height: 64px;
+    margin-top: 7px;
+  }
+
+  #app .liquid-glass-vue.ios26-navbar > .liquid-glass-vue__content,
+  #app .liquid-glass-vue.ios26-navbar .navbar-container {
+    min-height: 62px;
+  }
+
+  #app .liquid-glass-vue.ios26-navbar .navbar-container {
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 7px 10px;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  #app .liquid-glass-vue.ios26-navbar .navbar-container::-webkit-scrollbar { display: none; }
+  #app .liquid-glass-vue.ios26-navbar .navbar-brand { padding: 6px 10px; }
+  #app .liquid-glass-vue.ios26-navbar .brand-mark { width: 30px; height: 30px; }
+  #app .liquid-glass-vue.ios26-navbar .main-title { font-size: 15px; }
+  #app .liquid-glass-vue.ios26-navbar .navbar-menu { position: static; overflow: visible; padding: 0; }
+}
+
+@media (max-width: 767px), (update: slow) {
+  #app .ios26-navbar > .liquid-glass-vue__warp {
+    filter: none !important;
+    backdrop-filter: blur(12px) saturate(145%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(145%) !important;
+  }
+
+  #app .ios26-navbar > .liquid-glass-vue__edge {
+    mix-blend-mode: normal;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  #app .ios26-navbar > .liquid-glass-vue__warp {
+    background: linear-gradient(135deg, rgba(247, 252, 250, .97), rgba(224, 241, 235, .95));
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  #app .ios26-navbar > .liquid-glass-vue__warp {
+    background: rgba(243, 250, 247, .97);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app .liquid-glass-vue.ios26-navbar,
+  #app .liquid-glass-vue.ios26-navbar .navbar-brand,
+  #app .liquid-glass-vue.ios26-navbar .glass-nav-button {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
 }
 </style>

@@ -112,7 +112,7 @@
             <span class="mood-tag" :style="{ background: getMoodColor(result.mood) }">
               {{ result.mood }}
             </span>
-            <span class="mood-desc">{{ getMoodDescription(result.mood) }}</span>
+            <span class="mood-desc">{{ result.moodDescription || 'AI暂未返回情感解释' }}</span>
           </div>
         </div>
 
@@ -209,17 +209,6 @@ export default {
       '壮美': 'linear-gradient(135deg, #ff8a65, #ff5722)'
     };
 
-    const moodDescriptions = {
-      '清新': '如晨露般明亮清澈，适合描写自然景物',
-      '豪放': '气势磅礴，胸怀开阔，常用夸张手法',
-      '婉约': '细腻柔美，情感内敛，意境深远',
-      '忧郁': '情感低沉，思绪万千，略带感伤',
-      '欢快': '轻松愉悦，心情舒畅，充满生机',
-      '宁静': '平和安静，心如止水，超然物外',
-      '苍凉': '萧瑟悲壮，意境深远，历史感强',
-      '壮美': '雄伟壮观，气势恢宏，令人振奋'
-    };
-
     const onThemeInput = () => {
       emit('update:theme', localTheme.value);
     };
@@ -240,10 +229,6 @@ export default {
 
     const getMoodColor = (mood) => {
       return moodColors[mood] || moodColors['清新'];
-    };
-
-    const getMoodDescription = (mood) => {
-      return moodDescriptions[mood] || '';
     };
 
     const generate = () => {
@@ -305,7 +290,6 @@ export default {
       selectGenre,
       toggleKeyword,
       getMoodColor,
-      getMoodDescription,
       generate,
       setResult,
       setLoading,

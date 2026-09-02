@@ -43,9 +43,6 @@
       </button>
 
       <!-- 关键字提示 -->
-      <div class="keyword-tips">
-        <p>常见关键字：<span>月、花、风、雪、春、秋、山、水、云、鸟</span></p>
-      </div>
     </div>
 
     <!-- 关键字已选择 -->
@@ -108,14 +105,14 @@
           </div>
         </div>
 
-        <!-- AI检测结果 -->
+        <!-- 本地硬性校验：关键字是否实际出现在作品中 -->
         <transition name="fade">
           <div class="keyword-check-result" v-if="keywordCheckResult">
             <div class="check-icon" :class="{ pass: keywordCheckResult.pass }">
               {{ keywordCheckResult.pass ? '✓' : '!' }}
             </div>
             <div class="check-text">
-              <span class="check-title">{{ keywordCheckResult.pass ? '检测通过' : '检测提醒' }}</span>
+              <span class="check-title">{{ keywordCheckResult.pass ? '关键字校验通过' : '关键字校验提醒' }}</span>
               <span class="check-desc">{{ keywordCheckResult.message }}</span>
             </div>
           </div>
@@ -200,9 +197,9 @@ export default {
     const showScore = ref(false);
 
     const difficulties = [
-      { value: '简单', label: '简单', icon: '🌱', keywords: ['月', '花', '风', '春', '秋'] },
-      { value: '中等', label: '中等', icon: '🌳', keywords: ['山', '水', '云', '鸟', '雨'] },
-      { value: '困难', label: '困难', icon: '🏔️', keywords: ['思', '梦', '愁', '恨', '泪'] }
+        { value: '简单', label: '简单', icon: '🌱' },
+        { value: '中等', label: '中等', icon: '🌳' },
+        { value: '困难', label: '困难', icon: '🏔️' }
     ];
 
     // 字数统计
@@ -213,28 +210,6 @@ export default {
     // 随机获取关键字
     const getRandomKeyword = () => {
       emit('request-keyword', selectedDifficulty.value);
-    };
-
-    // 获取相关意象
-    const getRelatedWords = (keyword) => {
-      const relatedMap = {
-        '月': ['明月', '月光', '月色', '月夜', '月影'],
-        '花': ['桃花', '杏花', '梅花', '菊花', '春花'],
-        '风': ['春风', '秋风', '和风', '疾风', '清风'],
-        '春': ['春风', '春色', '春光', '春日', '春雨'],
-        '秋': ['秋风', '秋色', '秋月', '秋水', '秋叶'],
-        '山': ['青山', '高山', '群山', '山色', '山巅'],
-        '水': ['江水', '河水', '泉水', '秋水', '水光'],
-        '云': ['白云', '浮云', '乌云', '云彩', '云霞'],
-        '鸟': ['飞鸟', '啼鸟', '归鸟', '春鸟', '鸟鸣'],
-        '雨': ['春雨', '细雨', '秋雨', '夜雨', '雨声'],
-        '思': ['相思', '思念', '沉思', '乡思', '幽思'],
-        '梦': ['春梦', '幽梦', '梦魂', '残梦', '梦醒'],
-        '愁': ['乡愁', '离愁', '新愁', '春愁', '愁思'],
-        '恨': ['遗恨', '离恨', '新恨', '春恨', '幽恨'],
-        '泪': ['泪眼', '热泪', '清泪', '泪痕', '落泪']
-      };
-      return relatedMap[keyword] || [];
     };
 
     // 检查关键字出现次数
@@ -290,7 +265,7 @@ export default {
     watch(() => props.keyword, (newKeyword) => {
       if (newKeyword) {
         currentKeyword.value = newKeyword;
-        relatedWords.value = getRelatedWords(newKeyword);
+        relatedWords.value = [];
       }
     });
 
@@ -299,7 +274,7 @@ export default {
       currentKeyword.value = info.keyword;
       relatedWords.value = Array.isArray(info.relatedWords) && info.relatedWords.length
         ? info.relatedWords
-        : getRelatedWords(info.keyword);
+        : [];
       emit('change:keyword', info.keyword);
     }, { deep: true });
 

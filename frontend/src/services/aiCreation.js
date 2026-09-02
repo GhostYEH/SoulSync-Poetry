@@ -96,10 +96,10 @@ export const aiCreationService = {
     return result.data;
   },
 
-  getChainNextLine: async ({ userLine, genre, theme, lineNumber }) => {
+  getChainNextLine: async ({ userLine, allLines, genre, theme, lineNumber }) => {
     const result = await request('/creation/chain/next', {
       method: 'POST',
-      body: JSON.stringify({ userLine, genre, theme, lineNumber }),
+      body: JSON.stringify({ userLine, allLines, genre, theme, lineNumber }),
       timeout: TIMEOUTS.LONG
     });
     return result.data;

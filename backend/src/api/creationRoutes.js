@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../utils/db');
 const aiService = require('../services/aiService');
-const config = require('../config/config');
 const { parsePagination } = require('../utils/validation');
 const authenticateToken = require('../middleware/auth');
 
@@ -105,9 +104,8 @@ router.post('/novice/generate', authenticateToken, async (req, res) => {
       console.log('[creationRoutes] 生成引导诗 成功', { userId, theme: escapedTheme, genre: escapedGenre });
       return res.json({ success: true, data: result, message: '生成成功' });
     } else {
-      const mockData = config.creation.defaultData.noviceGenerate(theme, genre);
-      console.error('[creationRoutes] 生成引导诗 AI失败，返回模拟数据', { userId, theme: escapedTheme, genre: escapedGenre });
-      return res.json({ success: false, data: mockData, message: 'AI服务暂时不可用，已返回参考示例' });
+      console.error('[creationRoutes] 生成引导诗 AI未返回结果', { userId, theme: escapedTheme, genre: escapedGenre });
+      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI 服务暂时不可用，请稍后重试' });
     }
   } catch (error) {
     console.error('[creationRoutes] 生成引导诗 失败', { userId: req.user.userId, params: req.body, error: error.stack || error.message });
@@ -190,9 +188,8 @@ ${escapedUserPoem}
       console.log('[creationRoutes] 校验填词结果 成功', { userId });
       return res.json({ success: true, data: result, message: '校验成功' });
     } else {
-      const mockData = config.creation.defaultData.noviceCheck;
-      console.error('[creationRoutes] 校验填词结果 AI失败，返回模拟数据', { userId });
-      return res.json({ success: false, data: mockData, message: 'AI服务暂时不可用，已返回参考示例' });
+      console.error('[creationRoutes] 校验填词结果 AI未返回结果', { userId });
+      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI 服务暂时不可用，请稍后重试' });
     }
   } catch (error) {
     console.error('[creationRoutes] 校验填词结果 失败', { userId: req.user.userId, params: req.body, error: error.stack || error.message });
@@ -243,9 +240,8 @@ router.post('/assist/generate-reference', authenticateToken, async (req, res) =>
       console.log('[creationRoutes] 生成参考诗词 成功', { userId, theme: escapedTheme, genre: escapedGenre });
       return res.json({ success: true, data: result, message: '生成成功' });
     } else {
-      const mockData = config.creation.defaultData.assistGenerateReference(theme, genre);
-      console.error('[creationRoutes] 生成参考诗词 AI失败，返回模拟数据', { userId, theme: escapedTheme, genre: escapedGenre });
-      return res.json({ success: false, data: mockData, message: 'AI服务暂时不可用，已返回参考示例' });
+      console.error('[creationRoutes] 生成参考诗词 AI未返回结果', { userId, theme: escapedTheme, genre: escapedGenre });
+      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI 服务暂时不可用，请稍后重试' });
     }
   } catch (error) {
     console.error('[creationRoutes] 生成参考诗词 失败', { userId: req.user.userId, params: req.body, error: error.stack || error.message });
@@ -301,10 +297,16 @@ ${escapedPoem}
 
     const [scoreResult, imageResult] = await Promise.all([
       aiService.callZhipuGenerateJSON(prompt, systemContent, { temperature: 0.1, maxTokens: 800 }),
-      aiService.generatePoemImage(escapedPoem, escapedTitle, escapedAuthor)
+      aiService.generatePoemImage(escapedPoem, escapedTitle, escapedAuthor).catch(imageError => {
+        console.warn('[creationRoutes] 意境图生成失败，不影响评分:', imageError.message);
+        return null;
+      })
     ]);
 
-    if (scoreResult) {
+    const dimensions = scoreResult?.dimensions || {};
+    const dimensionKeys = ['content', 'rhythm', 'mood', 'language', 'creativity'];
+    const validDimensions = dimensionKeys.every(key => Number.isFinite(Number(dimensions[key])) && Number(dimensions[key]) >= 0 && Number(dimensions[key]) <= 100);
+    if (scoreResult && validDimensions) {
       if (typeof scoreResult.total !== 'number' || scoreResult.total < 0 || scoreResult.total > 100) {
         const dims = scoreResult.dimensions || {};
         const vals = Object.values(dims).filter(v => typeof v === 'number');
@@ -314,9 +316,8 @@ ${escapedPoem}
       console.log('[creationRoutes] 评分 成功', { userId, total: scoreResult.total });
       return res.json({ success: true, data: responseData, message: '评分成功' + (imageResult ? '，已生成意境图' : '') });
     } else {
-      const mockData = { total: 0, dimensions: { content: 0, rhythm: 0, mood: 0, language: 0, creativity: 0 }, suggestions: 'AI服务暂时不可用，请稍后重试。', image: imageResult || null };
-      console.error('[creationRoutes] 评分 AI失败，返回空分', { userId });
-      return res.json({ success: false, data: mockData, message: 'AI服务暂时不可用，请稍后重试' });
+      console.error('[creationRoutes] 评分 AI未返回有效结果', { userId });
+      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI 未返回有效评分，请稍后重试' });
     }
   } catch (error) {
     console.error('[creationRoutes] 评分 失败', { userId: req.user.userId, params: req.body, error: error.stack || error.message });

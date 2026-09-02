@@ -142,9 +142,11 @@ export function installCustomCursor(router) {
     cursorImage.decoding = 'async'
     cursorElement.appendChild(cursorImage)
     document.body.appendChild(cursorElement)
-    setCursorArtwork()
 
     pointerMoveHandler = (event) => {
+      // Defer the ~1 MB cursor bitmap until the first real pointer movement so
+      // it never competes with the login scene's critical image and fonts.
+      if (currentAssetIndex === -1) setCursorArtwork()
       targetX = event.clientX
       targetY = event.clientY
       updateCursorMode(event.target)
@@ -208,12 +210,10 @@ export function installCustomCursor(router) {
   pointerMedia.addEventListener?.('change', handlePointerCapabilityChange)
   motionMedia.addEventListener?.('change', handleMotionPreferenceChange)
   router?.afterEach((_to, from) => {
-    // 首次路由解析已在 enableCursor 中设置过图案，避免启动时额外下载一张大图。
-    if (enabled && from?.name) setCursorArtwork()
+    // Only rotate artwork after the cursor has actually been requested once.
+    // Route changes before the first pointer move must not pull a large bitmap.
+    if (enabled && currentAssetIndex !== -1 && from?.name) setCursorArtwork()
   })
 
   syncCursorCapability()
-  router?.isReady?.().then(() => {
-    if (enabled && currentAssetIndex === -1) setCursorArtwork()
-  })
 }

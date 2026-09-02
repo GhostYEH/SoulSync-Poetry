@@ -6,6 +6,17 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 // Socket 连接 URL
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || window.location.origin;
 
+// Electron 壳中的页面地址不一定就是后端地址；后端端口由壳在运行时提供。
+// 浏览器环境仍使用当前页面地址，保证开发环境走 Vite 的 /socket.io 代理。
+export const resolveSocketUrl = async () => {
+  if (import.meta.env.VITE_SOCKET_URL) return import.meta.env.VITE_SOCKET_URL;
+  if (window.electronAPI?.getBackendPort) {
+    const port = await window.electronAPI.getBackendPort();
+    return `http://localhost:${port}`;
+  }
+  return window.location.origin;
+};
+
 // 公共 fetch 辅助函数（用于不需要认证的请求）
 const publicFetch = async (url) => {
   return request(url, { includeAuth: false });
@@ -404,21 +415,6 @@ export const api = {
     getHighScore: () => request('/feihua/high-score')
   },
 
-  // 诗词创作挑战相关
-  poetryChallenge: {
-    getThemes: () => publicFetch('/poetry-challenge/themes'),
-    generate: (theme, keyword) => request('/poetry-challenge/generate', {
-      method: 'POST',
-      body: JSON.stringify({ theme, keyword })
-    }),
-    rate: (challengeId, score) => request('/poetry-challenge/rate', {
-      method: 'POST',
-      body: JSON.stringify({ challengeId, score })
-    }),
-    getHistory: (limit = 20) => request(`/poetry-challenge/history?limit=${limit}`),
-    getStats: () => request('/poetry-challenge/stats')
-  },
-
   // 诗词创作工作台相关
   creationWorkbench: {
     // 灵感生成 - 生成关键词 (AI生成需要约60秒)
@@ -460,7 +456,13 @@ export const api = {
     // 接龙创作 - 下一句 (AI生成需要约60秒)
     getChainNextLine: (params) => request('/creation/chain/next', {
       method: 'POST',
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        userLine: params.userLine,
+        allLines: params.allLines,
+        genre: params.genre,
+        theme: params.theme,
+        lineNumber: params.lineNumber
+      }),
       timeout: 120000
     }),
     // 飞花令 - 获取关键字

@@ -273,7 +273,17 @@ function scheduleAutoTurn() {
   window.clearTimeout(autoTurnTimer.value)
   autoTurnTimer.value = null
   if (isReducedMotion.value || isSuccess.value) return
-  autoTurnTimer.value = window.setTimeout(turnPage, AUTO_TURN_DELAY_MS)
+  autoTurnTimer.value = window.setTimeout(attemptAutoTurn, AUTO_TURN_DELAY_MS)
+}
+
+function attemptAutoTurn() {
+  // Do not start a compositor-heavy page turn while nobody is interacting.
+  // The next activity resumes the normal timer; manual clicks remain immediate.
+  if (document.documentElement.classList.contains('motion-idle') || document.hidden) {
+    scheduleAutoTurn()
+    return
+  }
+  turnPage()
 }
 
 function finishPageTurn() {

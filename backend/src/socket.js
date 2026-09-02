@@ -9,6 +9,9 @@ const JWT_SECRET = config.jwt.secret;
 
 // 双人对战房间计时器管理
 const duelTimers = new Map();
+// 普通匹配对战计时器；邀请对战使用 duelTimers（两种模式的计时规则不同）。
+const matchTimers = new Map();
+const dualAdvanceTimers = new Map();
 
 // 断线重连等待计时器（闯关对战）
 const reconnectTimers = new Map();
@@ -457,6 +460,14 @@ function setupSocket(io) {
           const result = mode === 'dual'
             ? challengeBattleService.quitDualGame(roomId, currentUserId)
             : challengeBattleService.quitDualInviteGame(roomId, currentUserId);
+          if (mode === 'dual') {
+            clearDualMatchTimer(roomId);
+            const advanceTimer = dualAdvanceTimers.get(roomId);
+            if (advanceTimer) clearTimeout(advanceTimer);
+            dualAdvanceTimers.delete(roomId);
+          } else {
+            clearDualInviteTimer(roomId);
+          }
           if (result && result.type === 'finished') {
             const room = challengeBattleService.getRoom(roomId);
             if (room) {
@@ -482,24 +493,32 @@ function setupSocket(io) {
     // ==============================================================
     // 诗词闯关 - 双人匹配模式（保持不变）
     // ==============================================================
-    socket.on('challenge-match-start', async (data) => {
-      if (!currentUserId) { socket.emit('error', { error: '未登录' }); return; }
-      const currentChallengeUser = challengeBattleService.getUser(currentUserId);
-      if (currentChallengeUser?.inGame || feihualingService.getUser(currentUserId)?.inGame) {
-        socket.emit('error', { error: '你正在对战中' });
-        return;
-      }
-      const room = await challengeBattleService.addToMatchmaking(currentUserId, data.username || '玩家', socket.id);
-      if (room) {
-        const roomInfo = challengeBattleService.getRoomInfo(room);
-        roomInfo.currentQuestion = room.question;
-        roomInfo.status = 'playing';
-        room.players.forEach(p => {
-          if (p.socketId) io.to(p.socketId).emit('challenge-dual-started', roomInfo);
-        });
-        io.emit('challenge-matchmaking-count', { count: challengeBattleService.getMatchmakingQueueSize() });
-      } else {
-        socket.emit('challenge-matchmaking-waiting', { count: challengeBattleService.getMatchmakingQueueSize() });
+    socket.on('challenge-match-start', async (data = {}) => {
+      try {
+        if (!currentUserId) { socket.emit('error', { error: '未登录' }); return; }
+        const currentChallengeUser = challengeBattleService.getUser(currentUserId);
+        if (currentChallengeUser?.inGame || feihualingService.getUser(currentUserId)?.inGame) {
+          socket.emit('error', { error: '你正在对战中' });
+          return;
+        }
+        const room = await challengeBattleService.addToMatchmaking(currentUserId, data.username || '玩家', socket.id);
+        if (room) {
+          const roomInfo = challengeBattleService.getRoomInfo(room);
+          roomInfo.currentQuestion = room.question;
+          roomInfo.currentQuestionIndex = 0;
+          roomInfo.totalQuestions = room.totalRounds;
+          roomInfo.status = 'playing';
+          room.players.forEach(p => {
+            if (p.socketId) io.to(p.socketId).emit('challenge-dual-started', roomInfo);
+          });
+          startDualMatchTimer(room.id, io, challengeBattleService);
+          io.emit('challenge-matchmaking-count', { count: challengeBattleService.getMatchmakingQueueSize() });
+        } else {
+          socket.emit('challenge-matchmaking-waiting', { count: challengeBattleService.getMatchmakingQueueSize() });
+        }
+      } catch (err) {
+        console.error('[Challenge] 匹配失败:', err);
+        socket.emit('error', { error: '匹配失败，请稍后重试' });
       }
     });
 
@@ -519,24 +538,21 @@ function setupSocket(io) {
         const result = challengeBattleService.submitDualAnswer(roomId, currentUserId, answer);
         if (!result.success) { socket.emit('error', { error: result.error }); return; }
         const room = challengeBattleService.getRoom(roomId);
-        const player = room.players.find(p => p.id === currentUserId);
+        const player = room.players.find(p => String(p.id) === String(currentUserId));
         const answerEvent = {
           playerId: currentUserId, username: player.username,
-          isCorrect: player.isCorrect, bothAnswered: result.bothAnswered
+          isCorrect: player.isCorrect, bothAnswered: result.bothAnswered,
+          currentQuestionIndex: room.currentRound - 1,
+          correctAnswer: player.isCorrect ? undefined : room.question.answer,
+          players: room.players.map(p => ({
+            id: p.id, username: p.username, correct: p.correct, wrong: p.wrong, answered: p.answered
+          }))
         };
         room.players.forEach(p => {
           if (p.socketId) io.to(p.socketId).emit('challenge-dual-answer-update', answerEvent);
         });
         if (result.bothAnswered) {
-          setTimeout(async () => {
-            const advanceResult = await challengeBattleService.advanceDualRound(roomId);
-            if (advanceResult.type === 'finished') {
-              room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('challenge-dual-finished', advanceResult); });
-              io.emit('online-users', getUnifiedOnlineUsers());
-            } else if (advanceResult.success) {
-              room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('challenge-dual-next', { question: advanceResult.question, currentRound: advanceResult.currentRound, players: advanceResult.players }); });
-            }
-          }, 2000);
+          scheduleDualMatchAdvance(roomId, io);
         }
       } catch (err) { console.error('[Challenge] 双人答题失败:', err); socket.emit('error', { error: '提交答案失败' }); }
     });
@@ -546,26 +562,23 @@ function setupSocket(io) {
         const { roomId } = data;
         const room = challengeBattleService.getRoom(roomId);
         if (!room || room.status !== 'playing') return;
-        const player = room.players.find(p => p.id === currentUserId);
+        const player = room.players.find(p => String(p.id) === String(currentUserId));
         if (!player || player.answered) return;
         const result = challengeBattleService.handleDualTimeout(roomId, currentUserId);
         if (result) {
           room.players.forEach(p => {
             if (p.socketId) io.to(p.socketId).emit('challenge-dual-answer-update', {
               playerId: currentUserId, username: player.username, isCorrect: false,
-              bothAnswered: result.bothAnswered, isTimeout: true
+              bothAnswered: result.bothAnswered, isTimeout: true,
+              currentQuestionIndex: room.currentRound - 1,
+              correctAnswer: room.question?.answer,
+              players: room.players.map(item => ({
+                id: item.id, username: item.username, correct: item.correct, wrong: item.wrong, answered: item.answered
+              }))
             });
           });
           if (result.bothAnswered) {
-            setTimeout(async () => {
-              const advanceResult = await challengeBattleService.advanceDualRound(roomId);
-              if (advanceResult.type === 'finished') {
-                room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('challenge-dual-finished', advanceResult); });
-                io.emit('online-users', getUnifiedOnlineUsers());
-              } else if (advanceResult.success) {
-                room.players.forEach(p => { if (p.socketId) io.to(p.socketId).emit('challenge-dual-next', { question: advanceResult.question, currentRound: advanceResult.currentRound, players: advanceResult.players }); });
-              }
-            }, 2000);
+            scheduleDualMatchAdvance(roomId, io);
           }
         }
       } catch (err) { console.error('[Challenge] 双人超时处理失败:', err); }
@@ -809,10 +822,14 @@ function setupSocket(io) {
         // 闯关对战断线 - 添加重连等待时间
         const activeChallengeUser = challengeBattleService.getUser(currentUserId);
         if (activeChallengeUser && activeChallengeUser.socketId === socket.id && activeChallengeUser.inGame) {
+          let reconnectProtected = false;
+          let handledChallengeRoom = false;
           for (const [roomId, room] of challengeBattleService.rooms.entries()) {
-            if (room.mode === 'dual-invite' && room.status === 'playing') {
-              const playerIndex = room.players.findIndex(p => String(p.id) === String(currentUserId));
-              if (playerIndex !== -1) {
+            if (room.status !== 'playing' || !room.players) continue;
+            const playerIndex = room.players.findIndex(p => String(p.id) === String(currentUserId));
+            if (playerIndex === -1) continue;
+            if (room.mode === 'dual-invite') {
+                handledChallengeRoom = true;
                 // 清除之前的重连计时器（如果存在）
                 const timerKey = `${roomId}_${currentUserId}`;
                 if (reconnectTimers.has(timerKey)) {
@@ -850,9 +867,37 @@ function setupSocket(io) {
                 
                 reconnectTimers.set(timerKey, timer);
                 console.log(`[ChallengeBattle] 玩家 ${currentUserId} 断线，等待 ${RECONNECT_WAIT_TIME/1000} 秒重连`);
+                reconnectProtected = true;
                 break;
-              }
             }
+
+            if (room.mode === 'dual') {
+              handledChallengeRoom = true;
+              // 普通匹配模式没有可恢复的客户端房间状态；立即结束本局，
+              // 避免对手和在线名单永久卡在 playing/inGame。
+              const result = challengeBattleService.quitDualGame(roomId, currentUserId);
+              clearDualMatchTimer(roomId);
+              const advanceTimer = dualAdvanceTimers.get(roomId);
+              if (advanceTimer) clearTimeout(advanceTimer);
+              dualAdvanceTimers.delete(roomId);
+              if (result?.type === 'finished') {
+                broadcastToRoom(room, 'challenge-dual-finished', result, io);
+                io.emit('online-users', getUnifiedOnlineUsers());
+              }
+              challengeBattleService.removeUser(socket.id);
+              break;
+            }
+
+            if (room.mode === 'single') {
+              handledChallengeRoom = true;
+              // 单人房间无法在断线后安全恢复，结束并释放用户占用状态。
+              const result = challengeBattleService.quitSingleGame(roomId, currentUserId);
+              challengeBattleService.removeUser(socket.id);
+              break;
+            }
+          }
+          if (!handledChallengeRoom && !reconnectProtected) {
+            challengeBattleService.removeUser(socket.id);
           }
         }
 
@@ -873,6 +918,7 @@ function buildDualGamePayload(room) {
   const currentQuestion = room.questions[0];
   return {
     id: room.id,
+    mode: room.mode,
     currentQuestionIndex: 0,
     totalQuestions: room.totalQuestions,
     currentQuestion: {
@@ -902,6 +948,95 @@ function broadcastToRoom(room, event, data, io) {
       io.to(p.socketId).emit(event, data);
     }
   });
+}
+
+function clearDualMatchTimer(roomId) {
+  const timer = matchTimers.get(roomId);
+  if (timer) clearInterval(timer);
+  matchTimers.delete(roomId);
+}
+
+function scheduleDualMatchAdvance(roomId, io, delay = 2000) {
+  if (dualAdvanceTimers.has(roomId)) return;
+  const timer = setTimeout(async () => {
+    dualAdvanceTimers.delete(roomId);
+    await advanceDualMatchRound(roomId, io);
+  }, delay);
+  dualAdvanceTimers.set(roomId, timer);
+}
+
+async function advanceDualMatchRound(roomId, io) {
+  const room = challengeBattleService.getRoom(roomId);
+  if (!room || room.status !== 'playing' || room.mode !== 'dual') return;
+
+  const advanceResult = await challengeBattleService.advanceDualRound(roomId);
+  if (!advanceResult) return;
+  if (advanceResult.type === 'finished') {
+    clearDualMatchTimer(roomId);
+    broadcastToRoom(room, 'challenge-dual-finished', advanceResult, io);
+    io.emit('online-users', getUnifiedOnlineUsers());
+    return;
+  }
+  if (advanceResult.success) {
+    startDualMatchTimer(roomId, io, challengeBattleService);
+    broadcastToRoom(room, 'challenge-dual-next', {
+      currentQuestion: advanceResult.question,
+      // 保留 question 兼容旧客户端，但 currentQuestion 是规范字段。
+      question: advanceResult.question,
+      currentQuestionIndex: advanceResult.currentRound - 1,
+      currentRound: advanceResult.currentRound,
+      totalQuestions: room.totalRounds,
+      players: advanceResult.players
+    }, io);
+  }
+}
+
+function startDualMatchTimer(roomId, io, service) {
+  clearDualMatchTimer(roomId);
+  const room = service.getRoom(roomId);
+  if (!room || room.status !== 'playing' || room.mode !== 'dual') return;
+
+  const timer = setInterval(() => {
+    const currentRoom = service.getRoom(roomId);
+    if (!currentRoom || currentRoom.status !== 'playing' || currentRoom.mode !== 'dual') {
+      clearDualMatchTimer(roomId);
+      return;
+    }
+
+    const total = Number(currentRoom.totalTime) || 30;
+    const startedAt = Number(currentRoom.questionStartTime) || Date.now();
+    const remaining = Math.max(0, total - Math.floor((Date.now() - startedAt) / 1000));
+    broadcastToRoom(currentRoom, 'challenge-dual-timer-tick', {
+      remaining,
+      total,
+      roomId,
+      currentQuestionIndex: currentRoom.currentRound - 1
+    }, io);
+
+    if (remaining <= 0) {
+      clearDualMatchTimer(roomId);
+      currentRoom.players.filter(player => !player.answered).forEach(player => {
+        service.handleDualTimeout(roomId, player.id);
+        broadcastToRoom(currentRoom, 'challenge-dual-answer-update', {
+          playerId: player.id,
+          username: player.username,
+          isCorrect: false,
+          isTimeout: true,
+          bothAnswered: currentRoom.players.every(item => item.answered),
+          currentQuestionIndex: currentRoom.currentRound - 1,
+          correctAnswer: currentRoom.question?.answer,
+          players: currentRoom.players.map(item => ({
+            id: item.id, username: item.username, correct: item.correct, wrong: item.wrong, answered: item.answered
+          }))
+        }, io);
+      });
+      if (currentRoom.players.every(player => player.answered)) {
+        scheduleDualMatchAdvance(roomId, io);
+      }
+    }
+  }, 1000);
+
+  matchTimers.set(roomId, timer);
 }
 
 // 启动双人邀请对战计时器

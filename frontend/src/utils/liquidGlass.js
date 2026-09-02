@@ -162,6 +162,11 @@ function shouldEnhance(element, style) {
   if (!(element instanceof HTMLElement)) return false
   if (SKIP_TAGS.has(element.tagName)) return false
   if (element.classList.contains('liquid-glass-optics') || element.getAttribute('aria-hidden') === 'true') return false
+  const isRouteRoot = element.parentElement?.matches('main.container')
+  // A route root is the page canvas, not a card. Applying the displacement
+  // filter there creates a full-viewport GPU layer. Pages that explicitly opt
+  // into the glass surface list are still enhanced normally.
+  if (isRouteRoot && !element.matches(EXPLICIT_SURFACES)) return false
   const buttonLike = isButtonLike(element)
   if (element.hasAttribute('data-liquid-ignore') || element.hasAttribute('data-liquid-glass-component')) return false
   if (element.closest('[data-liquid-glass-component]') && !buttonLike) return false
@@ -184,7 +189,6 @@ function shouldEnhance(element, style) {
   if (!interactive && !semanticSurface && !ownsBackdrop && !structuralFallback) return false
 
   const isViewportSheet = rect.width > window.innerWidth * 0.92 && rect.height > window.innerHeight * 0.82
-  const isRouteRoot = element.parentElement?.matches('main.container')
   if (isViewportSheet && !isRouteRoot && !element.matches('.ios26-navbar,.footer,.modal,.dialog,.drawer')) return false
 
   return true
@@ -318,6 +322,7 @@ export function installLiquidGlass(router) {
   let pointerGeometryDirty = false
   const appRoot = document.getElementById('app') || document.body
   const pendingScanRoots = new Set()
+  const pendingElementScans = new Set()
   const pressedControls = new Set()
   const scanTimers = new Set()
 
@@ -330,21 +335,54 @@ export function installLiquidGlass(router) {
       if (root.contains?.(pendingRoot)) pendingScanRoots.delete(pendingRoot)
     }
 
+    // A full scan supersedes any single-element checks inside that subtree.
+    pendingElementScans.forEach((element) => {
+      if (root === document || root === element || root.contains?.(element)) {
+        pendingElementScans.delete(element)
+      }
+    })
     pendingScanRoots.add(root)
     return true
   }
 
-  const scheduleScan = (root = appRoot) => {
-    addScanRoot(root)
+  const flushScans = () => {
     if (scanFrame) return
     scanFrame = window.requestAnimationFrame(() => {
       scanFrame = null
       const roots = [...pendingScanRoots]
+      const elements = [...pendingElementScans]
       pendingScanRoots.clear()
+      pendingElementScans.clear()
       roots.forEach((scanRoot) => {
         if (scanRoot === document || scanRoot.isConnected) enhanceTree(scanRoot)
       })
+      elements.forEach((element) => {
+        const isCoveredByTreeScan = roots.some((root) => root === document || root === element || root.contains?.(element))
+        if (!isCoveredByTreeScan && element.isConnected) enhanceElement(element)
+      })
     })
+  }
+
+  const scheduleScan = (root = appRoot) => {
+    addScanRoot(root)
+    flushScans()
+  }
+
+  // Attribute changes and child removals only affect the element itself. The
+  // old path scanned every descendant as well, even when a list container had
+  // hundreds of unchanged glass surfaces. Keep the exact enhancement result
+  // while avoiding those redundant style/layout reads.
+  const scheduleElementScan = (element) => {
+    if (!(element instanceof HTMLElement) || element.closest('.dynamic-elements')) return
+    if ([...pendingScanRoots].some((root) => root === document || root === element || root.contains?.(element))) return
+
+    for (const pendingElement of pendingElementScans) {
+      if (pendingElement === element || pendingElement.contains?.(element)) return
+      if (element.contains?.(pendingElement)) pendingElementScans.delete(pendingElement)
+    }
+
+    pendingElementScans.add(element)
+    flushScans()
   }
 
   const observer = new MutationObserver((mutations) => {
@@ -354,7 +392,7 @@ export function installLiquidGlass(router) {
 
       if (mutation.type === 'attributes') {
         if (mutation.attributeName === 'class' && hasOnlyInternalClassChanges(target, mutation.oldValue)) return
-        scheduleScan(target)
+        scheduleElementScan(target)
         return
       }
 
@@ -367,7 +405,7 @@ export function installLiquidGlass(router) {
 
       // Re-evaluate the parent because adding/removing text or controls can turn
       // a structural element into (or out of) an eligible glass surface.
-      scheduleScan(target)
+      scheduleElementScan(target)
       addedNodes.forEach((node) => {
         if (node instanceof HTMLElement) scheduleScan(node)
       })
@@ -486,6 +524,7 @@ export function installLiquidGlass(router) {
     if (scanFrame) window.cancelAnimationFrame(scanFrame)
     if (pointerFrame) window.cancelAnimationFrame(pointerFrame)
     pendingScanRoots.clear()
+    pendingElementScans.clear()
     clearActiveSurface()
     clearPressed()
     scanTimers.forEach((timer) => window.clearTimeout(timer))

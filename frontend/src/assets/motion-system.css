@@ -135,3 +135,15 @@
     animation: none !important;
   }
 }
+
+/* Infinite decorative animations keep their exact frame while the page is
+ * idle, then continue seamlessly on pointer, scroll, touch, or keyboard input.
+ * The activity window is long enough for one-shot route/click animations to
+ * finish, so interaction feedback is never cut short. */
+html.motion-idle body::before,
+html.motion-idle body::after,
+html.motion-idle #app *,
+html.motion-idle #app *::before,
+html.motion-idle #app *::after {
+  animation-play-state: paused !important;
+}

@@ -7,7 +7,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../utils/db');
 const aiService = require('../services/aiService');
-const config = require('../config/config');
 
 // AI调用限流Map
 const aiRateLimitMap = new Map();
@@ -114,6 +113,19 @@ function isValidLineLength(aiLine, lineLength) {
   return normalizePoemLineChars(aiLine).length === lineLength;
 }
 
+function genreRule(genre) {
+  if (genre === '宋词') return { lines: 1, charactersPerLine: 0, rhymeScheme: '依词牌与句式' };
+  return {
+    lines: genre && genre.includes('律诗') ? 8 : 4,
+    charactersPerLine: genre && genre.includes('七') ? 7 : 5,
+    rhymeScheme: genre && genre.includes('律诗') ? '偶数句押韵，首句可入韵' : '通常二、四句押韵'
+  };
+}
+
+function hasText(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 // ==================== 灵感生成接口 ====================
 
 /**
@@ -143,23 +155,28 @@ router.post('/inspiration/generate', optionalAuthenticateToken, async (req, res)
 1. keywords：5-8个与主题相关的关键词
 2. theme：主题描述（20字内）
 3. mood：情感基调（如：清新、豪放、婉约等）
-4. openingIdeas：3-4个起笔思路
-5. avoid：2-3个避免事项
-6. suggestions：2-3个创作建议
+4. moodDescription：结合当前主题和体裁，解释这种情感基调适合如何落笔（20-35字，不能只是通用词典释义）
+5. openingIdeas：3-4个起笔思路
+6. avoid：2-3个避免事项
+7. suggestions：2-3个创作建议
 
 返回JSON：
-{"keywords":["关键词1","关键词2"],"theme":"主题描述","mood":"情感基调","openingIdeas":["思路1","思路2"],"avoid":["避免1","避免2"],"suggestions":["建议1","建议2"]}`;
+{"keywords":["关键词1","关键词2"],"theme":"主题描述","mood":"情感基调","moodDescription":"结合本主题的情感解释与落笔方向","openingIdeas":["思路1","思路2"],"avoid":["避免1","避免2"],"suggestions":["建议1","建议2"]}`;
 
     const result = await aiService.callZhipuGenerateJSON(prompt,
       '你是古诗词专家，根据主题生成实际创作建议。',
       { temperature: 0.8, maxTokens: 500 }
     );
 
-    if (result) {
+    if (result && Array.isArray(result.keywords) && result.keywords.length >= 3 && hasText(result.theme) && hasText(result.mood)
+      && Array.isArray(result.openingIdeas) && result.openingIdeas.length >= 2
+      && Array.isArray(result.avoid) && result.avoid.length >= 1
+      && Array.isArray(result.suggestions) && result.suggestions.length >= 2) {
       const data = {
         keywords: Array.isArray(result.keywords) ? result.keywords : [],
         theme: result.theme || '',
         mood: result.mood || '',
+        moodDescription: typeof result.moodDescription === 'string' ? result.moodDescription.trim() : '',
         openingIdeas: Array.isArray(result.openingIdeas) ? result.openingIdeas : [],
         avoid: Array.isArray(result.avoid) ? result.avoid : [],
         suggestions: Array.isArray(result.suggestions) ? result.suggestions : []
@@ -199,30 +216,32 @@ router.post('/structure/guide', optionalAuthenticateToken, async (req, res) => {
     const escapedKeywords = Array.isArray(keywords) ? keywords.join('、') : '';
     const escapedMood = escapeString(mood || '');
 
-    // 基础结构模板
-    const baseTemplates = {
-      '五言绝句': { lines: 4, charactersPerLine: 5, rhymeScheme: '二四句押韵' },
-      '七言绝句': { lines: 4, charactersPerLine: 7, rhymeScheme: '二四句押韵' },
-      '五言律诗': { lines: 8, charactersPerLine: 5, rhymeScheme: '偶数句押韵，首句可入韵' },
-      '七言律诗': { lines: 8, charactersPerLine: 7, rhymeScheme: '偶数句押韵，首句可入韵' },
-      '宋词': { lines: 0, charactersPerLine: 0, rhymeScheme: '依词牌' }
-    };
+    const baseTemplate = genreRule(escapedGenre);
 
-    const baseTemplate = baseTemplates[escapedGenre] || baseTemplates['五言绝句'];
+    const prompt = `请为主题「${escapedTheme}」的${escapedGenre}生成专属写作结构。已知意象：${escapedKeywords || '暂无'}；情感基调：${escapedMood || '请你判断'}。
 
-    // 简化版：主题+体裁+JSON模板
-    const prompt = `主题：${escapedTheme}，体裁：${escapedGenre}
+结构必须包含${baseTemplate.lines || '与词牌对应的'}个句位。每个句位都要给出真实、完整、可阅读的参考诗句，参考范例可以引用公开古诗句或你生成的示例，但不能出现“示例1”“起句”“建议”等占位词，也不能留空。参考范例只用于说明写法，不要求用户照抄。
 
-直接返回以下JSON格式，不要输出任何分析或解释：
-{"name":"${escapedGenre}","lines":${baseTemplate.lines},"charactersPerLine":${baseTemplate.charactersPerLine},"rhymeScheme":"${baseTemplate.rhymeScheme}","introduction":"简介","structure":[{"position":"起","description":"起句","themeHint":"建议"},{"position":"承","description":"承句","themeHint":"建议"},{"position":"转","description":"转句","themeHint":"建议"},{"position":"合","description":"合句","themeHint":"建议"}],"tips":["建议1","建议2"],"rhyme":"韵部","avoid":["避免1","避免2"]}`;
+请具体说明每个句位在本主题中的作用、可使用的意象和情感推进，并给出关键词使用、写作技巧、韵律要求、韵脚示例和需要避免的问题。所有内容必须针对本次主题，不要输出通用占位文案。
+
+只返回JSON，不要输出Markdown或解释文字。字段必须严格为：name、lines、charactersPerLine、rhymeScheme、introduction、structure、keywordSuggestions、tips、rhyme、rhymeExamples、avoid、advancedTips。
+structure中的每项必须包含position、role、description、themeHint、example；keywordSuggestions中的每项必须包含keyword、usage。`;
 
     const result = await aiService.callZhipuGenerateJSON(prompt,
       '你是古诗词专家。直接返回JSON，不要输出任何分析过程。',
       { temperature: 0.7, maxTokens: 800 }
     );
 
-    if (result) {
-      return res.json({ success: true, data: result });
+    const structureTips = Array.isArray(result?.tips)
+      ? result.tips.filter(Boolean).map(String)
+      : hasText(result?.tips) ? result.tips.split(/[。；;\n]+/).map(item => item.trim()).filter(Boolean) : [];
+    const structureAvoid = Array.isArray(result?.avoid)
+      ? result.avoid.filter(Boolean).map(String)
+      : hasText(result?.avoid) ? result.avoid.split(/[。；;\n]+/).map(item => item.trim()).filter(Boolean) : [];
+    if (result && Array.isArray(result.structure) && result.structure.length >= baseTemplate.lines
+      && result.structure.every(item => hasText(item?.description) && hasText(item?.example) && item.example.trim().length >= 2)
+      && structureTips.length > 0) {
+      return res.json({ success: true, data: { ...result, tips: structureTips, avoid: structureAvoid, structure: result.structure.slice(0, baseTemplate.lines || result.structure.length) } });
     }
 
     return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI服务暂时不可用，请稍后重试' });
@@ -274,17 +293,17 @@ router.post('/recommend/next-line', optionalAuthenticateToken, async (req, res) 
     );
 
     if (result && Array.isArray(result.suggestions) && result.suggestions.length) {
-      const mapped = result.suggestions
+        const mapped = result.suggestions
         .map((s) => ({
           line: (s && s.line) ? String(s.line).trim() : '',
           reason: (s && s.reason) ? String(s.reason).trim() : '',
           mood: (s && s.mood) ? String(s.mood).trim() : ''
         }))
-        .filter((s) => s.line);
+        .filter((s) => s.line && isValidLineLength(s.line, lineLength));
       return res.json({
         success: true,
         data: {
-          suggestions: mapped.length ? mapped : [{ line: '（AI未返回有效续写，请重试）', reason: '', mood: '' }],
+          suggestions: mapped,
           rhymeHint: result.rhymeHint || '',
           moodHint: result.moodHint || ''
         }
@@ -326,7 +345,7 @@ router.post('/realtime/tips', optionalAuthenticateToken, async (req, res) => {
       { temperature: 0.5, maxTokens: 200 }
     );
 
-    if (result) {
+    if (result && Array.isArray(result.tips) && result.tips.length) {
       return res.json({ success: true, data: result });
     }
 
@@ -501,38 +520,31 @@ function analyzeRhyme(line) {
 // ==================== 飞花令创作接口 ====================
 
 /**
- * 飞花令创作 - 获取随机关键字
+ * 飞花令创作 - 请求 AI 生成关键字
  * POST /api/creation/feihua/keyword
  */
 router.post('/feihua/keyword', optionalAuthenticateToken, async (req, res) => {
   try {
     const { difficulty = '中等' } = req.body;
 
-    const keywordSets = {
-      '简单': ['春', '秋', '月', '花', '风', '云', '山', '水', '鸟', '酒'],
-      '中等': ['柳', '雨', '雪', '雁', '梦', '泪', '思', '归', '愁', '恨'],
-      '困难': ['烛', '笙', '瑟', '箫', '鸿', '鹤', '蝶', '蝉', '枫', '荻']
-    };
+    const relatedPrompt = `请为飞花令生成一个${escapeString(difficulty)}难度的单字题目，并给出5个与这个字在古典诗词语境中自然相关的意象词。题目必须是一个常用汉字，不要使用生僻符号或多字词。
 
-    const keywords = keywordSets[difficulty] || keywordSets['中等'];
-    const keyword = keywords[Math.floor(Math.random() * keywords.length)];
-
-    // 生成相关词
-    const relatedPrompt = `关键字是"${keyword}"，请给出5个与这个关键字在古典诗词中常常一起出现的意象词。
-
-直接返回以下JSON格式，不要输出任何分析或解释：
-{"relatedWords":["相关词1","相关词2","相关词3","相关词4","相关词5"]}`;
+只返回JSON，不要输出任何解释：{"keyword":"单个汉字","relatedWords":["意象1","意象2","意象3","意象4","意象5"]}`;
 
     const aiResult = await aiService.callZhipuGenerateJSON(relatedPrompt,
       '你是古典诗词专家。直接返回JSON，不要输出任何分析过程。',
       { temperature: 0.5, maxTokens: 200 }
     );
 
+    if (!aiResult || !hasText(aiResult.keyword) || Array.from(aiResult.keyword.trim()).length !== 1
+      || !Array.isArray(aiResult.relatedWords) || aiResult.relatedWords.length < 3) {
+      return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI 未返回有效飞花令题目，请稍后重试' });
+    }
     return res.json({
       success: true,
       data: {
-        keyword,
-        relatedWords: aiResult?.relatedWords || ['明月', '清风', '杨柳', '落花', '流水']
+        keyword: aiResult.keyword.trim(),
+        relatedWords: aiResult.relatedWords.filter(Boolean).map(String).slice(0, 5)
       }
     });
   } catch (error) {
@@ -589,14 +601,7 @@ router.post('/feihua/score', optionalAuthenticateToken, async (req, res) => {
       return res.json({ success: true, data: result });
     }
 
-    return res.json({
-      success: true,
-      data: {
-        total: 0,
-        dimensions: { keyword: 0, content: 0, rhythm: 0, mood: 0, creativity: 0 },
-        suggestions: '【亮点】无\n【不足】AI 暂不可用，请配置 ZHIPU_API_KEY 后重试\n【建议】检查网络与密钥'
-      }
-    });
+    return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI 服务暂时不可用，请稍后重试' });
   } catch (error) {
     console.error('[creationRoutes] 飞花令评分失败:', error);
     return res.status(500).json({ success: false, message: '服务器内部错误' });
@@ -642,18 +647,15 @@ ${escapedExistingLines ? `请保留并续写这些已完成诗句：${escapedExi
       { temperature: 0.8, maxTokens: 600 }
     );
 
-    if (result) {
+    const generatedLines = result?.poem ? String(result.poem).split(/\r?\n/).map(line => normalizePoemLineChars(line)).filter(Boolean) : [];
+    const rule = genreRule(escapedGenre);
+    const validPoem = generatedLines.length >= rule.lines
+      && (rule.charactersPerLine === 0 || generatedLines.slice(0, rule.lines).every(line => line.length === rule.charactersPerLine));
+    if (result && validPoem) {
+      result.poem = generatedLines.slice(0, rule.lines).join('\n');
       return res.json({ success: true, data: result });
     }
-
-    return res.json({
-      success: true,
-      data: {
-        poem: '春风又绿江南岸\n明月何时照我还\n孤帆远影碧空尽\n唯见长江天际流',
-        title: '春日感怀',
-        explanation: '以春风和明月为意象，表达了诗人对故乡的思念之情'
-      }
-    });
+    return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI 未返回符合体裁的诗稿，请重试' });
   } catch (error) {
     console.error('[creationRoutes] 诗词生成失败:', error);
     return res.status(500).json({ success: false, message: '服务器内部错误' });
@@ -683,7 +685,7 @@ router.post('/polish', optionalAuthenticateToken, async (req, res) => {
     const escapedPoem = escapeString(poem);
     const escapedGenre = escapeString(genre || '五言绝句');
     const escapedTheme = escapeString(theme || '一般主题');
-    const polishType = type || 'optimize';
+    const polishType = type === 'rewrite' ? '重新创作' : '在原诗基础上优化';
 
     const prompt = `润色诗词：
 体裁：${escapedGenre}
@@ -691,7 +693,7 @@ router.post('/polish', optionalAuthenticateToken, async (req, res) => {
 原诗：${escapedPoem}
 
 要求：
-1. 保持原诗结构和行数，每行字数与原诗一致
+  1. ${polishType}，保持原诗结构和行数，每行字数与原诗一致
 2. 使用规范的古诗词词汇，避免网络用语、乱码、无意义字符
 3. 优化用词，使词汇更典雅、更符合古诗词风格
 4. 调整韵律节奏，提升整体意境
@@ -710,19 +712,11 @@ router.post('/polish', optionalAuthenticateToken, async (req, res) => {
         result.original = escapedPoem;
         return res.json({ success: true, data: result });
       } else {
-        console.warn('[polish] 润色结果无效，返回原诗');
+        console.warn('[polish] 润色结果无效，拒绝返回');
       }
     }
 
-    return res.json({
-      success: true,
-      data: {
-        poem: escapedPoem,
-        original: escapedPoem,
-        explanation: '原诗已经很优秀，AI建议保持原貌',
-        changes: []
-      }
-    });
+    return res.status(503).json({ success: false, code: 'AI_UNAVAILABLE', message: 'AI 未返回有效润色结果，请重试' });
   } catch (error) {
     console.error('[creationRoutes] 润色失败:', error);
     return res.status(500).json({ success: false, message: '服务器内部错误' });

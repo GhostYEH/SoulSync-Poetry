@@ -69,13 +69,13 @@
                 rows="1"
                 @input="handleLineInput($event, index)"
                 @focus="activeLineIndex = index"
-                @blur="requestLineRecommendation(index)"
+                @blur="handleLineBlur(index)"
                 ref="lineInputs"
               ></textarea>
 
               <!-- 字数提示 -->
-              <div class="char-count" :class="{ warning: getLineCharCount(index) !== expectedChars }">
-                {{ getLineCharCount(index) }}/{{ expectedChars }}
+              <div class="char-count" :class="{ warning: expectedChars !== null && getLineCharCount(index) !== expectedChars }">
+                {{ getLineCharCount(index) }}<span v-if="expectedChars !== null">/{{ expectedChars }}</span><span v-else>字</span>
               </div>
             </div>
 
@@ -83,7 +83,7 @@
             <button
               class="delete-line-btn"
               @click="removeLine(index)"
-              v-if="localLines.length > 1"
+              v-if="line.trim() || localLines.length > expectedMinimumLines"
             >
               ×
             </button>
@@ -146,10 +146,12 @@
         </div>
 
         <!-- 实时提示 -->
-        <div class="realtime-tips" v-if="currentTips.length > 0">
-          <div class="tips-label">✎ 创作提示</div>
+        <div class="realtime-tips" v-if="assistantTips.length > 0 || isAssistantLoading || assistantError">
+          <div class="tips-label">✎ AI 创作提示</div>
+          <div v-if="isAssistantLoading" class="assistant-loading">AI 正在结合当前诗句思考...</div>
+          <div v-else-if="assistantError" class="assistant-error">{{ assistantError }}</div>
           <div class="tips-list">
-            <div v-for="(tip, i) in currentTips" :key="i" class="tip-item">
+            <div v-for="(tip, i) in assistantTips" :key="i" class="tip-item">
               {{ tip }}
             </div>
           </div>
@@ -157,13 +159,13 @@
 
         <!-- 韵律检查 -->
         <div class="rhyme-check" v-if="rhymeAnalysis">
-          <div class="check-label">🎵 韵律检查</div>
+          <div class="check-label">🎵 基础韵脚校验</div>
           <div class="check-result">
             <div class="check-item">
               <span class="check-icon" :class="{ pass: rhymeAnalysis.rhymeOk }">
                 {{ rhymeAnalysis.rhymeOk ? '✓' : '!' }}
               </span>
-              <span>押韵：{{ rhymeAnalysis.rhymeStatus }}</span>
+               <span>末字：{{ rhymeAnalysis.rhymeStatus }}</span>
             </div>
             <div class="check-item">
               <span class="check-icon" :class="{ pass: rhymeAnalysis.structureOk }">
@@ -214,7 +216,7 @@
 </template>
 
 <script>
-import { ref, reactive, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, toRef } from 'vue';
 
 export default {
   name: 'PoemEditor',
@@ -246,9 +248,21 @@ export default {
     isPolishing: {
       type: Boolean,
       default: false
+    },
+    assistantTips: {
+      type: Array,
+      default: () => []
+    },
+    isAssistantLoading: {
+      type: Boolean,
+      default: false
+    },
+    assistantError: {
+      type: String,
+      default: ''
     }
   },
-  emits: ['update:title', 'update:lines', 'recommend', 'generate', 'polish', 'score', 'save', 'back'],
+  emits: ['update:title', 'update:lines', 'recommend', 'request-tips', 'generate', 'polish', 'score', 'save', 'back'],
   setup(props, { emit }) {
     const localTitle = ref(props.title);
     const localLines = ref([...props.lines]);
@@ -257,12 +271,12 @@ export default {
     const recommendations = ref([]);
     const showRecommendations = ref(false);
     const isRequestingRecommendation = ref(false);
-    const currentTips = ref([]);
     const rhymeAnalysis = ref(null);
     const lineInputs = ref([]);
 
     // 计算属性
     const expectedChars = computed(() => {
+      if (props.genre === '宋词') return null;
       return props.genre.includes('七') ? 7 : 5;
     });
 
@@ -271,12 +285,14 @@ export default {
       return props.genre.includes('律诗') ? 8 : 4;
     });
 
+    const expectedMinimumLines = computed(() => expectedLines.value || 1);
+
     const canAddLine = computed(() => {
       return expectedLines.value === 0 || localLines.value.length < expectedLines.value;
     });
 
     const hasContent = computed(() => {
-      return localLines.value.some(l => l.trim()) || localTitle.value.trim();
+      return localLines.value.some(l => l.trim());
     });
 
     const structureRoles = computed(() => {
@@ -290,7 +306,8 @@ export default {
     const currentStatus = computed(() => {
       const filledLines = localLines.value.filter(l => l.trim()).length;
       if (filledLines === 0) return 'empty';
-      if (filledLines < localLines.value.length) return 'writing';
+      const lengthValid = expectedChars.value === null || localLines.value.every((line, index) => !line.trim() || getLineCharCount(index) === expectedChars.value);
+      if (filledLines < expectedMinimumLines.value || !lengthValid) return 'writing';
       return 'completed';
     });
 
@@ -325,7 +342,7 @@ export default {
     };
 
     const getLineCharCount = (index) => {
-      return localLines.value[index].replace(/\s/g, '').length;
+      return (localLines.value[index] || '').replace(/\s/g, '').length;
     };
 
     const handleLineInput = (event, index) => {
@@ -342,9 +359,12 @@ export default {
 
       // 发送更新
       emit('update:lines', [...localLines.value]);
+    };
 
-      // 更新提示
-      updateCurrentTips(index);
+    const handleLineBlur = (index) => {
+      requestLineRecommendation(index);
+      const partialLine = localLines.value[index];
+      if (partialLine?.trim()) emit('request-tips', { partialLine, genre: props.genre, lineNumber: index + 1 });
     };
 
     const requestLineRecommendation = (index) => {
@@ -424,34 +444,11 @@ export default {
       const prevLastChar = filledLines[filledLines.length - 2].slice(-1);
 
       rhymeAnalysis.value = {
-        rhymeOk: lastChar === prevLastChar || Math.random() > 0.3, // 模拟检查
-        rhymeStatus: lastChar === prevLastChar ? '良好' : '建议调整',
-        structureOk: filledLines.length >= expectedLines.value || expectedLines.value === 0,
-        structureStatus: filledLines.length >= expectedLines.value || expectedLines.value === 0 ? '完整' : '进行中'
+        rhymeOk: lastChar === prevLastChar,
+        rhymeStatus: lastChar === prevLastChar ? '与上一句末字相同' : '与上一句末字不同',
+        structureOk: filledLines.length >= expectedMinimumLines.value,
+        structureStatus: filledLines.length >= expectedMinimumLines.value ? '句数已够' : '仍在创作'
       };
-    };
-
-    const updateCurrentTips = (index) => {
-      const tips = [];
-
-      if (index === 0 && !localLines.value[0].trim()) {
-        tips.push('起句要新颖，吸引读者注意');
-      }
-
-      const charCount = getLineCharCount(index);
-      if (charCount > 0 && charCount !== expectedChars.value) {
-        tips.push(`注意每句应为${expectedChars.value}字，当前${charCount}字`);
-      }
-
-      if (index === 2) {
-        tips.push('转句是诗眼，需要有新意');
-      }
-
-      if (index === localLines.value.length - 1 && localLines.value.every(l => l.trim())) {
-        tips.push('恭喜！已完成创作，可以进行评分');
-      }
-
-      currentTips.value = tips;
     };
 
     const generateFullPoem = () => {
@@ -464,12 +461,11 @@ export default {
     };
 
     const clearAll = () => {
-      localLines.value = ['', '', '', ''];
+      localLines.value = Array.from({ length: expectedMinimumLines.value }, () => '');
       localTitle.value = '';
       recommendations.value = [];
       showRecommendations.value = false;
       rhymeAnalysis.value = null;
-      currentTips.value = [];
       emit('update:lines', [...localLines.value]);
       emit('update:title', '');
 
@@ -516,10 +512,13 @@ export default {
       aiAssistanceEnabled,
       recommendations,
       showRecommendations,
-      currentTips,
+      assistantTips: toRef(props, 'assistantTips'),
+      isAssistantLoading: toRef(props, 'isAssistantLoading'),
+      assistantError: toRef(props, 'assistantError'),
       rhymeAnalysis,
       lineInputs,
       expectedChars,
+      expectedMinimumLines,
       canAddLine,
       hasContent,
       structureRoles,
@@ -529,6 +528,7 @@ export default {
       getLineCharCount,
       handleLineInput,
       requestLineRecommendation,
+      handleLineBlur,
       applyRecommendation,
       addLine,
       removeLine,
@@ -1042,6 +1042,18 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.assistant-loading,
+.assistant-error {
+  margin: 8px 0;
+  color: #6f8f8a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.assistant-error {
+  color: #a45d52;
 }
 
 .tips-label {

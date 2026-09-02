@@ -1064,12 +1064,12 @@ main.container {
 
 main.container > :is(
   .challenge-battle, .challenge-battle-online, .challenge-rank, .collection,
-  .daily-page, .demo-mode-page, .error-book-page, .feihualing-multiplayer,
+  .daily-page, .error-book-page, .feihualing-multiplayer,
   .feihua-online, .feihua-page, .ranking-page, .flying-tiger-container,
   .home, .learning-dashboard, .learning-path-page, .login-page,
   .poem-challenge, .poem-detail, .poetry-mahjong-wrapper,
-  .poetry-challenge-page, .parkour-wrapper, .profile-page,
-  .register-container, .search-page, .voice-recitation-page, .review-page,
+  .parkour-wrapper, .profile-page,
+  .register-container, .search-page, .review-page,
   .creation-records-container, .poetry-workbench
 ) {
   color: var(--jade-ink);
@@ -1185,12 +1185,12 @@ main.container :is(td, th, .table-row, .list-item) {
   main.container { padding: 14px 12px 30px; }
   main.container > :is(
     .challenge-battle, .challenge-battle-online, .challenge-rank, .collection,
-    .daily-page, .demo-mode-page, .error-book-page, .feihualing-multiplayer,
+    .daily-page, .error-book-page, .feihualing-multiplayer,
     .feihua-online, .feihua-page, .ranking-page, .flying-tiger-container,
     .home, .learning-dashboard, .learning-path-page, .login-page,
     .poem-challenge, .poem-detail, .poetry-mahjong-wrapper,
-    .poetry-challenge-page, .parkour-wrapper, .profile-page,
-    .register-container, .search-page, .voice-recitation-page, .review-page,
+    .parkour-wrapper, .profile-page,
+    .register-container, .search-page, .review-page,
     .creation-records-container, .poetry-workbench
   ) { border-radius: 20px; }
 }

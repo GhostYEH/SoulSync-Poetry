@@ -453,6 +453,7 @@ class ChallengeBattleService {
     };
 
     this.rooms.set(roomId, room);
+    this.setUserInGame(userId, roomId);
     return room;
   }
 
@@ -556,6 +557,7 @@ class ChallengeBattleService {
   endSingleGame(room) {
     room.status = 'finished';
     room.endedAt = Date.now();
+    this.setUserInGame(room.userId, false);
     return {
       type: 'finished',
       reason: 'completed',
@@ -782,7 +784,7 @@ class ChallengeBattleService {
     if (!room || room.status !== 'playing') return null;
     if (room.mode !== 'dual') return null;
 
-    const player = room.players.find(p => p.id === userId);
+    const player = room.players.find(p => String(p.id) === String(userId));
     if (!player || player.answered) return null;
 
     player.answered = true;

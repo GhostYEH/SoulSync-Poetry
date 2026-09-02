@@ -1,12 +1,15 @@
 import { io } from 'socket.io-client';
-import { SOCKET_URL } from './api';
+import { resolveSocketUrl } from './api';
 
 class FeihualingSocket {
   constructor() {
     this.socket = null;
     this.connected = false;
+    this.authenticated = false;
     this.eventHandlers = {};
     this.authToken = null;
+    this.connectPromise = null;
+    this.pendingEmits = [];
   }
 
   connect(token) {
@@ -22,32 +25,68 @@ class FeihualingSocket {
       return this.channel();
     }
 
-    this.socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
-    });
+    // Electron 的 getBackendPort 是异步 API。先返回 channel，连接建立前的
+    // 业务事件暂存到认证成功后再发送，避免页面切换时丢邀请/刷新请求。
+    if (!this.connectPromise) {
+      this.connectPromise = resolveSocketUrl()
+        .then((socketUrl) => {
+          this.socket = io(socketUrl, {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 500,
+            reconnectionDelayMax: 5000,
+            timeout: 10000
+          });
+          this.bindSocketEvents();
+          return this.socket;
+        })
+        .catch((error) => {
+          console.error('[Socket] 初始化连接失败:', error);
+          this.trigger('connect_error', error);
+          return null;
+        })
+        .finally(() => {
+          this.connectPromise = null;
+        });
+    }
+    return this.channel();
+  }
+
+  bindSocketEvents() {
+    if (!this.socket) return;
 
     this.socket.on('connect', () => {
       console.log('飞花令Socket连接成功');
       this.connected = true;
+      this.authenticated = false;
       
       // 发送认证
       if (this.authToken) this.socket.emit('authenticate', { token: this.authToken });
       this.trigger('connect');
     });
 
-    this.socket.on('disconnect', () => {
+    this.socket.on('disconnect', (reason) => {
       console.log('飞花令Socket断开连接');
       this.connected = false;
-      this.trigger('disconnected');
+      this.authenticated = false;
+      // 不重放断线期间的答题/邀请等旧命令，避免重连后重复提交。
+      this.pendingEmits = [];
+      this.trigger('disconnected', reason);
+    });
+
+    this.socket.on('connect_error', (error) => {
+      this.connected = false;
+      this.authenticated = false;
+      this.trigger('connect_error', error);
     });
 
     // 认证成功（后端发送 authenticated 事件）
     this.socket.on('authenticated', (data) => {
       console.log('用户认证成功:', data);
+      this.authenticated = true;
       this.trigger('authenticated', data);
+      this.flushPendingEmits();
     });
 
     this.socket.on('online-list-update', (users) => {
@@ -152,7 +191,24 @@ class FeihualingSocket {
       this.trigger('error', error);
     });
 
-    return this.channel();
+  }
+
+  flushPendingEmits() {
+    if (!this.socket || !this.connected || !this.authenticated) return;
+    const pending = this.pendingEmits.splice(0);
+    pending.forEach(({ event, data }) => this.socket.emit(event, data));
+  }
+
+  emit(event, data) {
+    if (this.socket && this.connected && this.authenticated) {
+      this.socket.emit(event, data);
+      return true;
+    }
+    if (this.authToken) {
+      this.pendingEmits.push({ event, data });
+      this.connect(this.authToken);
+    }
+    return false;
   }
 
   // 给页面一个带作用域的事件通道。通道销毁只移除当前页面的监听，
@@ -162,6 +218,7 @@ class FeihualingSocket {
     const service = this;
     return {
       get connected() { return service.connected; },
+      get authenticated() { return service.authenticated; },
       on(event, callback) {
         service.on(event, callback);
         handlers.push({ event, callback });
@@ -185,7 +242,7 @@ class FeihualingSocket {
         return this;
       },
       emit(event, data) {
-        service.socket?.emit(event, data);
+        service.emit(event, data);
         return this;
       },
       // 页面生命周期不再拥有连接；这里只释放该页面的事件。
@@ -201,12 +258,15 @@ class FeihualingSocket {
       this.socket.disconnect();
       this.socket = null;
       this.connected = false;
+      this.authenticated = false;
+      this.connectPromise = null;
+      this.pendingEmits = [];
     }
   }
 
   // 发送邀请
   sendInvitation(targetUserId, keyword, difficulty) {
-    this.socket.emit('send-invitation', {
+    this.emit('send-invitation', {
       targetUserId,
       keyword,
       difficulty
@@ -215,12 +275,12 @@ class FeihualingSocket {
 
   // 取消已发出的邀请
   cancelInvitation() {
-    this.socket?.emit('cancel-invitation');
+    this.emit('cancel-invitation');
   }
 
   // 接受邀请
   acceptInvitation(inviteId, inviterId, keyword, difficulty) {
-    this.socket.emit('accept-invitation', {
+    this.emit('accept-invitation', {
       inviteId,
       inviterId,
       keyword,
@@ -230,7 +290,7 @@ class FeihualingSocket {
 
   // 拒绝邀请
   rejectInvitation(inviteId, inviterId) {
-    this.socket.emit('reject-invitation', {
+    this.emit('reject-invitation', {
       inviteId,
       inviterId
     });
@@ -238,22 +298,12 @@ class FeihualingSocket {
 
   // 刷新在线用户列表
   refreshOnlineUsers() {
-    if (this.socket && this.connected) {
-      this.socket.emit('feihualing:get-online-users');
-    } else {
-      // Socket未连接时，稍后重试
-      console.log('[飞花令Socket] Socket未连接，延迟刷新在线用户列表');
-      setTimeout(() => {
-        if (this.socket && this.connected) {
-          this.socket.emit('feihualing:get-online-users');
-        }
-      }, 1000);
-    }
+    this.emit('feihualing:get-online-users');
   }
 
   // 提交答案
   submitAnswer(roomId, answer) {
-    this.socket.emit('submit-poem', {
+    this.emit('submit-poem', {
       roomId,
       poem: answer
     });
@@ -261,21 +311,21 @@ class FeihualingSocket {
 
   // 扔题
   throwQuestion(roomId) {
-    this.socket.emit('throw-question', {
+    this.emit('throw-question', {
       roomId
     });
   }
 
   // 超时
   timeout(roomId) {
-    this.socket.emit('timeout', {
+    this.emit('timeout', {
       roomId
     });
   }
 
   // 游戏结束
   gameOver(roomId, winnerId, loserId, reason) {
-    this.socket.emit('game-over', {
+    this.emit('game-over', {
       roomId,
       winnerId,
       loserId,
@@ -284,29 +334,29 @@ class FeihualingSocket {
   }
 
   refreshPendingInvitations() {
-    this.socket?.emit('feihualing:get-pending-invitation');
-    this.socket?.emit('challenge-get-pending-invitations');
+    this.emit('feihualing:get-pending-invitation');
+    this.emit('challenge-get-pending-invitations');
   }
 
   // 闯关邀请共用同一条已认证连接
   challengeSendInvitation(targetUserId, targetUsername, username) {
-    this.socket?.emit('challenge-send-invitation', { targetUserId, targetUsername, username });
+    this.emit('challenge-send-invitation', { targetUserId, targetUsername, username });
   }
 
   challengeCancelInvitation(targetUserId) {
-    this.socket?.emit('challenge-cancel-invitation', { targetUserId });
+    this.emit('challenge-cancel-invitation', { targetUserId });
   }
 
   challengeAcceptInvitation(inviteId, inviterId, username) {
-    this.socket?.emit('challenge-accept-invitation', { inviteId, inviterId, username });
+    this.emit('challenge-accept-invitation', { inviteId, inviterId, username });
   }
 
   challengeRejectInvitation(inviteId, inviterId) {
-    this.socket?.emit('challenge-reject-invitation', { inviteId, inviterId });
+    this.emit('challenge-reject-invitation', { inviteId, inviterId });
   }
 
   challengeRefreshOnlineUsers() {
-    this.socket?.emit('challenge-get-online-users');
+    this.emit('challenge-get-online-users');
   }
 
   // 事件监听

@@ -251,7 +251,7 @@
 <script>
 import io from 'socket.io-client'
 import { generateAttemptId } from '../utils/attemptId'
-import { getToken, request, streamAI, TIMEOUTS } from '../services/api'
+import { getToken, request, resolveSocketUrl, streamAI, TIMEOUTS } from '../services/api'
 import { AUTHOR_PORTRAITS, DEFAULT_AUTHOR_PORTRAIT } from '../assets/poets/authorPortraits'
 import PoetryHero from '../components/poem-detail/PoetryHero.vue'
 import PoemContent from '../components/poem-detail/PoemContent.vue'
@@ -592,11 +592,7 @@ export default {
           if (!this.socket.connected) this.socket.connect()
           return
         }
-        let socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
-        if (window.electronAPI) {
-          const port = await window.electronAPI.getBackendPort();
-          socketUrl = `http://localhost:${port}`;
-        }
+        const socketUrl = await resolveSocketUrl();
         
         this.socket = io(socketUrl, {
           transports: ['websocket', 'polling']

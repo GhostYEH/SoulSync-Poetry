@@ -227,12 +227,7 @@ const routes = [
   },
   {
     path: '/poetry-challenge',
-    name: 'PoetryChallenge',
-    component: () => import('../views/PoetryChallenge.vue'),
-    meta: {
-      title: '诗词创作挑战 - 古诗词学习系统',
-      requiresAuth: true
-    }
+    redirect: '/creation'
   },
   {
     path: '/parkour',
@@ -262,12 +257,7 @@ const routes = [
 
   {
     path: '/voice-recitation',
-    name: 'VoiceRecitation',
-    component: () => import('../views/VoiceRecitation.vue'),
-    meta: {
-      title: '语音背诵 - 古诗词学习系统',
-      requiresAuth: true
-    }
+    redirect: '/search'
   },
   // 404 路由必须放在所有正式路由之后，否则会吞掉闯关、错题本等路径。
   {

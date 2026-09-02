@@ -44,9 +44,14 @@
             <div class="rule-item"><span class="rule-icon">3</span><span class="rule-text">答错立即判负</span></div>
             <div class="rule-item"><span class="rule-icon">4</span><span class="rule-text">共30题，全部答完则正确数多者胜</span></div>
           </div>
-          <button class="glass-button dual-start-btn" @click="goToBattleOnline" :disabled="starting">
-            邀请对战
-          </button>
+          <div class="mode-actions">
+            <button class="glass-button dual-start-btn" @click="startMatching" :disabled="starting">
+              随机匹配
+            </button>
+            <button class="glass-button invite-start-btn" @click="goToBattleOnline" :disabled="starting">
+              邀请好友
+            </button>
+          </div>
         </div>
       </div>
 
@@ -417,6 +422,7 @@ export default {
     const dualSubmitting = ref(false);
     const dualAnswerFeedback = ref(null);
     const dualRoomId = ref(null);
+    const dualRoomMode = ref('dual-invite');
     const myPlayer = ref({ id: null, username: '', correct: 0 });
     const opponentPlayer = ref(null);
     const currentQuestionIndex = ref(0);
@@ -464,6 +470,7 @@ export default {
 
     // 是否轮到自己（基于题目索引和自己在玩家数组中的位置）
     const isMyTurn = computed(() => {
+      if (dualRoomMode.value === 'dual') return true;
       if (!myPlayerIndex.value && myPlayerIndex.value !== 0) return true;
       return currentQuestionIndex.value % 2 === myPlayerIndex.value;
     });
@@ -585,6 +592,30 @@ export default {
         starting.value = false;
       });
 
+      // 普通随机匹配是双方同时作答；服务端会广播每个玩家的答案状态，
+      // 不能复用邀请对战的 poem-submitted 事件。
+      socket.value.on('challenge-dual-answer-update', (data) => {
+        if (gameMode.value !== 'dual' || dualRoomMode.value !== 'dual') return;
+        if (data.players) {
+          data.players.forEach((p) => {
+            if (idsEqual(p.id, myUserId.value) || idsEqual(p.userId, myUserId.value)) {
+              myPlayer.value.correct = p.correct || p.correctAnswers || 0;
+            } else {
+              if (!opponentPlayer.value) opponentPlayer.value = { username: p.username, correct: 0 };
+              opponentPlayer.value.correct = p.correct || p.correctAnswers || 0;
+            }
+          });
+        }
+        if (idsEqual(data.playerId, myUserId.value)) {
+          dualSubmitting.value = false;
+          dualAnswerFeedback.value = {
+            isCorrect: data.isCorrect,
+            correctAnswer: data.correctAnswer
+          };
+        }
+        if (data.bothAnswered) stopDualTimer();
+      });
+
       // 游戏开始（邀请对战 + 匹配对战共用）
       socket.value.on('challenge-dual-started', (data) => {
         console.log('[ChallengeBattle] 收到 challenge-dual-started:', data);
@@ -621,10 +652,10 @@ export default {
         if (data.players) {
           data.players.forEach(p => {
             if (idsEqual(p.id, myUserId.value) || idsEqual(p.userId, myUserId.value)) {
-              myPlayer.value.correct = p.correctAnswers || 0;
+              myPlayer.value.correct = p.correctAnswers ?? p.correct ?? 0;
             } else {
               if (!opponentPlayer.value) opponentPlayer.value = { username: p.username, correct: 0 };
-              opponentPlayer.value.correct = p.correctAnswers || 0;
+              opponentPlayer.value.correct = p.correctAnswers ?? p.correct ?? 0;
             }
           });
         }
@@ -653,9 +684,11 @@ export default {
         console.log('[ChallengeBattle] 收到 challenge-dual-next:', data);
         if (gameMode.value !== 'dual') return;
 
-        dualQuestion.value = data.currentQuestion;
-        dualRound.value = (data.currentQuestionIndex || 0) + 1;
-        currentQuestionIndex.value = data.currentQuestionIndex || 0;
+        const nextQuestion = data.currentQuestion || data.question;
+        if (!nextQuestion) return;
+        dualQuestion.value = nextQuestion;
+        dualRound.value = (data.currentQuestionIndex ?? ((data.currentRound || 1) - 1)) + 1;
+        currentQuestionIndex.value = data.currentQuestionIndex ?? ((data.currentRound || 1) - 1);
         dualAnswerFeedback.value = null;
         dualAnswer.value = '';
 
@@ -663,16 +696,17 @@ export default {
         if (data.players) {
           data.players.forEach(p => {
             if (idsEqual(p.id, myUserId.value) || idsEqual(p.userId, myUserId.value)) {
-              myPlayer.value.correct = p.correctAnswers || 0;
+              myPlayer.value.correct = p.correctAnswers ?? p.correct ?? 0;
             } else {
               if (!opponentPlayer.value) opponentPlayer.value = { username: p.username, correct: 0 };
-              opponentPlayer.value.correct = p.correctAnswers || 0;
+              opponentPlayer.value.correct = p.correctAnswers ?? p.correct ?? 0;
             }
           });
         }
 
         // 重启计时器
         dualRemainingTime.value = 30;
+        dualSubmitting.value = false;
         startDualTimer();
         setTimeout(() => dualAnswerInput.value?.focus(), 100);
       });
@@ -728,16 +762,17 @@ export default {
       // 计时器心跳（仅双人对战）
       socket.value.on('challenge-dual-timer-tick', (data) => {
         if (gameMode.value !== 'dual') return;
-        dualRemainingTime.value = data.remaining;
-        // 如果收到的题目索引和本地不一致，说明这是旧数据，忽略
-        if (data.currentQuestionIndex !== undefined && data.currentQuestionIndex !== currentQuestionIndex.value) {
-          return;
+        if (data.roomId && String(data.roomId) !== String(dualRoomId.value)) return;
+        // 匹配和邀请模式都以服务端心跳校准本地倒计时，避免切后台后漂移。
+        if (Number.isFinite(Number(data.remaining))) {
+          dualRemainingTime.value = Math.max(0, Number(data.remaining));
         }
       });
 
       socket.value.on('error', (data) => {
         console.error('[ChallengeBattle] Socket错误:', JSON.stringify(data));
         showToast(data.error || '发生错误', 'error');
+        if (matching.value && !gameStarted.value) matching.value = false;
         starting.value = false;
         submitting.value = false;
         dualSubmitting.value = false;
@@ -745,6 +780,9 @@ export default {
 
       socket.value.on('disconnect', () => {
         console.log('[ChallengeBattle] Socket断开连接');
+        // 服务端断线时会移出匹配队列，页面不能继续显示一个已失效的等待状态。
+        if (matching.value && !gameStarted.value) matching.value = false;
+        starting.value = false;
       });
     };
 
@@ -784,7 +822,7 @@ export default {
       if (!isMyTurn.value) { showToast('还没轮到你答题', 'error'); return; }
       dualSubmitting.value = true;
       stopDualTimer();
-      socket.value.emit('challenge-dual-invite-answer', {
+      socket.value.emit(dualRoomMode.value === 'dual' ? 'challenge-dual-answer' : 'challenge-dual-invite-answer', {
         roomId: dualRoomId.value,
         answer: dualAnswer.value.trim()
       });
@@ -798,7 +836,10 @@ export default {
         if (dualRemainingTime.value > 0) dualRemainingTime.value--;
         else {
           stopDualTimer();
-          socket.value.emit('challenge-dual-invite-timeout', { roomId: dualRoomId.value });
+          socket.value.emit(
+            dualRoomMode.value === 'dual' ? 'challenge-dual-timeout' : 'challenge-dual-invite-timeout',
+            { roomId: dualRoomId.value }
+          );
         }
       }, 1000);
     };
@@ -817,6 +858,7 @@ export default {
       matching.value = false;
       starting.value = false;
       gameMode.value = 'dual';
+      dualRoomMode.value = data.mode || 'dual-invite';
       gameStarted.value = true;
       gameEnded.value = false;
       dualRoomId.value = data.id;
@@ -846,14 +888,14 @@ export default {
         myPlayer.value = {
           id: me.id || me.userId,
           username: me.username,
-          correct: me.correctAnswers || 0
+          correct: me.correctAnswers ?? me.correct ?? 0
         };
       }
       if (other) {
         opponentPlayer.value = {
           id: other.id || other.userId,
           username: other.username,
-          correct: other.correctAnswers || 0
+          correct: other.correctAnswers ?? other.correct ?? 0
         };
       }
 
@@ -902,6 +944,8 @@ export default {
       stopDualTimer();
       if (gameMode.value === 'single') {
         socket.value?.emit('challenge-quit', { roomId: roomId.value, mode: 'single' });
+      } else if (dualRoomMode.value === 'dual') {
+        socket.value?.emit('challenge-quit', { roomId: dualRoomId.value, mode: 'dual' });
       } else {
         socket.value?.emit('challenge-dual-invite-quit', { roomId: dualRoomId.value });
       }
@@ -915,6 +959,7 @@ export default {
       matching.value = false;
       roomId.value = null;
       dualRoomId.value = null;
+      dualRoomMode.value = 'dual-invite';
       currentQuestion.value = null;
       dualQuestion.value = null;
       answerFeedback.value = null;
@@ -936,6 +981,19 @@ export default {
         history.value = data.history || [];
         historyLoading.value = false;
       });
+    };
+
+    const startMatching = () => {
+      if (!socket.value?.connected) { showToast('网络未连接', 'error'); return; }
+      matching.value = true;
+      starting.value = true;
+      socket.value.emit('challenge-match-start', { username: myUsername.value });
+    };
+
+    const cancelMatching = () => {
+      if (socket.value?.connected) socket.value.emit('challenge-match-cancel');
+      matching.value = false;
+      starting.value = false;
     };
 
     const formatDate = (dateStr) => {
@@ -989,6 +1047,7 @@ export default {
     onUnmounted(() => {
       stopSingleTimer();
       stopDualTimer();
+      if (matching.value && socket.value?.connected) socket.value.emit('challenge-match-cancel');
       socket.value?.dispose?.();
       socket.value = null;
     });
@@ -1006,7 +1065,7 @@ export default {
       wrongQuestions, dualResult,
       toast, answerInput, dualAnswerInput,
       goLogin, goBack, goToReview, goToBattleOnline,
-      startSingleGame, submitAnswer, cancelMatching: () => { matching.value = false; starting.value = false; },
+      startSingleGame, startMatching, submitAnswer, cancelMatching,
       submitDualAnswer, retryGame, confirmQuit, returnToStart, formatDate,
       iWon, isTie, isMyTurn
     };
@@ -1082,6 +1141,9 @@ export default {
 .dual-card .rule-icon { background:var(--gold); }
 .rule-text { color:inherit; }
 .mode-card .glass-button { margin-top:auto; min-width:150px; }
+.mode-actions { display:flex; justify-content:center; flex-wrap:wrap; gap:10px; width:100%; margin-top:auto; }
+.mode-actions .glass-button { margin-top:0; }
+.invite-start-btn { color:var(--ink); background:rgba(255,255,255,.72); box-shadow:none; }
 .start-btn { background:linear-gradient(180deg,#2a8178,#216d65); }
 .dual-start-btn { background:linear-gradient(180deg,#c39858,#a66e30); }
 .history-card { width:100%; margin-top:18px; }

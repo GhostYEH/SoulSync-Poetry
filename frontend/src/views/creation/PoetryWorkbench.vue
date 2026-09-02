@@ -73,7 +73,7 @@
           <span>此刻</span>
           <strong>{{ currentStepCopy }}</strong>
         </div>
-        <div class="stage-rail-foot"><span class="status-pulse"></span> AI 灵感引擎在线</div>
+        <div class="stage-rail-foot"><span class="status-pulse"></span> AI 功能按需请求</div>
       </aside>
 
       <div class="workspace">
@@ -127,9 +127,13 @@
                 :keywords="poemDraft.keywords"
                 :is-generating="isGenerating"
                 :is-polishing="isPolishing"
+                :assistant-tips="assistantTips"
+                :is-assistant-loading="isAssistantLoading"
+                :assistant-error="assistantError"
                 @update:title="poemDraft.title = $event"
                 @update:lines="poemDraft.lines = $event"
                 @recommend="handleRecommend"
+                @request-tips="handleRealtimeTips"
                 @generate="handleGeneratePoem"
                 @polish="handlePolish"
                 @score="handleScore"
@@ -308,6 +312,10 @@ export default {
     const isLoading = ref(false);
     const isGenerating = ref(false);
     const isPolishing = ref(false);
+    const isAssistantLoading = ref(false);
+    const assistantTips = ref([]);
+    const assistantError = ref('');
+    let assistantRequestSerial = 0;
     const showTypewriter = ref(false);
     const typewriterText = ref('');
     const showScorePanel = ref(false);
@@ -336,6 +344,8 @@ export default {
       poemDraft.keywords = [];
       poemDraft.mood = '';
       poemDraft.suggestions = [];
+      assistantTips.value = [];
+      assistantError.value = '';
       feihuaDraft.keyword = '';
       feihuaDraft.title = '';
       feihuaDraft.content = '';
@@ -371,26 +381,7 @@ export default {
         }
       } catch (error) {
         console.error('生成灵感失败:', error);
-        // 即使接口完全失败，也基于用户主题生成相关 fallback
-        if (inspirationPanel.value) {
-          const t = theme || '一般主题';
-          const fallbacks = {
-            '思乡': { keywords: ['明月', '孤灯', '归雁', '故园', '白发', '江湖', '烟波', '旧路'], theme: `围绕「${t}」主题，可从故乡景物（炊烟、老树、旧居）或旅途所见（孤舟、斜阳、霜鬓）切入，在空间对比中写出距离感与归心`, mood: '沉郁', suggestions: ['用故乡具体景物代替直接说「想家」', '以空间距离（千里）强化归心之切', '转句可宕入归期想象或梦境', '结尾以景结情，留白回味'] },
-            '离别': { keywords: ['长亭', '古道', '杨柳', '孤帆', '浊酒', '泪眼', '斜阳', '歧路'], theme: `围绕「${t}」主题，可从送别场景（渡口、长亭、暮色）或别后想象切入，以景托情，不言别而别情自现`, mood: '怅惘', suggestions: ['以具体动作（执手、折柳）代替空洞悲叹', '转句宕开写别后，不局限于当下', '用「浊酒」「斜阳」等浊重意象托出离愁', '结尾以景结情，不说再见'] },
-            '春日': { keywords: ['柳絮', '桃花', '燕归', '新芽', '微雨', '暖风', '蜂蝶', '纸鸢'], theme: `围绕「${t}」主题，可从一花一草的细微变化切入，写出春日独有的生机或春光易逝的感慨`, mood: '清新', suggestions: ['写春不写春字，借「柳绿」「桃红」让春意自己显现', '动静结合：蜂蝶忙而人静，意境更活', '转句引入「春将尽」或人事，增加层次', '结尾宕入人事，写春日里的思念或孩童'] },
-            '山水': { keywords: ['空山', '幽径', '飞鸟', '流泉', '松风', '白云', '独坐', '樵归'], theme: `围绕「${t}」主题，以山水为媒介写出诗人的精神世界，境随心转，山水即心境`, mood: '宁静', suggestions: ['以动写静：「鸟鸣山更幽」比直接说山很静更有张力', '远近层次：近处奇石细草，远处飞鸟孤云', '转句引入「人」：山中行人、渔樵问答，以人衬静', '结尾留白：「独坐」「忘言」比说完更耐读'] },
-            '怀古': { keywords: ['残碑', '故垒', '夕阳', '西风', '英雄', '往事', '成败', '兴亡'], theme: `围绕「${t}」主题，借历史遗迹或古人事迹发感慨，在「变与不变」中找立意，借古讽今或借古抒怀`, mood: '苍凉', suggestions: ['以小见大：选一个细节、一个决定，而非全面评价', '古今对比：打通古人处境与当下，在比较中找立意', '转句宕开议论，点明主旨', '结尾用反问或假设，增加思辨力量'] },
-            '闺怨': { keywords: ['高楼', '明月', '妆奁', '落花', '春雨', '孤灯', '秋风', '雁过'], theme: `围绕「${t}」主题，借女子之口写人间别情，通过妆扮变化、时令更替暗示思念，不言怨而怨自深`, mood: '婉约', suggestions: ['通过妆扮变化（懒梳头、眉不画）暗示思念', '转句宕入对方视角：他此刻在做什么？', '善用「梦」意象：梦里相聚、梦醒更孤', '结尾以物结情：落花、孤灯，以景写情胜于直说'] }
-          };
-          let mockResult = fallbacks['春日'];
-          for (const key of Object.keys(fallbacks)) {
-            if (theme.includes(key)) { mockResult = fallbacks[key]; break; }
-          }
-          inspirationPanel.value.setResult(mockResult);
-          poemDraft.keywords = mockResult.keywords;
-          poemDraft.mood = mockResult.mood;
-          poemDraft.suggestions = mockResult.suggestions;
-        }
+        notify(error.message || 'AI 灵感生成失败，请稍后重试', 'error');
       } finally {
         isLoading.value = false;
       }
@@ -417,22 +408,20 @@ export default {
           });
           const result = response.data || response;
 
-          if (result && result.suggestions) {
-          const recs = result.suggestions.map((item, i) => ({
+          if (result && Array.isArray(result.suggestions) && result.suggestions.length) {
+            const recs = result.suggestions.map((item, i) => ({
               line: typeof item === 'string' ? item : item?.line,
-              reason: typeof item === 'string' ? (result.reasons?.[i] || 'AI推荐') : (item?.reason || 'AI推荐')
-            }));
+              reason: typeof item === 'string' ? (result.reasons?.[i] || '') : (item?.reason || '')
+            })).filter(item => item.line?.trim());
+            if (!recs.length) throw new Error('AI 未返回有效续写建议');
             poemEditor.value.setRecommendations(recs);
+          } else {
+            throw new Error('AI 未返回续写建议');
           }
         } catch (error) {
-          // 模拟推荐数据
-          if (poemEditor.value) {
-            const mockRecs = [
-              { line: '春风又绿江南岸', reason: '与上句形成对仗' },
-              { line: '明月何时照我还', reason: '意境呼应' }
-            ];
-            poemEditor.value.setRecommendations(mockRecs);
-          }
+          console.error('获取续写建议失败:', error);
+          poemEditor.value.setRecommendations([]);
+          notify(error.message || 'AI 续写建议失败，请稍后重试', 'error');
         }
       }
     };
@@ -448,11 +437,13 @@ export default {
           genre,
           keywords,
           structure: '',
-          existingLines: existingLines?.filter(line => line?.trim()) || []
+          existingLines: Array.isArray(existingLines)
+            ? existingLines.filter(line => line?.trim())
+            : String(existingLines || '').split('\n').map(line => line.trim()).filter(Boolean)
         });
         const result = response.data || response;
 
-        if (result && result.poem) {
+        if (result && result.poem && result.poem.trim()) {
           const newLines = result.poem.split('\n').filter(l => l.trim());
           if (poemEditor.value) {
             poemEditor.value.setLines(newLines);
@@ -463,14 +454,12 @@ export default {
               poemEditor.value.setTitle(result.title);
             }
           }
+        } else {
+          throw new Error('AI 未返回有效诗稿');
         }
       } catch (error) {
         console.error('生成诗词失败:', error);
-        // 模拟生成数据
-        const mockPoem = '春风拂面柳丝长\n桃花映日笑春光\n燕子归来寻旧垒\n碧水青山入梦乡';
-        if (poemEditor.value) {
-          poemEditor.value.setLines(mockPoem.split('\n'));
-        }
+        notify(error.message || 'AI 生成诗词失败，请稍后重试', 'error');
       } finally {
         isGenerating.value = false;
         hideTypewriterEffect();
@@ -479,11 +468,15 @@ export default {
 
     // AI润色
     const handlePolish = async (type) => {
+      const poemContent = poemDraft.lines.filter(l => l.trim()).join('\n');
+      if (!poemContent) {
+        notify('请先写下至少一句诗，再请求 AI 润色', 'warning');
+        return;
+      }
       isPolishing.value = true;
       showTypewriterEffect('AI正在润色中...');
 
       try {
-        const poemContent = poemDraft.lines.filter(l => l.trim()).join('\n');
         const response = await api.creationWorkbench.polishPoem({
           poem: poemContent,
           genre: poemDraft.genre,
@@ -499,24 +492,12 @@ export default {
             explanation: result.explanation || '已优化用词，增强韵律美感',
             changes: result.changes || []
           };
-        } else {
-          polishResult.value = {
-            poem: poemContent,
-            original: poemContent,
-            explanation: '原诗已经很优秀，无需润色',
-            changes: []
-          };
-        }
+        } else throw new Error('AI 未返回有效润色结果');
         showScorePanel.value = true;
       } catch (error) {
         console.error('润色失败:', error);
-        polishResult.value = {
-          poem: poemDraft.lines.filter(l => l.trim()).join('\n'),
-          original: poemDraft.lines.filter(l => l.trim()).join('\n'),
-          explanation: '润色失败，请检查网络连接后重试',
-          changes: []
-        };
-        showScorePanel.value = true;
+        polishResult.value = null;
+        notify(error.message || 'AI 润色失败，请稍后重试', 'error');
       } finally {
         isPolishing.value = false;
         hideTypewriterEffect();
@@ -536,10 +517,14 @@ export default {
 
     // 评分
     const handleScore = async () => {
+      const poemContent = poemDraft.lines.filter(l => l.trim()).join('\n');
+      if (!poemContent) {
+        notify('请先写下至少一句诗，再请求 AI 评分', 'warning');
+        return;
+      }
       showTypewriterEffect('正在分析作品...');
 
       try {
-        const poemContent = poemDraft.lines.filter(l => l.trim()).join('\n');
         const response = await api.creationWorkbench.scorePoem({
           poem: poemContent,
           title: poemDraft.title,
@@ -552,29 +537,9 @@ export default {
         showScorePanel.value = true;
       } catch (error) {
         console.error('评分失败:', error);
-        // 模拟评分数据
-        currentScore.value = {
-          total: 85,
-          dimensions: {
-            content: 88,
-            rhythm: 82,
-            mood: 85,
-            language: 80,
-            creativity: 75
-          },
-          analysis: {
-            rhyme: '押韵良好，平仄协调',
-            rhymeOk: true,
-            structure: '起承转合分明，结构完整',
-            structureOk: true,
-            meaning: '意境清晰，情景交融',
-            meaningOk: true,
-            language: '语言流畅，用词恰当',
-            languageOk: true
-          },
-          suggestions: '整体作品优秀，第三句可再斟酌，增加情感深度'
-        };
-        showScorePanel.value = true;
+        currentScore.value = null;
+        showScorePanel.value = false;
+        notify(error.message || 'AI 评分失败，请稍后重试', 'error');
       }
 
       hideTypewriterEffect();
@@ -591,10 +556,9 @@ export default {
         feihuaDraft.keyword = result.keyword;
       } catch (error) {
         console.error('获取飞花令关键字失败:', error);
-        // 保持可继续创作；失败提示和兜底仅用于网络不可用时。
-        const fallback = { keyword: '月', relatedWords: ['清辉', '孤舟', '归雁', '寒江', '乡关'] };
-        feihuaKeywordInfo.value = fallback;
-        feihuaDraft.keyword = fallback.keyword;
+        feihuaKeywordInfo.value = null;
+        feihuaDraft.keyword = '';
+        notify(error.message || 'AI 抽题失败，请稍后重试', 'error');
       } finally {
         isLoading.value = false;
       }
@@ -602,7 +566,7 @@ export default {
 
     // 飞花令评分
     const handleFeihuaScore = async () => {
-      if (!feihuaDraft.content) return;
+      if (!feihuaDraft.content?.trim()) return;
 
       isLoading.value = true;
       showTypewriterEffect('正在评分...');
@@ -619,28 +583,8 @@ export default {
         showScorePanel.value = false;
       } catch (error) {
         console.error('飞花令评分失败:', error);
-        // 模拟评分
-        currentScore.value = {
-          total: 78,
-          dimensions: {
-            content: 80,
-            rhythm: 75,
-            mood: 78,
-            language: 72,
-            creativity: 70,
-            keyword: 95
-          },
-          analysis: {
-            rhyme: '关键字使用恰当',
-            rhymeOk: true,
-            structure: '结构基本完整',
-            structureOk: true,
-            meaning: '意境表达尚可',
-            meaningOk: true
-          },
-          suggestions: '关键字使用出色，可进一步提升韵律美感'
-        };
-        showScorePanel.value = false;
+        currentScore.value = null;
+        notify(error.message || 'AI 评分失败，请稍后重试', 'error');
       }
 
       isLoading.value = false;
@@ -649,7 +593,10 @@ export default {
 
     // 飞花令润色
     const handleFeihuaPolish = async (type) => {
-      if (!feihuaDraft.content) return;
+      if (!feihuaDraft.content?.trim()) {
+        notify('请先写下飞花令作品，再请求 AI 润色', 'warning');
+        return;
+      }
 
       isPolishing.value = true;
       showTypewriterEffect('AI正在润色中...');
@@ -670,22 +617,11 @@ export default {
             explanation: result.explanation || '已优化用词，增强韵律美感',
             changes: result.changes || []
           };
-        } else {
-          polishResult.value = {
-            poem: feihuaDraft.content,
-            original: feihuaDraft.content,
-            explanation: '原诗已经很优秀，无需润色',
-            changes: []
-          };
-        }
+        } else throw new Error('AI 未返回有效润色结果');
       } catch (error) {
         console.error('飞花令润色失败:', error);
-        polishResult.value = {
-          poem: feihuaDraft.content,
-          original: feihuaDraft.content,
-          explanation: '润色失败，请检查网络连接后重试',
-          changes: []
-        };
+        polishResult.value = null;
+        notify(error.message || 'AI 润色失败，请稍后重试', 'error');
       } finally {
         isPolishing.value = false;
         hideTypewriterEffect();
@@ -707,6 +643,34 @@ export default {
     const handleChainStart = ({ theme, genre, startMode }) => {
       poemDraft.theme = theme;
       poemDraft.genre = genre;
+    };
+
+    // 编辑器右侧 AI 助手：只有真实请求返回后才展示建议。
+    const handleRealtimeTips = async ({ partialLine, genre }) => {
+      if (!partialLine?.trim()) return;
+      const requestSerial = ++assistantRequestSerial;
+      isAssistantLoading.value = true;
+      assistantError.value = '';
+      try {
+        const response = await api.creationWorkbench.getRealtimeTips(partialLine, genre);
+        const result = response.data || response;
+        if (!result || !Array.isArray(result.tips) || !result.tips.length) {
+          throw new Error('AI 未返回创作提示');
+        }
+        if (requestSerial !== assistantRequestSerial) return;
+        assistantTips.value = result.tips.filter(Boolean).map(String);
+        if (result.rhymeReminder) assistantTips.value.push(`韵律：${result.rhymeReminder}`);
+        if (result.remainingChars) assistantTips.value.push(`字数：${result.remainingChars}`);
+      } catch (error) {
+        console.error('获取实时创作提示失败:', error);
+        if (requestSerial !== assistantRequestSerial) return;
+        assistantTips.value = [];
+        assistantError.value = error.message || 'AI 助手暂时不可用';
+      } finally {
+        if (requestSerial === assistantRequestSerial) {
+          isAssistantLoading.value = false;
+        }
+      }
     };
 
     // 接龙提交
@@ -735,20 +699,7 @@ export default {
     }
   } catch (error) {
     console.error('接龙失败:', error);
-    // 根据错误类型决定是否使用兜底
-    const g = genre || '五言绝句';
-    const n = g.includes('七') ? 7 : 5;
-    const themeMap = {
-      '思乡': '故园东望路漫漫', '离别': '孤帆远影碧空尽',
-      '山水': '青山隐隐水迢迢', '自然': '春风得意马蹄疾',
-      'default': '落花时节又逢君'
-    };
-    const raw = Object.entries(themeMap).find(([k]) => (theme || '').includes(k))?.[1] || themeMap.default;
-    const norm = (raw || '').replace(/[，。？！、；：""''（）【】\s]/g, '');
-    const mock = norm.slice(0, n) || (n === 7 ? '春风送暖入屠苏' : '春风拂面柳丝轻');
-    if (chainMode.value) {
-      chainMode.value.setAILine(mock);
-    }
+    notify(error.message || 'AI 接龙失败，请稍后重试', 'error');
   }
 
       isLoading.value = false;
@@ -782,6 +733,8 @@ export default {
           modification_suggestions: currentScore.value?.suggestions || ''
         };
 
+        if (!workData.content?.trim()) throw new Error('请先完成至少一句诗，再保存作品');
+        if (!workData.theme?.trim()) throw new Error('请先填写创作主题，再保存作品');
         await api.creationWorkbench.saveWork(workData);
 
         showScorePanel.value = false;
@@ -819,6 +772,9 @@ export default {
       isLoading,
       isGenerating,
       isPolishing,
+      isAssistantLoading,
+      assistantTips,
+      assistantError,
       showTypewriter,
       typewriterText,
       showScorePanel,
@@ -836,6 +792,7 @@ export default {
       handleGenerateInspiration,
       handleInspirationNext,
       handleRecommend,
+      handleRealtimeTips,
       handleGeneratePoem,
       handlePolish,
       handleApplyPolish,
