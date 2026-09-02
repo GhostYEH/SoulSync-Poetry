@@ -209,6 +209,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { LOGIN_POEMS } from '../data/loginPoems.js'
+import { request } from '../services/api.js'
 
 const router = useRouter()
 const loading = ref(false)
@@ -327,12 +328,12 @@ const handleLogin = async () => {
   loading.value = true
   error.value = ''
   try {
-    const response = await fetch('http://localhost:3000/api/auth/login', {
+    const data = await request('/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form.value)
+      body: JSON.stringify(form.value),
+      includeAuth: false,
+      skipAuthRedirect: true,
     })
-    const data = await response.json()
     if (data.success) {
       localStorage.setItem('token', data.data.token)
       localStorage.setItem('user', JSON.stringify(data.data.user))

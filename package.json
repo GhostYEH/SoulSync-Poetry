@@ -4,6 +4,9 @@
   "description": "诗词学习系统桌面应用",
   "author": "",
   "license": "MIT",
+  "engines": {
+    "node": ">=22.14.0"
+  },
   "scripts": {
     "start": "npm run dev",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",

@@ -10,8 +10,15 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 const server = http.createServer(app);
+const configuredOrigins = process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN || '';
+const allowedOrigins = configuredOrigins
+  ? configuredOrigins.split(',').map(origin => origin.trim()).filter(Boolean)
+  : (process.env.NODE_ENV === 'production' ? [] : ['*']);
+const corsOrigin = allowedOrigins.length === 0
+  ? false
+  : (allowedOrigins.length === 1 && allowedOrigins[0] === '*' ? '*' : allowedOrigins);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { origin: corsOrigin, methods: ['GET', 'POST'] }
 });
 
 const PORT = process.env.PORT || 3000;
@@ -28,11 +35,8 @@ app.use(helmet({
   crossOriginResourcePolicy: { crossOriginResourcePolicy: false }
 }));
 
-const _allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
-  : ['*'];
 app.use(cors({
-  origin: _allowedOrigins.length === 1 && _allowedOrigins[0] === '*' ? '*' : _allowedOrigins,
+  origin: corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id']
 }));
@@ -87,11 +91,6 @@ app.use((req, res, next) => {
       console.warn(`[SLOW] ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms (reqId=${req.requestId})`);
     }
   });
-  next();
-});
-
-app.use((req, res, next) => {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   next();
 });
 

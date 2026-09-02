@@ -112,6 +112,8 @@ class DigitalHumanService {
       await this.playBrowserSpeech(result.browserSpeech, session)
     } catch (error) {
       if (session !== this.speechSession) return
+      // Audio.play() 失败时也必须释放刚创建的 Blob URL，避免重复回退造成泄漏。
+      this.releaseAudio()
       console.info('[DigitalHuman] TTS API unavailable, using browser speech fallback.')
       try {
         const fallback = await this.browserProvider.synthesize(text, options)

@@ -11,6 +11,7 @@ const {
   getLearningRecords
 } = require('../services/personalizedService');
 const { getWrongQuestions } = require('../services/wrongQuestionService');
+const authenticateToken = require('../middleware/auth');
 
 // 缓存配置
 const CACHE_TTL = 30 * 60 * 1000; // 30分钟缓存
@@ -78,32 +79,16 @@ function withTimeout(promise, ms) {
 }
 
 /**
- * 从请求中提取用户ID
+ * 使用共享 JWT 验签中间件，禁止只解码 payload。
  */
-function extractUserId(req) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  const token = authHeader.slice(7);
-  try {
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-    return payload.userId;
-  } catch (e) {
-    return null;
-  }
-}
-
 /**
  * 统一认证中间件
  */
 function authMiddleware(req, res, next) {
-  const userId = extractUserId(req);
-  if (!userId) {
-    return res.status(401).json({ message: '未登录，请先登录' });
-  }
-  req.userId = userId;
-  next();
+  authenticateToken(req, res, () => {
+    req.userId = req.user.userId;
+    next();
+  });
 }
 
 /**
@@ -111,11 +96,8 @@ function authMiddleware(req, res, next) {
  * 获取完整的个性化推荐数据（需要认证）
  * 返回：{ review, learn, analysis }
  */
-router.get('/', async (req, res) => {
-  const userId = extractUserId(req);
-  if (!userId) {
-    return res.status(401).json({ message: '未登录，请先登录' });
-  }
+router.get('/', authMiddleware, async (req, res) => {
+  const userId = req.userId;
 
   console.log('[personalizedRoutes] 收到个性化推荐请求，用户ID:', userId);
 

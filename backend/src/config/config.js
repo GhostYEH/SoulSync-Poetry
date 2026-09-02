@@ -4,19 +4,23 @@ require('dotenv').config({ quiet: true, override: true });
 
 const _WEAK_SECRETS = ['your-secret-key', 'your-secret-key-change-in-production', 'secret', '123456', 'password', 'jwt-secret', ''];
 const _jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+const _normalizedJwtSecret = _jwtSecret.trim().toLowerCase();
+const _isWeakJwtSecret = _WEAK_SECRETS.includes(_normalizedJwtSecret)
+  || /^(your[-_ ]?secret|change[-_ ]?me|example|test|development|dev)(?:[-_ ]|$)/i.test(_jwtSecret.trim())
+  || /^(.)\1+$/.test(_jwtSecret);
 
 if (process.env.NODE_ENV === 'production') {
-  if (_WEAK_SECRETS.includes(_jwtSecret)) {
+  if (_isWeakJwtSecret) {
     console.error('[SECURITY] 生产环境 JWT_SECRET 未设置或为弱密钥，拒绝启动！');
     console.error('[SECURITY] 请设置 JWT_SECRET 环境变量为至少32字符的随机字符串。');
     process.exit(1);
   }
-  if (_jwtSecret.length < 16) {
-    console.error('[SECURITY] 生产环境 JWT_SECRET 长度不足16字符，拒绝启动！');
+  if (_jwtSecret.length < 32) {
+    console.error('[SECURITY] 生产环境 JWT_SECRET 长度不足32字符，拒绝启动！');
     process.exit(1);
   }
 } else {
-  if (_WEAK_SECRETS.includes(_jwtSecret)) {
+  if (_isWeakJwtSecret) {
     console.warn('[SECURITY] 开发环境使用默认 JWT 密钥，请勿用于生产！');
   }
 }
@@ -32,11 +36,6 @@ module.exports = {
   jwt: {
     secret: _jwtSecret,
     expiresIn: process.env.JWT_EXPIRES_IN || '24h'
-  },
-  
-  // 认证配置
-  auth: {
-    defaultUserId: 1 // 无token/无效token时使用的默认用户ID，仅用于演示/开发环境
   },
   
   // 普通文本模型统一使用智谱；文生图、语音等独立能力继续使用各自的配置。

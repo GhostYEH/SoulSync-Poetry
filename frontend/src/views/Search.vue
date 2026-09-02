@@ -249,6 +249,7 @@
 </template>
 
 <script>
+import DOMPurify from 'dompurify';
 import { request, TIMEOUTS } from '@/services/api.js';
 import {
   PhArrowRight,
@@ -476,6 +477,8 @@ export default {
     if (this.animationFrame) {
       cancelAnimationFrame(this.animationFrame);
     }
+    clearTimeout(this.suggestionTimer);
+    window.removeEventListener('resize', this.resizeParticles);
   },
   methods: {
     // ---- 搜索 ----
@@ -815,7 +818,10 @@ export default {
     highlightMatch(text, query) {
       if (!query || !text) return text;
       const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-      return text.replace(regex, '<mark>$1</mark>');
+      return DOMPurify.sanitize(text.replace(regex, '<mark>$1</mark>'), {
+        ALLOWED_TAGS: ['mark'],
+        ALLOWED_ATTR: [],
+      });
     },
 
     selectSuggestion(suggestion) {
@@ -1007,12 +1013,12 @@ export default {
       const ctx = canvas.getContext('2d');
       this.particleCtx = ctx;
 
-      const resize = () => {
+      this.resizeParticles = () => {
         canvas.width = canvas.offsetWidth;
         canvas.height = canvas.offsetHeight;
       };
-      resize();
-      window.addEventListener('resize', resize);
+      this.resizeParticles();
+      window.addEventListener('resize', this.resizeParticles);
 
       const chars = ['诗', '词', '风', '月', '花', '云', '山', '水', '雨', '雪', '春', '秋', '酒', '思', '归', '梦'];
       for (let i = 0; i < 40; i++) {

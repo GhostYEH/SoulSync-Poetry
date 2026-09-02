@@ -605,7 +605,8 @@ export default {
         this.socket.on('connect', () => {
           console.log('Socket连接成功')
           // 发送认证信息
-          this.socket.emit('authenticate', 'user_' + Date.now())
+          const token = getToken()
+          if (token) this.socket.emit('authenticate', { token })
         })
         
         this.socket.on('disconnect', () => {

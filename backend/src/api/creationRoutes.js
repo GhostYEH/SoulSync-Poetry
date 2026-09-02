@@ -4,6 +4,7 @@ const db = require('../utils/db');
 const aiService = require('../services/aiService');
 const config = require('../config/config');
 const { parsePagination } = require('../utils/validation');
+const authenticateToken = require('../middleware/auth');
 
 const aiRateLimitMap = new Map();
 
@@ -56,39 +57,7 @@ function checkAIRateLimit(req) {
   return true;
 }
 
-function optionalAuthenticateToken(req, res, next) {
-  try {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.split(' ')[1];
-
-    if (token) {
-      const jwt = require('jsonwebtoken');
-      const JWT_SECRET = config.jwt.secret || 'your-secret-key';
-
-      jwt.verify(token, JWT_SECRET, (err, decoded) => {
-        if (err) {
-          req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
-          next();
-        } else {
-          req.user = {
-            userId: decoded.userId,
-            username: decoded.username
-          };
-          next();
-        }
-      });
-    } else {
-      req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
-      next();
-    }
-  } catch (error) {
-    console.error('认证失败:', error);
-    req.user = { userId: config.auth.defaultUserId || 1, username: 'default' };
-    next();
-  }
-}
-
-router.post('/novice/generate', optionalAuthenticateToken, async (req, res) => {
+router.post('/novice/generate', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { theme, genre } = req.body;
@@ -146,7 +115,7 @@ router.post('/novice/generate', optionalAuthenticateToken, async (req, res) => {
   }
 });
 
-router.post('/novice/check', optionalAuthenticateToken, async (req, res) => {
+router.post('/novice/check', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { userPoem, referencePoem, title, author } = req.body;
@@ -231,7 +200,7 @@ ${escapedUserPoem}
   }
 });
 
-router.post('/assist/generate-reference', optionalAuthenticateToken, async (req, res) => {
+router.post('/assist/generate-reference', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { theme, genre } = req.body;
@@ -284,7 +253,7 @@ router.post('/assist/generate-reference', optionalAuthenticateToken, async (req,
   }
 });
 
-router.post('/assist/score', optionalAuthenticateToken, async (req, res) => {
+router.post('/assist/score', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { poem, title, author, genre, theme } = req.body;
@@ -355,7 +324,7 @@ ${escapedPoem}
   }
 });
 
-router.post('/assist/generate-image', optionalAuthenticateToken, async (req, res) => {
+router.post('/assist/generate-image', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { poem, title, author } = req.body;
@@ -390,7 +359,7 @@ router.post('/assist/generate-image', optionalAuthenticateToken, async (req, res
   }
 });
 
-router.post('/works/save', optionalAuthenticateToken, async (req, res) => {
+router.post('/works/save', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { title, content, genre, theme, creation_mode, ai_reference, score_data, modification_suggestions } = req.body;
@@ -418,7 +387,7 @@ router.post('/works/save', optionalAuthenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/works/:id', optionalAuthenticateToken, async (req, res) => {
+router.delete('/works/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.userId;
@@ -442,7 +411,7 @@ router.delete('/works/:id', optionalAuthenticateToken, async (req, res) => {
   }
 });
 
-router.get('/works/list', optionalAuthenticateToken, async (req, res) => {
+router.get('/works/list', authenticateToken, async (req, res) => {
   try {
     const { page, pageSize, offset } = parsePagination(req, 10);
     const userId = req.user.userId;
@@ -475,7 +444,7 @@ router.get('/works/list', optionalAuthenticateToken, async (req, res) => {
   }
 });
 
-router.get('/works/:id', optionalAuthenticateToken, async (req, res) => {
+router.get('/works/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.userId;
@@ -500,7 +469,7 @@ router.get('/works/:id', optionalAuthenticateToken, async (req, res) => {
   }
 });
 
-router.get('/stats', optionalAuthenticateToken, async (req, res) => {
+router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
 

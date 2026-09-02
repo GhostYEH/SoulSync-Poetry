@@ -115,6 +115,9 @@ screenshots/
 /digital-human-*.png
 /poem-detail-comparison.png
 /design-qa-compare.html
+/.edge-check-*/
+/v*-??????????????????.png
+/verification-*.png
 
 # Temporary files
 test-*.js

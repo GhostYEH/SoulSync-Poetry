@@ -85,6 +85,7 @@
 
 <script>
 import { askConfirm } from '../services/appFeedback'
+import { request } from '../services/api'
 
 export default {
   name: 'Collection',
@@ -120,16 +121,18 @@ export default {
           collectedData.map(item => typeof item === 'string' ? { id: item } : item) : []
         
         // 批量获取诗词详情
-        const poems = []
-        for (const item of collectedIds) {
-          const response = await fetch(`/api/poems/${item.id}`)
-          if (response.ok) {
-            const poem = await response.json()
-            // 添加收藏时间
-            poem.collectTime = item.collectTime || item.timestamp || new Date().toISOString()
-            poems.push(poem)
+        const poems = (await Promise.all(collectedIds.map(async (item) => {
+          try {
+            const poem = await request(`/poems/${item.id}`, { includeAuth: false })
+            return {
+              ...poem,
+              collectTime: item.collectTime || item.timestamp || new Date().toISOString(),
+            }
+          } catch (error) {
+            console.warn(`加载收藏诗词 ${item.id} 失败:`, error)
+            return null
           }
-        }
+        }))).filter(Boolean)
         
         // 按收藏时间排序（默认最新的在前面）
         poems.sort((a, b) => new Date(b.collectTime) - new Date(a.collectTime))

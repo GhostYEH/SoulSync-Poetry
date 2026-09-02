@@ -111,7 +111,7 @@ function writeRuntimeEnv() {
     DB_PATH: process.env.DB_PATH || './db/poetry.db',
     JWT_SECRET: process.env.JWT_SECRET || '',
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '24h',
-    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || '*',
+    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || process.env.CORS_ORIGIN || '',
     ZHIPU_API_KEY: process.env.ZHIPU_API_KEY || '',
     ZHIPU_MODEL: process.env.ZHIPU_MODEL || 'GLM-4-Flash-250414',
     SPARK_API_PASSWORD: process.env.SPARK_API_PASSWORD || '',
